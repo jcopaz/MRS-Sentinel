@@ -1,0 +1,42 @@
+# ── Segurança (NUNCA commitar) ──────────────────────────
+.streamlit/secrets.toml
+.env
+*.env.*
+
+# ── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+.Python
+
+# ── Ambientes virtuais ────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Dados sensíveis (planilhas SAP) ──────────────────────
+*.xlsx
+*.xls
+*.csv
+data/raw/
+uploads/
+
+# ── IDEs ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Build / Dist ──────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ── Logs ─────────────────────────────────────────────────
+*.log
+logs/
