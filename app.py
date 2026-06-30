@@ -1,4 +1,4 @@
-# app.py — Ponto de entrada principal do MRS Sentinel
+# app.py — Ponto de entrada principal do MRS Nexus
 # 🚂 Plataforma de Inteligência de Manutenção da Malha MRS
 # Sprint 1 — Fundação: login, RBAC, roteamento, sidebar
 #
@@ -16,7 +16,7 @@ import streamlit as st
 # region ====================== SESSÃO 1: Configuração da Página ======================
 # ⚠️ st.set_page_config DEVE ser a PRIMEIRA chamada Streamlit — antes de qualquer import
 st.set_page_config(
-    page_title="MRS Sentinel",
+    page_title="MRS Nexus",
     page_icon="🚂",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -24,7 +24,7 @@ st.set_page_config(
         "Get Help":     None,
         "Report a bug": None,
         "About": (
-            "**MRS Sentinel** — Plataforma de Inteligência de Manutenção da Malha\n\n"
+            "**MRS Nexus** — Plataforma de Inteligência de Manutenção da Malha\n\n"
             "MRS Logística · Gerência de Via Permanente e Obras\n\n"
             "v1.0.0 · Sprint 1 — Fundação"
         ),
@@ -41,6 +41,7 @@ from modules.gerencia_sp    import render_gerencia_sp
 from modules.gerencia_vp    import render_gerencia_vp
 from modules.gerencia_geral import render_gerencia_geral
 from modules.admin_panel    import render_admin_panel
+from modules.data_uploader  import render_upload
 # endregion
 
 
@@ -145,6 +146,7 @@ def _rotear():
         "gerencia_sp":    render_gerencia_sp,
         "gerencia_vp":    render_gerencia_vp,
         "gerencia_geral": render_gerencia_geral,
+        "upload":         render_upload,
         "admin":          render_admin_panel,
     }
 

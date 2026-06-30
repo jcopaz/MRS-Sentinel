@@ -38,12 +38,9 @@ def get_todos_usuarios() -> pd.DataFrame:
         resp = supabase.table("usuarios").select("*").order("criado_em", desc=True).execute()
         return pd.DataFrame(resp.data) if resp.data else pd.DataFrame()
     except Exception as e:
-        err = str(e)
-        if "SSL" in err or "certificate" in err.lower():
-            st.warning("⚠️ Sem acesso ao banco via rede corporativa. Use hotspot ou acesse pelo Streamlit Cloud.", icon="🔒")
-        else:
-            st.error(f"Erro ao buscar usuários: {e}")
+        st.error(f"Erro ao buscar usuários: {e}")
         return pd.DataFrame()
+
 
 def criar_usuario_perfil(email: str, nome: str, perfil: str, gerencia: str | None, criado_por_id: str) -> bool:
     """
@@ -159,7 +156,74 @@ def get_contagem_notas_por_gerencia() -> dict:
 # endregion
 
 
-# region ====================== SESSÃO 3: Auditoria ======================
+# region ====================== SESSÃO 3: Notas e Uploads ======================
+
+def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataFrame:
+    """
+    Busca notas ativas de uma gerência do upload mais recente.
+    Filtra pelo upload_id ativo para evitar pegar dados de uploads antigos.
+    """
+    try:
+        supabase = get_supabase()
+
+        # Primeiro busca o upload ativo da gerência
+        query_upload = (
+            supabase.table("uploads_historico")
+            .select("id")
+            .eq("gerencia", gerencia)
+            .eq("status", "ativo")
+        )
+        if disciplina:
+            query_upload = query_upload.eq("disciplina", disciplina)
+
+        resp_uploads = query_upload.execute()
+        if not resp_uploads.data:
+            return pd.DataFrame()
+
+        upload_ids = [r["id"] for r in resp_uploads.data]
+
+        # Busca notas dos uploads ativos
+        query = (
+            supabase.table("notas")
+            .select("*")
+            .in_("upload_id", upload_ids)
+        )
+        resp = query.execute()
+        return pd.DataFrame(resp.data) if resp.data else pd.DataFrame()
+
+    except Exception as e:
+        st.error(f"Erro ao buscar notas: {e}")
+        return pd.DataFrame()
+
+
+def get_historico_uploads(gerencia: str | None = None, usuario_id: str | None = None) -> pd.DataFrame:
+    """
+    Retorna histórico de uploads com join de usuário.
+    Admin vê todos; assistente filtra por usuario_id.
+    """
+    try:
+        supabase = get_supabase()
+        query = (
+            supabase.table("uploads_historico")
+            .select("*, usuarios(nome, email)")
+            .order("enviado_em", desc=True)
+            .limit(50)
+        )
+        if gerencia:
+            query = query.eq("gerencia", gerencia)
+        if usuario_id:
+            query = query.eq("usuario_id", usuario_id)
+
+        resp = query.execute()
+        return pd.DataFrame(resp.data) if resp.data else pd.DataFrame()
+    except Exception as e:
+        st.error(f"Erro ao buscar histórico: {e}")
+        return pd.DataFrame()
+
+# endregion
+
+
+# region ====================== SESSÃO 4: Auditoria ======================
 
 def log_acesso(usuario_id: str, acao: str, detalhes: dict | None = None):
     """

@@ -4,7 +4,7 @@
 
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
-from auth.permissions import can_see_gerencia, can_admin_panel
+from auth.permissions import can_see_gerencia, can_admin_panel, can_upload
 from database.queries import get_ultima_atualizacao, log_acesso
 
 
@@ -77,7 +77,7 @@ def _render_logo():
             <span style="font-size:28px;">🚂</span>
         </div>
         <div style="font-size:1.3rem; font-weight:700; color:#ffffff; letter-spacing:-0.3px;">
-            MRS Sentinel
+            MRS Nexus
         </div>
         <div style="font-size:0.72rem; color:rgba(255,255,255,0.5); margin-top:2px; letter-spacing:0.3px;">
             INTELIGÊNCIA DE MANUTENÇÃO
@@ -151,6 +151,13 @@ def _render_nav_buttons():
     # Visão Geral: todos podem ver
     ativo_geral = "🔵 " if pagina_atual == "gerencia_geral" else ""
     nav_items.append(("GERAL", f"{ativo_geral}🌐  Visão Geral", "gerencia_geral"))
+
+    # Upload: admin e assistente
+    gerencia_usr = get_gerencia()
+    gerencia_upload = gerencia_usr or "SP"
+    if can_upload(gerencia_upload) or get_perfil() == "admin":
+        ativo_upload = "🔵 " if pagina_atual == "upload" else ""
+        nav_items.append(("UPLOAD", f"{ativo_upload}📤  Upload de Dados", "upload"))
 
     # Admin Panel: somente admin
     if can_admin_panel():
