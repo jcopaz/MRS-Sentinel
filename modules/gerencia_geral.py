@@ -1,16 +1,6 @@
 # modules/gerencia_geral.py
 # Tela de Visão Geral — Consolidação Multi-gerencial SP × VP
 # Sprint 4 — Visão Geral + Admin
-#
-# Esta tela cruza dados das duas gerências (SP e VP) e das duas
-# disciplinas (VP e EE) para uma visão executiva da malha inteira.
-#
-# Abas:
-#   1. 📊 Consolidado     — KPIs unificados + IMT/DI + semáforos
-#   2. 🗺️ Comparativo    — SP vs VP lado a lado (gráficos espelho)
-#   3. 📡 Unifilar Total  — Unifilar Tridisciplinar (SP + VP + EE)
-#   4. 📈 Temporal Global — Série temporal de toda a malha
-#   5. 🏆 Top Hot-spots   — Ranking cross-gerencial
 
 import streamlit as st
 import pandas as pd
@@ -33,7 +23,7 @@ from core.glossarios      import nome_ramal
 
 # region ====================== SESSÃO 1: Constantes ==========================
 
-LABEL_TELA = "🌐 Visão Geral — MRS Sentinel"
+LABEL_TELA = "Visao Geral — MRS Sentinel"
 
 # endregion
 
@@ -41,12 +31,6 @@ LABEL_TELA = "🌐 Visão Geral — MRS Sentinel"
 # region ====================== SESSÃO 2: Tela principal ======================
 
 def render_gerencia_geral() -> None:
-    """
-    Ponto de entrada da Visão Geral.
-    Chamado pelo app.py quando o usuário navega para Visão Geral.
-    """
-
-    # ── 2.1: Cabeçalho ─────────────────────────────────────────────────────
     st.markdown(
         f"""
         <div style='
@@ -63,7 +47,7 @@ def render_gerencia_geral() -> None:
                     {LABEL_TELA}
                 </h2>
                 <p style='color:rgba(255,255,255,0.7); margin:4px 0 0 0; font-size:13px;'>
-                    Consolidação integrada · Gerências SP + VP · Disciplinas VP + EE
+                    Consolidacao integrada · Gerencias SP + VP · Disciplinas VP + EE
                 </p>
             </div>
             <div style='text-align:right;'>
@@ -81,8 +65,7 @@ def render_gerencia_geral() -> None:
         unsafe_allow_html=True,
     )
 
-    # ── 2.2: Carrega dados das 4 combinações ─────────────────────────────────
-    with st.spinner("🔄 Carregando dados de SP e VP..."):
+    with st.spinner("Carregando dados de SP e VP..."):
         df_sp_vp = _load("SP", "VP")
         df_sp_ee = _load("SP", "EE")
         df_vp_vp = _load("VP", "VP")
@@ -97,26 +80,22 @@ def render_gerencia_geral() -> None:
         _render_estado_vazio()
         return
 
-    # ── 2.3: Score engine (sidebar) ─────────────────────────────────────────
     st.sidebar.markdown("---")
     config = render_score_sidebar("VP+EE")
 
-    # ── 2.4: Calcula scores ──────────────────────────────────────────────────
     df_sp_vp = calcular_score(df_sp_vp, config) if df_sp_vp is not None else None
     df_sp_ee = calcular_score(df_sp_ee, config) if df_sp_ee is not None else None
     df_vp_vp = calcular_score(df_vp_vp, config) if df_vp_vp is not None else None
     df_vp_ee = calcular_score(df_vp_ee, config) if df_vp_ee is not None else None
 
-    # ── 2.5: Cards de última atualização ──────────────────────────────────────
     _render_card_atualizacao()
 
-    # ── 2.6: Abas ─────────────────────────────────────────────────────────────
     tab_cons, tab_comp, tab_uni, tab_temp, tab_rank = st.tabs([
-        "📊 Consolidado",
-        "🗺️ Comparativo SP × VP",
-        "📡 Unifilar Total",
-        "📈 Temporal Global",
-        "🏆 Top Hot-spots",
+        "Consolidado",
+        "Comparativo SP x VP",
+        "Unifilar Total",
+        "Temporal Global",
+        "Top Hot-spots",
     ])
 
     with tab_cons:
@@ -140,7 +119,6 @@ def render_gerencia_geral() -> None:
 # region ====================== SESSÃO 3: Helpers de carregamento =============
 
 def _load(gerencia: str, disciplina: str) -> pd.DataFrame | None:
-    """Carrega notas do banco com cache. Retorna None se vazio."""
     df = get_notas_cached(gerencia, disciplina)
     return df if df is not None and not df.empty else None
 
@@ -161,38 +139,34 @@ def _render_card_atualizacao() -> None:
 
 # region ====================== SESSÃO 4: Aba Consolidado =====================
 
-def _render_aba_consolidado(
-    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
-) -> None:
-    """
-    Aba 1: KPIs totais da malha + Indicadores IMT/DI + Semáforos.
-    """
-    # ── KPIs totais ──────────────────────────────────────────────────────────
+def _render_aba_consolidado(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
     df_total = _concat_safe(
         _concat_safe(df_sp_vp, df_sp_ee),
         _concat_safe(df_vp_vp, df_vp_ee),
     )
-
-    st.markdown("#### 📋 KPIs — Toda a Malha MRS")
+    st.markdown("#### KPIs — Toda a Malha MRS")
     _render_kpis_consolidados(df_total)
-
     st.markdown("---")
-
-    # ── Indicadores integrados IMT/DI ──────────────────────────────────────────
     render_indicadores_geral(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
 
 
 def _render_kpis_consolidados(df: pd.DataFrame) -> None:
-    """6 KPIs em linha para a visão total da malha."""
     if df is None or df.empty:
-        st.info("📭 Sem dados.")
+        st.info("Sem dados.")
         return
 
-    total  = len(df)
-    aber   = int((df.get("status_usuario", pd.Series()).str.upper() == "ABER").sum()) if "status_usuario" in df.columns else 0
+    total = len(df)
+
+    col_status = (
+        "status_nota" if "status_nota" in df.columns
+        else ("status_usuario" if "status_usuario" in df.columns else None)
+    )
+    aber = int(df[col_status].dropna().str.upper().str.startswith("AB").sum()) if col_status else 0
+
     score_m = round(df["score"].dropna().mean(), 1) if "score" in df.columns else 0.0
-    lt_m    = round(df["lead_time_dias"].dropna().mean(), 0) if "lead_time_dias" in df.columns else 0.0
-    crit    = int(df["prioridade"].str.contains("1-Muito alta", na=False).sum()) if "prioridade" in df.columns else 0
+    lt_raw  = df["lead_time_dias"].dropna().mean() if "lead_time_dias" in df.columns else None
+    lt_m    = int(round(lt_raw, 0)) if lt_raw is not None and pd.notna(lt_raw) else 0
+    crit    = int(df["prioridade"].str.contains("1-Muito alta", na=False, case=False).sum()) if "prioridade" in df.columns else 0
 
     ramal_top = "—"
     if "ramal" in df.columns and "score" in df.columns:
@@ -201,12 +175,12 @@ def _render_kpis_consolidados(df: pd.DataFrame) -> None:
             ramal_top = nome_ramal(por_r.idxmax())
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    _kpi(c1, "📋 Total Notas",     f"{total:,}",       "#1e3a5f")
-    _kpi(c2, "📂 Notas Abertas",   f"{aber:,}",        "#f59e0b")
-    _kpi(c3, "🚨 Prioridade Máx.", f"{crit:,}",        "#dc2626")
-    _kpi(c4, "⚖️ Score Médio",     f"{score_m:.1f}",   "#ffb000")
-    _kpi(c5, "⏱️ Lead Time Médio", f"{int(lt_m)} dias","#7c3aed")
-    _kpi(c6, "🚂 Ramal Top",       ramal_top[:18],     "#0891b2")
+    _kpi(c1, "Total Notas",     f"{total:,}",       "#1e3a5f")
+    _kpi(c2, "Notas Abertas",   f"{aber:,}",        "#f59e0b")
+    _kpi(c3, "Prioridade Max.", f"{crit:,}",        "#dc2626")
+    _kpi(c4, "Score Medio",     f"{score_m:.1f}",   "#ffb000")
+    _kpi(c5, "Lead Time Medio", f"{lt_m} dias",     "#7c3aed")
+    _kpi(c6, "Ramal Top",       ramal_top[:18],     "#0891b2")
 
 
 def _kpi(col, titulo: str, valor: str, cor: str) -> None:
@@ -231,65 +205,52 @@ def _kpi(col, titulo: str, valor: str, cor: str) -> None:
 
 # region ====================== SESSÃO 5: Aba Comparativo SP × VP =============
 
-def _render_aba_comparativo(
-    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
-) -> None:
-    """
-    Aba 2: Gráficos espelho SP × VP, lado a lado.
-
-    Comparações:
-      - Volume de notas por prioridade (SP × VP)
-      - Score total por ramal (barras horizontais)
-      - Lead time médio por família
-      - Distribuição de status
-    """
+def _render_aba_comparativo(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
     df_sp = _concat_safe(df_sp_vp, df_sp_ee)
     df_vp = _concat_safe(df_vp_vp, df_vp_ee)
 
-    # ── 5.1: Volume por prioridade ────────────────────────────────────────────
-    st.markdown("#### 📊 Volume de Notas por Prioridade — SP × VP")
-
+    st.markdown("#### Volume de Notas por Prioridade — SP x VP")
     col_sp, col_vp = st.columns(2)
     _grafico_criticidade(col_sp, df_sp, "SP")
     _grafico_criticidade(col_vp, df_vp, "VP")
 
     st.markdown("---")
-
-    # ── 5.2: Score por ramal ─────────────────────────────────────────────────
-    st.markdown("#### ⚖️ Score Total por Ramal")
-
+    st.markdown("#### Score Total por Ramal")
     col_sp2, col_vp2 = st.columns(2)
     _grafico_score_ramal(col_sp2, df_sp, "SP")
     _grafico_score_ramal(col_vp2, df_vp, "VP")
 
     st.markdown("---")
-
-    # ── 5.3: Lead time por família ────────────────────────────────────────────
-    st.markdown("#### ⏱️ Lead Time Médio por Família de Defeito")
-
+    st.markdown("#### Lead Time Medio por Familia de Defeito")
     col_sp3, col_vp3 = st.columns(2)
     _grafico_lead_familia(col_sp3, df_sp, "SP")
     _grafico_lead_familia(col_vp3, df_vp, "VP")
 
 
-def _grafico_criticidade(col, df: pd.DataFrame | None, ger: str) -> None:
-    col.markdown(f"**🏭 Gerência {ger}**")
+def _grafico_criticidade(col, df, ger: str) -> None:
+    col.markdown(f"**Gerencia {ger}**")
     if df is None or df.empty or "prioridade" not in df.columns:
         col.caption("_(sem dados)_")
         return
-    ordem  = ["1-Muito alta", "2-Alta", "3-Média", "4-Baixa"]
+    ordem  = ["1-Muito alta", "2-Alta", "3-Media", "4-Baixa"]
     cores  = ["#dc2626", "#f59e0b", "#0891b2", "#16a34a"]
     cnt    = df["prioridade"].value_counts()
     labels = [p for p in ordem if p in cnt.index]
     values = [cnt.get(p, 0) for p in labels]
     bares  = [cores[i] for i, p in enumerate(ordem) if p in cnt.index]
     fig = go.Figure(go.Bar(x=labels, y=values, marker_color=bares, text=values, textposition="outside"))
-    fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff", margin=dict(l=5,r=5,t=10,b=30), height=220, showlegend=False, yaxis=dict(showgrid=True, gridcolor="#f3f4f6"), xaxis=dict(tickfont=dict(size=9)))
+    fig.update_layout(
+        plot_bgcolor="#fff", paper_bgcolor="#fff",
+        margin=dict(l=5, r=5, t=10, b=30), height=220,
+        showlegend=False,
+        yaxis=dict(showgrid=True, gridcolor="#f3f4f6"),
+        xaxis=dict(tickfont=dict(size=9)),
+    )
     col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
 
 
-def _grafico_score_ramal(col, df: pd.DataFrame | None, ger: str) -> None:
-    col.markdown(f"**🏭 Gerência {ger}**")
+def _grafico_score_ramal(col, df, ger: str) -> None:
+    col.markdown(f"**Gerencia {ger}**")
     if df is None or df.empty or "ramal" not in df.columns or "score" not in df.columns:
         col.caption("_(sem dados)_")
         return
@@ -300,38 +261,44 @@ def _grafico_score_ramal(col, df: pd.DataFrame | None, ger: str) -> None:
     )
     nomes = [nome_ramal(s) for s in por_ramal.index]
     fig = go.Figure(go.Bar(
-        y=nomes, x=por_ramal.values,
-        orientation="h",
+        y=nomes, x=por_ramal.values, orientation="h",
         marker_color="#1e3a5f" if ger == "SP" else "#16a34a",
-        text=[f"{v:.0f}" for v in por_ramal.values],
-        textposition="outside",
+        text=[f"{v:.0f}" for v in por_ramal.values], textposition="outside",
     ))
-    fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff", margin=dict(l=5,r=5,t=10,b=10), height=280, showlegend=False, xaxis=dict(showgrid=True, gridcolor="#f3f4f6"), yaxis=dict(tickfont=dict(size=9)))
+    fig.update_layout(
+        plot_bgcolor="#fff", paper_bgcolor="#fff",
+        margin=dict(l=5, r=5, t=10, b=10), height=280,
+        showlegend=False,
+        xaxis=dict(showgrid=True, gridcolor="#f3f4f6"),
+        yaxis=dict(tickfont=dict(size=9)),
+    )
     col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
 
 
-def _grafico_lead_familia(col, df: pd.DataFrame | None, ger: str) -> None:
-    col.markdown(f"**🏭 Gerência {ger}**")
-    col_fam = next((c for c in ["familia_defeito","familia_cod"] if df is not None and c in df.columns), None)
+def _grafico_lead_familia(col, df, ger: str) -> None:
+    col.markdown(f"**Gerencia {ger}**")
+    col_fam = next((c for c in ["familia_defeito", "familia_cod"] if df is not None and c in df.columns), None)
     if df is None or df.empty or not col_fam or "lead_time_dias" not in df.columns:
         col.caption("_(sem dados)_")
         return
     lt_fam = (
         df.groupby(col_fam)["lead_time_dias"]
-        .mean()
-        .dropna()
+        .mean().dropna()
         .sort_values(ascending=False)
         .head(8)
     )
     fig = go.Figure(go.Bar(
-        y=lt_fam.index.tolist(),
-        x=lt_fam.values.tolist(),
-        orientation="h",
-        marker_color="#7c3aed",
-        text=[f"{v:.0f}d" for v in lt_fam.values],
-        textposition="outside",
+        y=lt_fam.index.tolist(), x=lt_fam.values.tolist(),
+        orientation="h", marker_color="#7c3aed",
+        text=[f"{v:.0f}d" for v in lt_fam.values], textposition="outside",
     ))
-    fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff", margin=dict(l=5,r=5,t=10,b=10), height=260, showlegend=False, xaxis=dict(showgrid=True, gridcolor="#f3f4f6", title="dias"), yaxis=dict(tickfont=dict(size=9)))
+    fig.update_layout(
+        plot_bgcolor="#fff", paper_bgcolor="#fff",
+        margin=dict(l=5, r=5, t=10, b=10), height=260,
+        showlegend=False,
+        xaxis=dict(showgrid=True, gridcolor="#f3f4f6", title="dias"),
+        yaxis=dict(tickfont=dict(size=9)),
+    )
     col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
 
 # endregion
@@ -339,62 +306,30 @@ def _grafico_lead_familia(col, df: pd.DataFrame | None, ger: str) -> None:
 
 # region ====================== SESSÃO 6: Aba Unifilar Total ==================
 
-def _render_aba_unifilar(
-    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
-) -> None:
-    """
-    Aba 3: Unifilar Tridisciplinar — SP e VP no mesmo gráfico.
-
-    Como ECharts não tem contexto geográfico real (sem shapefile aqui),
-    usamos dois pares de bandas sobrepostos:
-      SP-VP (y=3), SP-EE (y=2), VP-VP (y=1), VP-EE (y=0)
-
-    O Unifilar dual é renderizado 2× com labels distintos.
-    """
-    st.markdown("#### 📡 Unifilar Tridisciplinar — SP + VP")
-
+def _render_aba_unifilar(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
+    st.markdown("#### Unifilar Tridisciplinar — SP + VP")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**🏭 Gerência SP**")
-        render_unifilar_dual(
-            df_vp=df_sp_vp,
-            df_ee=df_sp_ee,
-            titulo="SP — VP + EE",
-            altura=380,
-        )
+        st.markdown("**Gerencia SP**")
+        render_unifilar_dual(df_vp=df_sp_vp, df_ee=df_sp_ee, titulo="SP — VP + EE", altura=380)
     with c2:
-        st.markdown("**🏭 Gerência VP**")
-        render_unifilar_dual(
-            df_vp=df_vp_vp,
-            df_ee=df_vp_ee,
-            titulo="VP — VP + EE",
-            altura=380,
-        )
+        st.markdown("**Gerencia VP**")
+        render_unifilar_dual(df_vp=df_vp_vp, df_ee=df_vp_ee, titulo="VP — VP + EE", altura=380)
 
 # endregion
 
 
 # region ====================== SESSÃO 7: Aba Temporal Global =================
 
-def _render_aba_temporal(
-    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
-) -> None:
-    """
-    Aba 4: Série temporal consolidada de toda a malha,
-    com opção de quebrar por Gerência.
-    """
-    st.markdown("#### 📈 Série Temporal — Malha MRS (SP + VP)")
-
+def _render_aba_temporal(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
+    st.markdown("#### Serie Temporal — Malha MRS (SP + VP)")
     df_total = _concat_safe(
         _concat_safe(df_sp_vp, df_sp_ee),
         _concat_safe(df_vp_vp, df_vp_ee),
     )
-
-    if df_total.empty:
-        st.info("📭 Sem dados para a série temporal.")
+    if df_total is None or df_total.empty:
+        st.info("Sem dados para a serie temporal.")
         return
-
-    # Quebra por gerência (visão cross)
     render_serie_temporal(df_total, "SP+VP")
 
 # endregion
@@ -402,38 +337,27 @@ def _render_aba_temporal(
 
 # region ====================== SESSÃO 8: Aba Top Hot-spots ===================
 
-def _render_aba_ranking(
-    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
-) -> None:
-    """
-    Aba 5: Ranking cross-gerencial — os N piores trechos de toda a MRS.
-    Combina SP + VP + VP + EE em um único ranking consolidado.
-    """
-    st.markdown("#### 🏆 Top Hot-spots — Malha MRS (Cross-Gerencial)")
+def _render_aba_ranking(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
+    st.markdown("#### Top Hot-spots — Malha MRS (Cross-Gerencial)")
 
-    # Adiciona coluna de gerência antes de concatenar
     dfs = []
     for df, ger, disc in [
-        (df_sp_vp, "SP", "VP"),
-        (df_sp_ee, "SP", "EE"),
-        (df_vp_vp, "VP", "VP"),
-        (df_vp_ee, "VP", "EE"),
+        (df_sp_vp, "SP", "VP"), (df_sp_ee, "SP", "EE"),
+        (df_vp_vp, "VP", "VP"), (df_vp_ee, "VP", "EE"),
     ]:
         if df is not None and not df.empty:
             d = df.copy()
-            d["_gerencia"] = ger
+            d["_gerencia"]   = ger
             d["_disciplina"] = disc
             dfs.append(d)
 
     if not dfs:
-        st.info("📭 Sem dados para o ranking.")
+        st.info("Sem dados para o ranking.")
         return
 
     df_all = pd.concat(dfs, ignore_index=True)
+    top_n  = st.slider("Top N trechos", min_value=10, max_value=50, value=20, step=5, key="topn_geral")
 
-    top_n = st.slider("Top N trechos", min_value=10, max_value=50, value=20, step=5, key="topn_geral")
-
-    # Agrupa por gerência + ramal + pátio
     group_cols = [c for c in ["_gerencia", "_disciplina", "ramal", "origem"] if c in df_all.columns]
     agg = {}
     if "score" in df_all.columns:
@@ -443,8 +367,7 @@ def _render_aba_ranking(
     agg["numero_nota"] = "count"
 
     ranking = (
-        df_all.groupby(group_cols)
-        .agg(agg)
+        df_all.groupby(group_cols).agg(agg)
         .reset_index()
         .sort_values("score" if "score" in agg else "numero_nota", ascending=False)
         .head(top_n)
@@ -453,13 +376,10 @@ def _render_aba_ranking(
     ranking.index += 1
 
     rename = {
-        "_gerencia":      "Gerência",
-        "_disciplina":    "Disciplina",
-        "ramal":          "Ramal",
-        "origem":         "Pátio",
-        "score":          "Score Total",
-        "lead_time_dias": "Lead Time Médio (d)",
-        "numero_nota":    "Nº Notas",
+        "_gerencia": "Gerencia", "_disciplina": "Disciplina",
+        "ramal": "Ramal", "origem": "Patio",
+        "score": "Score Total", "lead_time_dias": "Lead Time Medio (d)",
+        "numero_nota": "N Notas",
     }
     ranking.rename(columns={k: v for k, v in rename.items() if k in ranking.columns}, inplace=True)
 
@@ -467,18 +387,16 @@ def _render_aba_ranking(
         ranking["Ramal"] = ranking["Ramal"].apply(lambda s: nome_ramal(str(s), "completo_sigla"))
     if "Score Total" in ranking.columns:
         ranking["Score Total"] = ranking["Score Total"].round(1)
-    if "Lead Time Médio (d)" in ranking.columns:
-        ranking["Lead Time Médio (d)"] = ranking["Lead Time Médio (d)"].round(0).astype("Int64")
+    if "Lead Time Medio (d)" in ranking.columns:
+        ranking["Lead Time Medio (d)"] = ranking["Lead Time Medio (d)"].round(0).astype("Int64")
 
     st.dataframe(ranking, use_container_width=True, height=min(700, 45 * len(ranking) + 80))
 
-    csv = ranking.to_csv(index_label="Posição").encode("utf-8-sig")
+    csv = ranking.to_csv(index_label="Posicao").encode("utf-8-sig")
     st.download_button(
-        "⬇️ Exportar Ranking Cross-Gerencial CSV",
-        csv,
+        "Exportar Ranking CSV", csv,
         file_name="ranking_hotspots_malha_mrs.csv",
-        mime="text/csv",
-        key="dl_ranking_geral",
+        mime="text/csv", key="dl_ranking_geral",
     )
 
 # endregion
@@ -490,32 +408,18 @@ def _render_estado_vazio() -> None:
     st.markdown(
         """
         <div style='
-            text-align: center;
-            padding: 40px;
-            background: #f8fafc;
-            border-radius: 16px;
-            border: 2px dashed #d1d5db;
-            margin: 20px 0;
+            text-align: center; padding: 40px;
+            background: #f8fafc; border-radius: 16px;
+            border: 2px dashed #d1d5db; margin: 20px 0;
         '>
-            <div style='font-size: 48px; margin-bottom: 12px;'>🌐</div>
+            <div style='font-size: 48px; margin-bottom: 12px;'>&#127758;</div>
             <h3 style='color: #1e3a5f; margin: 0 0 8px 0;'>
                 Nenhum dado carregado na plataforma
             </h3>
             <p style='color: #6b7280; font-size: 14px; margin: 0 0 16px 0;'>
-                A Visão Geral requer dados das Gerências SP e/ou VP.<br/>
-                Solicite ao Assistente/Admin o upload das planilhas SAP.
+                A Visao Geral requer dados das Gerencias SP e/ou VP.<br/>
+                Solicite ao Admin o upload das planilhas SAP.
             </p>
-            <div style='
-                background: rgba(255,176,0,0.1);
-                border: 1px solid #ffb000;
-                border-radius: 8px;
-                padding: 10px 16px;
-                display: inline-block;
-                font-size: 13px;
-                color: #92400e;
-            '>
-                💡 Menu lateral → <b>🏭 Gerência SP</b> ou <b>🏭 Gerência VP</b> → Upload de Dados
-            </div>
         </div>
         """,
         unsafe_allow_html=True,
