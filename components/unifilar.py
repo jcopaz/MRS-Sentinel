@@ -277,7 +277,7 @@ def render_unifilar_dual(
             "min": -0.5,
             "max": 3.0,
             "axisLabel": {
-                "formatter": "function(v){ return v===2?'🛤️ VP': v===0?'⚡ EE':''; }",
+                "formatter": "function(v){ if(v===2) return 'VP'; if(v===0) return 'EE'; return ''; }",
                 "color": "#1e3a5f",
                 "fontSize": 12,
                 "fontWeight": "bold",
