@@ -17,7 +17,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import math
-from streamlit_echarts import st_echarts
+from streamlit_echarts import st_echarts, JsCode
 from core.glossarios import nome_ramal
 
 # region ====================== SESSÃO 1: Configurações visuais ================
@@ -203,13 +203,15 @@ def render_unifilar_dual(
 
     series = []
 
+    _symbol_size_fn = JsCode("function(val){ return val[2]; }")
+
     # Scatter VP (fundo)
     if pontos_vp_norm:
         series.append({
             "name": "VP",
             "type": "scatter",
             "data": pontos_vp_norm,
-            "symbolSize": "function(val){ return val[2]; }",
+            "symbolSize": _symbol_size_fn,
             "itemStyle": {"opacity": 0.65},
             "tooltip": tooltip_base,
         })
@@ -220,7 +222,7 @@ def render_unifilar_dual(
             "name": "EE",
             "type": "scatter",
             "data": pontos_ee_norm,
-            "symbolSize": "function(val){ return val[2]; }",
+            "symbolSize": _symbol_size_fn,
             "itemStyle": {"opacity": 0.65},
             "tooltip": tooltip_base,
         })
@@ -231,7 +233,7 @@ def render_unifilar_dual(
             "name": "VP Crítico",
             "type": "effectScatter",
             "data": pontos_vp_top,
-            "symbolSize": "function(val){ return val[2]; }",
+            "symbolSize": _symbol_size_fn,
             "rippleEffect": {"brushType": "stroke", "scale": 3, "period": 3},
             "itemStyle": {"opacity": 0.9},
             "tooltip": tooltip_base,
@@ -243,7 +245,7 @@ def render_unifilar_dual(
             "name": "EE Crítico",
             "type": "effectScatter",
             "data": pontos_ee_top,
-            "symbolSize": "function(val){ return val[2]; }",
+            "symbolSize": _symbol_size_fn,
             "rippleEffect": {"brushType": "stroke", "scale": 3, "period": 3},
             "itemStyle": {"opacity": 0.9},
             "tooltip": tooltip_base,
@@ -277,7 +279,7 @@ def render_unifilar_dual(
             "min": -0.5,
             "max": 3.0,
             "axisLabel": {
-                "formatter": "function(v){ if(v===2) return 'VP'; if(v===0) return 'EE'; return ''; }",
+                "formatter": JsCode("function(v){ if(v===2) return 'VP'; if(v===0) return 'EE'; return ''; }"),
                 "color": "#1e3a5f",
                 "fontSize": 12,
                 "fontWeight": "bold",
