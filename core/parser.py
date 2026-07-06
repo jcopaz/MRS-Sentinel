@@ -342,21 +342,25 @@ def _extrair_km_formato_d(txt_km, decimal) -> float | None:
 def _aplicar_km_formato_d(df: pd.DataFrame, df_raw: pd.DataFrame) -> pd.DataFrame:
     """
     Aplica extração de km_real e km_fim a partir das colunas brutas do Formato D.
+
+    IMPORTANTE: chamado ANTES de reset_index para que df.index ainda aponte
+    para as mesmas linhas de df_raw (o dropna(how='all') pode ter removido
+    linhas — reindex alinha corretamente sem quebrar por tamanho).
     """
-    df["km_real"] = [
-        _extrair_km_formato_d(
-            df_raw.iloc[i].get("Km início"),
-            df_raw.iloc[i].get("Market_Dist_Start_2"),
-        )
-        for i in range(len(df_raw))
-    ]
-    df["km_fim"] = [
-        _extrair_km_formato_d(
-            df_raw.iloc[i].get("Km Fim"),
-            df_raw.iloc[i].get("Maker_Dist_End_1"),
-        )
-        for i in range(len(df_raw))
-    ]
+    idx = df.index  # índices originais (antes do reset_index)
+
+    def _col(nome: str) -> pd.Series:
+        if nome in df_raw.columns:
+            return df_raw[nome].reindex(idx)
+        return pd.Series([None] * len(idx), index=idx)
+
+    s_inicio  = _col("Km início")
+    s_offset  = _col("Market_Dist_Start_2")
+    s_fim     = _col("Km Fim")
+    s_fim_off = _col("Maker_Dist_End_1")
+
+    df["km_real"] = [_extrair_km_formato_d(a, b) for a, b in zip(s_inicio, s_offset)]
+    df["km_fim"]  = [_extrair_km_formato_d(a, b) for a, b in zip(s_fim, s_fim_off)]
     return df
 
 # endregion
@@ -475,8 +479,9 @@ def processar_planilha(
     colunas_rename = {k: v for k, v in mapa.items() if k in df_raw.columns}
     df = df_raw.rename(columns=colunas_rename).copy()
 
-    # Remove linhas completamente vazias
-    df = df.dropna(how="all").reset_index(drop=True)
+    # Remove linhas completamente vazias — SEM reset_index ainda
+    # (o índice precisa continuar apontando para df_raw até o passo 6)
+    df = df.dropna(how="all")
 
     # Passo 4: Converter datas
     df = _converter_colunas_data(df, ["data_nota", "data_encerramento", "data_planejada"])
@@ -484,18 +489,20 @@ def processar_planilha(
     # Passo 5: Decodificar TPLNR → ramal, origem, destino, trecho
     df = _aplicar_tplnr_dataframe(df)
 
-    # Passo 6: KM real
+    # Passo 6: KM real — ANTES do reset_index para manter alinhamento com df_raw
     if formato == "D":
-        # Formato D: km vem de colunas separadas "Km início" e "Market_Dist_Start_2"
         df = _aplicar_km_formato_d(df, df_raw)
     # Para A/B/C: km já foi extraído do TPLNR em _aplicar_tplnr_dataframe
+
+    # Apenas agora o reset_index é seguro
+    df = df.reset_index(drop=True)
 
     # Passo 7: Normalizar ramal (ASP → VSU, etc.)
     df = normalizar_coluna_ramal(df, "ramal")
 
     # Passo 8: Defeito legível
     if formato == "D" and "_anomalia_raw" in df.columns:
-        # Formato D: "DM01Dormente de madeira inservível" → "Dormente de madeira inservível"
+        # "DM01Dormente de madeira inservível" → "Dormente de madeira inservível"
         df["defeito_legivel"] = df["_anomalia_raw"].str.replace(
             r"^[A-Z]{2}\d{2}", "", regex=True
         ).str.strip()
