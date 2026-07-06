@@ -589,12 +589,18 @@ def df_para_registros_supabase(df: pd.DataFrame, upload_id: str) -> list[dict]:
         rec = {"upload_id": upload_id}
         for col in colunas_notas:
             val = row.get(col)
-            if val is None:
+            # Captura None, NaT e NaN em uma única verificação
+            try:
+                if val is None or pd.isnull(val):
+                    rec[col] = None
+                    continue
+            except (TypeError, ValueError):
+                pass
+
+            if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
                 rec[col] = None
-            elif isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
-                rec[col] = None
-            elif isinstance(val, pd.Timestamp):
-                rec[col] = val.date().isoformat() if not pd.isna(val) else None
+            elif isinstance(val, (pd.Timestamp, datetime)):
+                rec[col] = val.date().isoformat()
             elif hasattr(val, "item"):
                 rec[col] = val.item()
             else:
