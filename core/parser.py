@@ -597,8 +597,13 @@ def df_para_registros_supabase(df: pd.DataFrame, upload_id: str) -> list[dict]:
             except (TypeError, ValueError):
                 pass
 
-            if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
-                rec[col] = None
+            if isinstance(val, float):
+                if np.isnan(val) or np.isinf(val):
+                    rec[col] = None
+                elif val == int(val):
+                    rec[col] = int(val)   # 1265.0 → 1265
+                else:
+                    rec[col] = val
             elif isinstance(val, (pd.Timestamp, datetime)):
                 rec[col] = val.date().isoformat()
             elif hasattr(val, "item"):
