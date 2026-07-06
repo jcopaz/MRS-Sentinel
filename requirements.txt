@@ -1,5 +1,5 @@
-# MRS Nexus — Dependências
-# Atualizado: Sprint 1 — Fundação
+# MRS Sentinel — Dependências
+# Atualizado: Sprint 4
 
 # Core
 streamlit>=1.36.0
@@ -16,8 +16,13 @@ streamlit-echarts>=0.4.0
 # Excel / Planilhas
 openpyxl>=3.1.0
 
-# Componentes extras (Sprint 2+)
+# Componentes extras
 streamlit-aggrid>=1.0.5
+streamlit-extras>=0.4.0
+
+# Autenticação
+bcrypt>=4.0.0
+email-validator>=2.0.0
 
 # Utilitários
 python-dotenv>=1.0.0
