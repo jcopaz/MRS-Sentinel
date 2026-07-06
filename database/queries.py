@@ -347,5 +347,24 @@ def log_acesso(
         }).execute()
     except Exception:
         pass
-
+def get_ultima_atualizacao_info() -> dict:
+    """Retorna dict com dados do último upload — usado pelo home.py."""
+    try:
+        supabase = get_supabase()
+        resp = (
+            supabase.table("uploads_historico")
+            .select("enviado_em, gerencia, disciplina, nome_arquivo")
+            .eq("status", "ativo")
+            .order("enviado_em", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            row = resp.data[0]
+            dt = pd.to_datetime(row.get("enviado_em"))
+            row["enviado_em_fmt"] = dt.strftime("%d/%m/%Y às %H:%M") if dt else "—"
+            return row
+        return {}
+    except Exception:
+        return {}
 # endregion

@@ -187,7 +187,9 @@ def _render_ultima_atualizacao():
         unsafe_allow_html=True
     )
 
-    ultimo = get_ultima_atualizacao()
+    from database.queries import get_ultima_atualizacao_info
+    ultimo = get_ultima_atualizacao_info()
+
 
     if not ultimo:
         st.sidebar.markdown("""
