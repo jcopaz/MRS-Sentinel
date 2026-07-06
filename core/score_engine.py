@@ -404,7 +404,22 @@ def render_painel_transparencia(df: pd.DataFrame, config: ScoreConfig) -> None:
 
         st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
 
-# Alias de compatibilidade — parser.py do Sprint 1 usa este nome
-aplicar_score_dataframe = calcular_score
+# Wrapper de compatibilidade com Sprint 1
+# parser.py chama aplicar_score_dataframe(df, disciplina="VP")
+def aplicar_score_dataframe(df: pd.DataFrame, disciplina: str = "VP") -> pd.DataFrame:
+    """
+    Cria um ScoreConfig padrão e aplica o score.
+    Mantém compatibilidade com a assinatura do Sprint 1.
+    """
+    mult_familia = (
+        MULT_FAMILIA_EE_PADRAO
+        if disciplina == "EE"
+        else MULT_FAMILIA_VP_PADRAO
+    )
+    config = ScoreConfig(
+        disciplina=disciplina,
+        mult_familia=mult_familia,
+    )
+    return calcular_score(df, config)
 
 # endregion
