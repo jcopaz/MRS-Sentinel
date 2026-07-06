@@ -9,10 +9,30 @@
 #   2. 📋 Logs        — Histórico de acessos e uploads
 #   3. ⚙️ Configurações — Pesos padrão de score por gerência, km de malha
 
+import importlib
+import base64
+import hashlib
+import os
+from datetime import datetime
+
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import bcrypt
+
+bcrypt_spec = importlib.util.find_spec("bcrypt")
+if bcrypt_spec is not None:
+    bcrypt = importlib.import_module("bcrypt")
+else:
+    class _BcryptFallback:
+        @staticmethod
+        def gensalt() -> bytes:
+            return os.urandom(16)
+
+        @staticmethod
+        def hashpw(password: bytes, salt: bytes) -> bytes:
+            digest = hashlib.pbkdf2_hmac("sha256", password, salt, 100_000)
+            return base64.b64encode(salt + digest)
+
+    bcrypt = _BcryptFallback()
 
 from database.client  import get_supabase
 from database.queries import get_uploads_historico
