@@ -421,10 +421,25 @@ def _mapear_status_amigavel(status: str) -> str:
             return val
     return status
 
+_PESO_PRIORIDADE: dict[str, int] = {
+    "1-Muito alta":  5,
+    "2-Alta":        4,
+    "3-Média":       3,
+    "4-Baixa":       2,
+    "5-Muito baixa": 1,
+    "1": 5,
+    "2": 4,
+    "3": 3,
+    "4": 2,
+    "5": 1,
+}
+
 
 def _mapear_peso_prioridade(prio: str) -> int:
-    from core.score_engine import PESO_PRIORIDADE
-    return PESO_PRIORIDADE.get(str(prio).strip(), 1)
+    p = str(prio).strip() if prio else ""
+    if p in _PESO_PRIORIDADE:
+        return _PESO_PRIORIDADE[p]
+    return _PESO_PRIORIDADE.get(p[:1], 1)
 
 # endregion
 
