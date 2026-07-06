@@ -311,6 +311,9 @@ def _executar_upload(
             f"— **{disciplina}** carregadas com sucesso.".replace(",", ".")
         )
         st.balloons()
+        
+        from database.queries import invalidar_cache_notas
+        invalidar_cache_notas()
 
         # Limpa o estado do uploader para permitir novo upload
         st.session_state.pop("upload_arquivo", None)
