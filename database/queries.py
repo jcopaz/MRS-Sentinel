@@ -297,3 +297,54 @@ def invalidar_cache_notas() -> None:
     st.toast("🔄 Cache de notas atualizado.", icon="✅")
 
 # endregion
+
+# region ====================== SESSÃO 4: Autenticação (Sprint 1) =============
+
+def get_usuario_by_email(email: str) -> dict | None:
+    try:
+        supabase = get_supabase()
+        resp = (
+            supabase.table("usuarios")
+            .select("*")
+            .eq("email", email.strip().lower())
+            .eq("ativo", True)
+            .limit(1)
+            .execute()
+        )
+        return resp.data[0] if resp.data else None
+    except Exception as e:
+        st.error(f"❌ Erro ao buscar usuário: {e}")
+        return None
+
+
+def atualizar_ultimo_login(user_id: str) -> None:
+    try:
+        from datetime import datetime
+        supabase = get_supabase()
+        supabase.table("usuarios").update({
+            "ultimo_login": datetime.utcnow().isoformat()
+        }).eq("id", user_id).execute()
+    except Exception:
+        pass
+
+
+def log_acesso(
+    usuario_id: str | None,
+    acao: str,
+    detalhes: dict | None = None,
+    ip: str | None = None,
+) -> None:
+    try:
+        from datetime import datetime
+        supabase = get_supabase()
+        supabase.table("logs_acesso").insert({
+            "usuario_id": usuario_id,
+            "acao":       acao,
+            "detalhes":   detalhes or {},
+            "ip":         ip,
+            "quando":     datetime.utcnow().isoformat(),
+        }).execute()
+    except Exception:
+        pass
+
+# endregion
