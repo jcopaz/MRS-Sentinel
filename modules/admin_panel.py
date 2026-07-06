@@ -51,10 +51,12 @@ def render_admin_panel() -> None:
         unsafe_allow_html=True,
     )
 
-    tab_users, tab_logs, tab_config = st.tabs([
+    
+    tab_users, tab_logs, tab_config, tab_dados = st.tabs([
         "👥 Usuários",
         "📋 Logs de Acesso",
         "⚙️ Configurações",
+        "🗑️ Gestão de Dados",
     ])
 
     with tab_users:
@@ -65,6 +67,9 @@ def render_admin_panel() -> None:
 
     with tab_config:
         _render_aba_configuracoes()
+
+    with tab_dados:
+        _render_aba_gestao_dados()
 
 # endregion
 
@@ -539,5 +544,67 @@ def _registrar_log(acao: str, detalhes: dict, admin_id: str | None = None) -> No
         }).execute()
     except Exception:
         pass  # log nunca deve quebrar operação principal
+
+# endregion
+
+# region ====================== SESSÃO X: Aba Gestão de Dados ================
+
+def _render_aba_gestao_dados() -> None:
+    """Permite apagar notas por gerência/disciplina para reprocessamento."""
+    st.markdown("### 🗑️ Gestão de Dados — Reprocessamento")
+
+    st.warning(
+        "⚠️ **Atenção**: Esta operação apaga permanentemente as notas do banco. "
+        "Use apenas para reprocessar uma planilha com parser corrigido.",
+        icon="⚠️",
+    )
+
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        ger_del = st.selectbox("Gerência", ["SP", "VP"], key="del_ger")
+    with col2:
+        disc_del = st.selectbox("Disciplina", ["VP", "EE", "Todas"], key="del_disc")
+
+    # Preview de quantas notas serão apagadas
+    supabase = get_supabase()
+    try:
+        q = supabase.table("notas").select("id", count="exact").eq("gerencia", ger_del)
+        if disc_del != "Todas":
+            q = q.eq("disciplina", disc_del)
+        res = q.execute()
+        total = res.count or 0
+    except Exception:
+        total = "?"
+
+    st.info(f"📊 Notas que serão apagadas: **{total}**")
+
+    confirmacao = st.text_input(
+        'Digite "CONFIRMAR" para habilitar o botão:',
+        key="del_confirm_txt",
+    )
+
+    if st.button(
+        f"🗑️ Apagar notas — {ger_del}/{disc_del}",
+        type="primary",
+        disabled=(confirmacao.strip().upper() != "CONFIRMAR"),
+        key="btn_apagar_notas",
+    ):
+        try:
+            q = supabase.table("notas").delete().eq("gerencia", ger_del)
+            if disc_del != "Todas":
+                q = q.eq("disciplina", disc_del)
+            q.execute()
+
+            # Limpa cache
+            from database.queries import invalidar_cache_notas
+            invalidar_cache_notas()
+
+            st.success(f"✅ {total} notas de {ger_del}/{disc_del} apagadas com sucesso!")
+            st.rerun()
+        except Exception as ex:
+            st.error(f"❌ Erro ao apagar: {ex}")
+
+    st.markdown("---")
+    st.caption("💡 Após apagar, vá para a tela da Gerência e faça um novo upload da planilha.")
 
 # endregion
