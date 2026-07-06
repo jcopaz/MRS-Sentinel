@@ -98,7 +98,7 @@ def get_uploads_historico(gerencia: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def get_ultima_atualizacao(gerencia: str, disciplina: str | None = None) -> str:
+def get_ultima_atualizacao(gerencia: str | None = None, disciplina: str | None = None) -> str:
     """
     Retorna a data/hora do último upload ativo para o card de 'última atualização'.
 
@@ -114,11 +114,12 @@ def get_ultima_atualizacao(gerencia: str, disciplina: str | None = None) -> str:
         query = (
             supabase.table("uploads_historico")
             .select("enviado_em")
-            .eq("gerencia", gerencia)
             .eq("status", "ativo")
             .order("enviado_em", desc=True)
             .limit(1)
         )
+        if gerencia:
+            query = query.eq("gerencia", gerencia)
         if disciplina:
             query = query.eq("disciplina", disciplina)
 
