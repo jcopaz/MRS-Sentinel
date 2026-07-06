@@ -1,153 +1,524 @@
-# modules/gerencia_geral.py — Tela de Visão Geral (multi-gerencial)
-# Sprint 1: placeholder com roadmap visual.
-# Sprint 4: conteúdo real cruzando SP + VP (IMT, DI, Unifilar Tridisciplinar).
+# modules/gerencia_geral.py
+# Tela de Visão Geral — Consolidação Multi-gerencial SP × VP
+# Sprint 4 — Visão Geral + Admin
+#
+# Esta tela cruza dados das duas gerências (SP e VP) e das duas
+# disciplinas (VP e EE) para uma visão executiva da malha inteira.
+#
+# Abas:
+#   1. 📊 Consolidado     — KPIs unificados + IMT/DI + semáforos
+#   2. 🗺️ Comparativo    — SP vs VP lado a lado (gráficos espelho)
+#   3. 📡 Unifilar Total  — Unifilar Tridisciplinar (SP + VP + EE)
+#   4. 📈 Temporal Global — Série temporal de toda a malha
+#   5. 🏆 Top Hot-spots   — Ranking cross-gerencial
 
 import streamlit as st
-from auth.permissions import require_login
-from database.queries import get_contagem_notas_por_gerencia
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 
+from components.unifilar  import render_unifilar_dual
+from components.heatmap   import render_ranking_hotspots, render_serie_temporal
+from core.indicadores     import (
+    render_indicadores_geral,
+    calcular_imt,
+    calcular_di,
+    calcular_aderencia,
+    calcular_lead_time_medio,
+    _concat_safe,
+)
+from database.queries     import get_notas_cached, get_ultima_atualizacao
+from core.score_engine    import render_score_sidebar, calcular_score
+from core.glossarios      import nome_ramal
 
-# region ====================== SESSÃO 1: Header ======================
+# region ====================== SESSÃO 1: Constantes ==========================
 
-def _render_header():
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("""
-        <div style="margin-bottom: 0.5rem;">
-            <span style="font-size:0.8rem; color:#6b7280; font-weight:500;
-                         text-transform:uppercase; letter-spacing:1px;">
-                CONSOLIDADO MULTI-GERENCIAL
-            </span>
-            <h1 style="font-size:1.9rem; font-weight:700; color:#1e3a5f;
-                        margin:4px 0 0 0; line-height:1.2;">
-                🌐 Visão Geral da Malha
-            </h1>
-            <p style="color:#6b7280; font-size:0.92rem; margin:6px 0 0 0;">
-                Gerência SP + VP · Via Permanente e Eletroeletrônica
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #fce7f3, #fbcfe8);
-            border: 1px solid #ec4899;
-            border-radius: 10px; padding: 10px 14px; text-align:center;
-            margin-top: 10px;
-        ">
-            <div style="font-size:0.7rem; color:#9d174d; font-weight:600;
-                         text-transform:uppercase;">STATUS</div>
-            <div style="font-size:1rem; font-weight:700; color:#be185d; margin-top:2px;">
-                🚧 Sprint 4
-            </div>
-            <div style="font-size:0.72rem; color:#9d174d;">Pós MVP</div>
-        </div>
-        """, unsafe_allow_html=True)
+LABEL_TELA = "🌐 Visão Geral — MRS Sentinel"
 
 # endregion
 
 
-# region ====================== SESSÃO 2: Cards de Contagem por Gerência ======================
+# region ====================== SESSÃO 2: Tela principal ======================
 
-def _render_cards_contagem():
+def render_gerencia_geral() -> None:
     """
-    Mostra contagem de notas por gerência consultando o banco.
-    Sprint 2+: números reais aparecem aqui automaticamente.
+    Ponto de entrada da Visão Geral.
+    Chamado pelo app.py quando o usuário navega para Visão Geral.
     """
-    contagem = get_contagem_notas_por_gerencia()
 
-    st.markdown("""
-    <p style='font-size:0.8rem; color:#9ca3af; text-transform:uppercase;
-               letter-spacing:1px; font-weight:600; margin: 1.5rem 0 0.8rem 0;'>
-        Consolidado da Plataforma
-    </p>
-    """, unsafe_allow_html=True)
-
-    cols = st.columns(4)
-    total = contagem["SP"] + contagem["VP"]
-
-    cards = [
-        ("🏭", "Gerência SP",    f"{contagem['SP']:,}".replace(",", "."), "#1e3a5f", "notas carregadas"),
-        ("🏭", "Gerência VP",    f"{contagem['VP']:,}".replace(",", "."), "#0891b2", "notas carregadas"),
-        ("🌐", "Total Plataforma", f"{total:,}".replace(",", "."),        "#16a34a", "notas consolidadas"),
-        ("⏰", "Atualização",    "—",                                     "#f59e0b", "Em tempo real"),
-    ]
-
-    for i, (ico, titulo, valor, cor, sub) in enumerate(cards):
-        with cols[i]:
-            st.markdown(f"""
-            <div style="
-                background:white; border:1px solid #e5e7eb;
-                border-top:3px solid {cor}; border-radius:12px;
-                padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.04);
-                text-align:center; min-height:110px;
-                display:flex; flex-direction:column; justify-content:center;
-            ">
-                <div style="font-size:1.6rem; margin-bottom:4px;">{ico}</div>
-                <div style="font-size:0.75rem; color:#6b7280; font-weight:500;
-                             text-transform:uppercase; letter-spacing:0.5px;">{titulo}</div>
-                <div style="font-size:1.6rem; font-weight:700; color:{cor}; margin:4px 0 2px 0;">
-                    {valor if valor != "0" else "—"}
-                </div>
-                <div style="font-size:0.72rem; color:#9ca3af;">{sub}</div>
+    # ── 2.1: Cabeçalho ─────────────────────────────────────────────────────
+    st.markdown(
+        f"""
+        <div style='
+            background: linear-gradient(135deg, #1e3a5f 0%, #7c3aed 100%);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        '>
+            <div>
+                <h2 style='color:#ffffff; margin:0; font-size:22px;'>
+                    {LABEL_TELA}
+                </h2>
+                <p style='color:rgba(255,255,255,0.7); margin:4px 0 0 0; font-size:13px;'>
+                    Consolidação integrada · Gerências SP + VP · Disciplinas VP + EE
+                </p>
             </div>
-            """, unsafe_allow_html=True)
+            <div style='text-align:right;'>
+                <span style='
+                    background: #ffb000;
+                    color: #1e3a5f;
+                    font-weight: 700;
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                '>SP + VP</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-# endregion
+    # ── 2.2: Carrega dados das 4 combinações ─────────────────────────────────
+    with st.spinner("🔄 Carregando dados de SP e VP..."):
+        df_sp_vp = _load("SP", "VP")
+        df_sp_ee = _load("SP", "EE")
+        df_vp_vp = _load("VP", "VP")
+        df_vp_ee = _load("VP", "EE")
 
+    total_notas = sum(
+        len(d) for d in [df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee]
+        if d is not None
+    )
 
-# region ====================== SESSÃO 3: Roadmap Visual ======================
+    if total_notas == 0:
+        _render_estado_vazio()
+        return
 
-def _render_roadmap_visao_geral():
-    """Mostra o que será construído nesta tela na Sprint 4."""
-        # Bloco roadmap
-    st.markdown("<div style='margin-top:2rem;'></div>", unsafe_allow_html=True)
-    grid_html = "".join([
-        f"""<div style="background:white; border-radius:10px; padding:12px 14px;
-            border:1px solid #bbf7d0;">
-            <div style="font-size:0.75rem; font-weight:600; color:#15803d;
-                text-transform:uppercase; margin-bottom:4px;">{titulo}</div>
-            <div style="font-size:0.82rem; color:#4b5563;">{desc}</div>
-        </div>"""
-        for titulo, desc in [
-            ("IMT Consolidado",       "Indice de Manutencao Total cruzando SP e VP"),
-            ("DI Integrado",          "Desempenho Integrado das disciplinas VP+EE"),
-            ("Unifilar Tridisciplinar","VP + EE + Sinalizacao no mesmo mapa"),
-            ("Mapa Geografico",       "Bolhas KMZ sobre tracado real da malha"),
-            ("Alertas Criticos",      "Hot-spots cronicos das duas gerencias"),
-            ("Comparativo Mensal",    "SP x VP lado a lado por periodo"),
-        ]
+    # ── 2.3: Score engine (sidebar) ─────────────────────────────────────────
+    st.sidebar.markdown("---")
+    config = render_score_sidebar("VP+EE")
+
+    # ── 2.4: Calcula scores ──────────────────────────────────────────────────
+    df_sp_vp = calcular_score(df_sp_vp, config) if df_sp_vp is not None else None
+    df_sp_ee = calcular_score(df_sp_ee, config) if df_sp_ee is not None else None
+    df_vp_vp = calcular_score(df_vp_vp, config) if df_vp_vp is not None else None
+    df_vp_ee = calcular_score(df_vp_ee, config) if df_vp_ee is not None else None
+
+    # ── 2.5: Cards de última atualização ──────────────────────────────────────
+    _render_card_atualizacao()
+
+    # ── 2.6: Abas ─────────────────────────────────────────────────────────────
+    tab_cons, tab_comp, tab_uni, tab_temp, tab_rank = st.tabs([
+        "📊 Consolidado",
+        "🗺️ Comparativo SP × VP",
+        "📡 Unifilar Total",
+        "📈 Temporal Global",
+        "🏆 Top Hot-spots",
     ])
-    st.html(f"""
-    <div style="background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%);
-        border:2px dashed #16a34a44; border-radius:16px; padding:2.5rem; text-align:center;">
-        <div style="font-size:3rem; margin-bottom:1rem;">&#127760;</div>
-        <h2 style="font-size:1.4rem; font-weight:700; color:#15803d; margin:0 0 0.5rem 0;">
-            Visao Geral - Em construcao (Sprint 4)
-        </h2>
-        <p style="color:#6b7280; font-size:0.95rem; max-width:560px; margin:0 auto 1.5rem auto;">
-            A Visao Geral cruzara dados das duas gerencias para dar ao Gerente Geral
-            uma perspectiva unificada de toda a malha MRS.
-        </p>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;
-            max-width:480px; margin:0 auto; text-align:left;">
-            {grid_html}
-        </div>
-    </div>
-    """)
-    
+
+    with tab_cons:
+        _render_aba_consolidado(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
+
+    with tab_comp:
+        _render_aba_comparativo(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
+
+    with tab_uni:
+        _render_aba_unifilar(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
+
+    with tab_temp:
+        _render_aba_temporal(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
+
+    with tab_rank:
+        _render_aba_ranking(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
+
 # endregion
 
 
-# region ====================== SESSÃO 4: Renderização Principal ======================
+# region ====================== SESSÃO 3: Helpers de carregamento =============
 
-def render_gerencia_geral():
-    """Ponto de entrada: renderiza a tela de Visão Geral."""
-    require_login()
+def _load(gerencia: str, disciplina: str) -> pd.DataFrame | None:
+    """Carrega notas do banco com cache. Retorna None se vazio."""
+    df = get_notas_cached(gerencia, disciplina)
+    return df if df is not None and not df.empty else None
 
-    _render_header()
-    st.divider()
-    _render_cards_contagem()
-    _render_roadmap_visao_geral()
+
+def _render_card_atualizacao() -> None:
+    cols = st.columns([3, 1])
+    with cols[1]:
+        for ger, disc in [("SP", "VP"), ("SP", "EE"), ("VP", "VP"), ("VP", "EE")]:
+            ult = get_ultima_atualizacao(ger, disc)
+            st.markdown(
+                f"<div style='text-align:right; font-size:10px; color:#9ca3af;'>"
+                f"{ger}/{disc}: <b>{ult}</b></div>",
+                unsafe_allow_html=True,
+            )
+
+# endregion
+
+
+# region ====================== SESSÃO 4: Aba Consolidado =====================
+
+def _render_aba_consolidado(
+    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
+) -> None:
+    """
+    Aba 1: KPIs totais da malha + Indicadores IMT/DI + Semáforos.
+    """
+    # ── KPIs totais ──────────────────────────────────────────────────────────
+    df_total = _concat_safe(
+        _concat_safe(df_sp_vp, df_sp_ee),
+        _concat_safe(df_vp_vp, df_vp_ee),
+    )
+
+    st.markdown("#### 📋 KPIs — Toda a Malha MRS")
+    _render_kpis_consolidados(df_total)
+
+    st.markdown("---")
+
+    # ── Indicadores integrados IMT/DI ──────────────────────────────────────────
+    render_indicadores_geral(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
+
+
+def _render_kpis_consolidados(df: pd.DataFrame) -> None:
+    """6 KPIs em linha para a visão total da malha."""
+    if df is None or df.empty:
+        st.info("📭 Sem dados.")
+        return
+
+    total  = len(df)
+    aber   = int((df.get("status_usuario", pd.Series()).str.upper() == "ABER").sum()) if "status_usuario" in df.columns else 0
+    score_m = round(df["score"].dropna().mean(), 1) if "score" in df.columns else 0.0
+    lt_m    = round(df["lead_time_dias"].dropna().mean(), 0) if "lead_time_dias" in df.columns else 0.0
+    crit    = int(df["prioridade"].str.contains("1-Muito alta", na=False).sum()) if "prioridade" in df.columns else 0
+
+    ramal_top = "—"
+    if "ramal" in df.columns and "score" in df.columns:
+        por_r = df.groupby("ramal")["score"].sum().dropna()
+        if not por_r.empty:
+            ramal_top = nome_ramal(por_r.idxmax())
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    _kpi(c1, "📋 Total Notas",     f"{total:,}",       "#1e3a5f")
+    _kpi(c2, "📂 Notas Abertas",   f"{aber:,}",        "#f59e0b")
+    _kpi(c3, "🚨 Prioridade Máx.", f"{crit:,}",        "#dc2626")
+    _kpi(c4, "⚖️ Score Médio",     f"{score_m:.1f}",   "#ffb000")
+    _kpi(c5, "⏱️ Lead Time Médio", f"{int(lt_m)} dias","#7c3aed")
+    _kpi(c6, "🚂 Ramal Top",       ramal_top[:18],     "#0891b2")
+
+
+def _kpi(col, titulo: str, valor: str, cor: str) -> None:
+    col.markdown(
+        f"""
+        <div style='
+            background:#f8fafc;
+            border-left:3px solid {cor};
+            border-radius:10px;
+            padding:12px 10px;
+            text-align:center;
+        '>
+            <div style='font-size:10px; color:#6b7280;'>{titulo}</div>
+            <div style='font-size:20px; font-weight:700; color:{cor};'>{valor}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# endregion
+
+
+# region ====================== SESSÃO 5: Aba Comparativo SP × VP =============
+
+def _render_aba_comparativo(
+    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
+) -> None:
+    """
+    Aba 2: Gráficos espelho SP × VP, lado a lado.
+
+    Comparações:
+      - Volume de notas por prioridade (SP × VP)
+      - Score total por ramal (barras horizontais)
+      - Lead time médio por família
+      - Distribuição de status
+    """
+    df_sp = _concat_safe(df_sp_vp, df_sp_ee)
+    df_vp = _concat_safe(df_vp_vp, df_vp_ee)
+
+    # ── 5.1: Volume por prioridade ────────────────────────────────────────────
+    st.markdown("#### 📊 Volume de Notas por Prioridade — SP × VP")
+
+    col_sp, col_vp = st.columns(2)
+    _grafico_criticidade(col_sp, df_sp, "SP")
+    _grafico_criticidade(col_vp, df_vp, "VP")
+
+    st.markdown("---")
+
+    # ── 5.2: Score por ramal ─────────────────────────────────────────────────
+    st.markdown("#### ⚖️ Score Total por Ramal")
+
+    col_sp2, col_vp2 = st.columns(2)
+    _grafico_score_ramal(col_sp2, df_sp, "SP")
+    _grafico_score_ramal(col_vp2, df_vp, "VP")
+
+    st.markdown("---")
+
+    # ── 5.3: Lead time por família ────────────────────────────────────────────
+    st.markdown("#### ⏱️ Lead Time Médio por Família de Defeito")
+
+    col_sp3, col_vp3 = st.columns(2)
+    _grafico_lead_familia(col_sp3, df_sp, "SP")
+    _grafico_lead_familia(col_vp3, df_vp, "VP")
+
+
+def _grafico_criticidade(col, df: pd.DataFrame | None, ger: str) -> None:
+    col.markdown(f"**🏭 Gerência {ger}**")
+    if df is None or df.empty or "prioridade" not in df.columns:
+        col.caption("_(sem dados)_")
+        return
+    ordem  = ["1-Muito alta", "2-Alta", "3-Média", "4-Baixa"]
+    cores  = ["#dc2626", "#f59e0b", "#0891b2", "#16a34a"]
+    cnt    = df["prioridade"].value_counts()
+    labels = [p for p in ordem if p in cnt.index]
+    values = [cnt.get(p, 0) for p in labels]
+    bares  = [cores[i] for i, p in enumerate(ordem) if p in cnt.index]
+    fig = go.Figure(go.Bar(x=labels, y=values, marker_color=bares, text=values, textposition="outside"))
+    fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff", margin=dict(l=5,r=5,t=10,b=30), height=220, showlegend=False, yaxis=dict(showgrid=True, gridcolor="#f3f4f6"), xaxis=dict(tickfont=dict(size=9)))
+    col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+
+
+def _grafico_score_ramal(col, df: pd.DataFrame | None, ger: str) -> None:
+    col.markdown(f"**🏭 Gerência {ger}**")
+    if df is None or df.empty or "ramal" not in df.columns or "score" not in df.columns:
+        col.caption("_(sem dados)_")
+        return
+    por_ramal = (
+        df.groupby("ramal")["score"].sum()
+        .sort_values(ascending=True)
+        .tail(10)
+    )
+    nomes = [nome_ramal(s) for s in por_ramal.index]
+    fig = go.Figure(go.Bar(
+        y=nomes, x=por_ramal.values,
+        orientation="h",
+        marker_color="#1e3a5f" if ger == "SP" else "#16a34a",
+        text=[f"{v:.0f}" for v in por_ramal.values],
+        textposition="outside",
+    ))
+    fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff", margin=dict(l=5,r=5,t=10,b=10), height=280, showlegend=False, xaxis=dict(showgrid=True, gridcolor="#f3f4f6"), yaxis=dict(tickfont=dict(size=9)))
+    col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+
+
+def _grafico_lead_familia(col, df: pd.DataFrame | None, ger: str) -> None:
+    col.markdown(f"**🏭 Gerência {ger}**")
+    col_fam = next((c for c in ["familia_defeito","familia_cod"] if df is not None and c in df.columns), None)
+    if df is None or df.empty or not col_fam or "lead_time_dias" not in df.columns:
+        col.caption("_(sem dados)_")
+        return
+    lt_fam = (
+        df.groupby(col_fam)["lead_time_dias"]
+        .mean()
+        .dropna()
+        .sort_values(ascending=False)
+        .head(8)
+    )
+    fig = go.Figure(go.Bar(
+        y=lt_fam.index.tolist(),
+        x=lt_fam.values.tolist(),
+        orientation="h",
+        marker_color="#7c3aed",
+        text=[f"{v:.0f}d" for v in lt_fam.values],
+        textposition="outside",
+    ))
+    fig.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff", margin=dict(l=5,r=5,t=10,b=10), height=260, showlegend=False, xaxis=dict(showgrid=True, gridcolor="#f3f4f6", title="dias"), yaxis=dict(tickfont=dict(size=9)))
+    col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+
+# endregion
+
+
+# region ====================== SESSÃO 6: Aba Unifilar Total ==================
+
+def _render_aba_unifilar(
+    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
+) -> None:
+    """
+    Aba 3: Unifilar Tridisciplinar — SP e VP no mesmo gráfico.
+
+    Como ECharts não tem contexto geográfico real (sem shapefile aqui),
+    usamos dois pares de bandas sobrepostos:
+      SP-VP (y=3), SP-EE (y=2), VP-VP (y=1), VP-EE (y=0)
+
+    O Unifilar dual é renderizado 2× com labels distintos.
+    """
+    st.markdown("#### 📡 Unifilar Tridisciplinar — SP + VP")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**🏭 Gerência SP**")
+        render_unifilar_dual(
+            df_vp=df_sp_vp,
+            df_ee=df_sp_ee,
+            titulo="SP — VP + EE",
+            altura=380,
+        )
+    with c2:
+        st.markdown("**🏭 Gerência VP**")
+        render_unifilar_dual(
+            df_vp=df_vp_vp,
+            df_ee=df_vp_ee,
+            titulo="VP — VP + EE",
+            altura=380,
+        )
+
+# endregion
+
+
+# region ====================== SESSÃO 7: Aba Temporal Global =================
+
+def _render_aba_temporal(
+    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
+) -> None:
+    """
+    Aba 4: Série temporal consolidada de toda a malha,
+    com opção de quebrar por Gerência.
+    """
+    st.markdown("#### 📈 Série Temporal — Malha MRS (SP + VP)")
+
+    df_total = _concat_safe(
+        _concat_safe(df_sp_vp, df_sp_ee),
+        _concat_safe(df_vp_vp, df_vp_ee),
+    )
+
+    if df_total.empty:
+        st.info("📭 Sem dados para a série temporal.")
+        return
+
+    # Quebra por gerência (visão cross)
+    render_serie_temporal(df_total, "SP+VP")
+
+# endregion
+
+
+# region ====================== SESSÃO 8: Aba Top Hot-spots ===================
+
+def _render_aba_ranking(
+    df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee,
+) -> None:
+    """
+    Aba 5: Ranking cross-gerencial — os N piores trechos de toda a MRS.
+    Combina SP + VP + VP + EE em um único ranking consolidado.
+    """
+    st.markdown("#### 🏆 Top Hot-spots — Malha MRS (Cross-Gerencial)")
+
+    # Adiciona coluna de gerência antes de concatenar
+    dfs = []
+    for df, ger, disc in [
+        (df_sp_vp, "SP", "VP"),
+        (df_sp_ee, "SP", "EE"),
+        (df_vp_vp, "VP", "VP"),
+        (df_vp_ee, "VP", "EE"),
+    ]:
+        if df is not None and not df.empty:
+            d = df.copy()
+            d["_gerencia"] = ger
+            d["_disciplina"] = disc
+            dfs.append(d)
+
+    if not dfs:
+        st.info("📭 Sem dados para o ranking.")
+        return
+
+    df_all = pd.concat(dfs, ignore_index=True)
+
+    top_n = st.slider("Top N trechos", min_value=10, max_value=50, value=20, step=5, key="topn_geral")
+
+    # Agrupa por gerência + ramal + pátio
+    group_cols = [c for c in ["_gerencia", "_disciplina", "ramal", "origem"] if c in df_all.columns]
+    agg = {}
+    if "score" in df_all.columns:
+        agg["score"] = "sum"
+    if "lead_time_dias" in df_all.columns:
+        agg["lead_time_dias"] = "mean"
+    agg["numero_nota"] = "count"
+
+    ranking = (
+        df_all.groupby(group_cols)
+        .agg(agg)
+        .reset_index()
+        .sort_values("score" if "score" in agg else "numero_nota", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+    ranking.index += 1
+
+    rename = {
+        "_gerencia":      "Gerência",
+        "_disciplina":    "Disciplina",
+        "ramal":          "Ramal",
+        "origem":         "Pátio",
+        "score":          "Score Total",
+        "lead_time_dias": "Lead Time Médio (d)",
+        "numero_nota":    "Nº Notas",
+    }
+    ranking.rename(columns={k: v for k, v in rename.items() if k in ranking.columns}, inplace=True)
+
+    if "Ramal" in ranking.columns:
+        ranking["Ramal"] = ranking["Ramal"].apply(lambda s: nome_ramal(str(s), "completo_sigla"))
+    if "Score Total" in ranking.columns:
+        ranking["Score Total"] = ranking["Score Total"].round(1)
+    if "Lead Time Médio (d)" in ranking.columns:
+        ranking["Lead Time Médio (d)"] = ranking["Lead Time Médio (d)"].round(0).astype("Int64")
+
+    st.dataframe(ranking, use_container_width=True, height=min(700, 45 * len(ranking) + 80))
+
+    csv = ranking.to_csv(index_label="Posição").encode("utf-8-sig")
+    st.download_button(
+        "⬇️ Exportar Ranking Cross-Gerencial CSV",
+        csv,
+        file_name="ranking_hotspots_malha_mrs.csv",
+        mime="text/csv",
+        key="dl_ranking_geral",
+    )
+
+# endregion
+
+
+# region ====================== SESSÃO 9: Estado Vazio ========================
+
+def _render_estado_vazio() -> None:
+    st.markdown(
+        """
+        <div style='
+            text-align: center;
+            padding: 40px;
+            background: #f8fafc;
+            border-radius: 16px;
+            border: 2px dashed #d1d5db;
+            margin: 20px 0;
+        '>
+            <div style='font-size: 48px; margin-bottom: 12px;'>🌐</div>
+            <h3 style='color: #1e3a5f; margin: 0 0 8px 0;'>
+                Nenhum dado carregado na plataforma
+            </h3>
+            <p style='color: #6b7280; font-size: 14px; margin: 0 0 16px 0;'>
+                A Visão Geral requer dados das Gerências SP e/ou VP.<br/>
+                Solicite ao Assistente/Admin o upload das planilhas SAP.
+            </p>
+            <div style='
+                background: rgba(255,176,0,0.1);
+                border: 1px solid #ffb000;
+                border-radius: 8px;
+                padding: 10px 16px;
+                display: inline-block;
+                font-size: 13px;
+                color: #92400e;
+            '>
+                💡 Menu lateral → <b>🏭 Gerência SP</b> ou <b>🏭 Gerência VP</b> → Upload de Dados
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # endregion

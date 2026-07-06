@@ -77,7 +77,7 @@ def _render_logo():
             <span style="font-size:28px;">🚂</span>
         </div>
         <div style="font-size:1.3rem; font-weight:700; color:#ffffff; letter-spacing:-0.3px;">
-            MRS Nexus
+            MRS Sentinel
         </div>
         <div style="font-size:0.72rem; color:rgba(255,255,255,0.5); margin-top:2px; letter-spacing:0.3px;">
             INTELIGÊNCIA DE MANUTENÇÃO
