@@ -404,4 +404,7 @@ def render_painel_transparencia(df: pd.DataFrame, config: ScoreConfig) -> None:
 
         st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
 
+# Alias de compatibilidade — parser.py do Sprint 1 usa este nome
+aplicar_score_dataframe = calcular_score
+
 # endregion
