@@ -17,7 +17,7 @@ import plotly.express as px
 
 from components.filtros  import render_filtros_sidebar
 from components.kpi_card import render_kpi_cards
-from components.unifilar import render_unifilar_dual
+from components.unifilar import render_unifilar
 from components.heatmap  import (
     render_heatmap_patio_familia,
     render_ranking_hotspots,
@@ -39,6 +39,9 @@ from core.glossarios import nome_ramal
 GERENCIA       = "VP"
 LABEL_GERENCIA = "🏭 Gerência VP — Vale do Paraíba"
 CENTROS_VP     = ["CFAN", "CFTA", "CFPI"]
+
+# cfg retornado por render_filtros_sidebar — contém bin_km para o unifilar
+_cfg_score: dict = {"bin_km": 0.5}
 
 # endregion
 
@@ -199,17 +202,33 @@ def _aplicar_filtros(
     df_ee: pd.DataFrame | None,
     disciplina_sel: str,
 ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    global _cfg_score
+
+    # Monta df combinado para sidebar única (evita renderizar sidebar duas vezes)
+    dfs = []
+    if df_vp is not None:
+        dfs.append(df_vp)
+    if df_ee is not None:
+        dfs.append(df_ee)
+    df_combined = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
+    df_filt, _cfg_score = render_filtros_sidebar(df_combined)
+
+    # Separa de volta por disciplina
     df_vp_filt = None
     df_ee_filt = None
 
-    if df_vp is not None:
-        df_vp_filt, _ = render_filtros_sidebar(
-            df_vp, GERENCIA, "VP", prefix="vp_vp"
-        )
-    if df_ee is not None:
-        df_ee_filt, _ = render_filtros_sidebar(
-            df_ee, GERENCIA, "EE", prefix="vp_ee"
-        )
+    if df_vp is not None and not df_filt.empty:
+        if "disciplina" in df_filt.columns:
+            df_vp_filt = df_filt[df_filt["disciplina"] == "VP"].copy()
+        else:
+            df_vp_filt = df_filt.copy()
+
+    if df_ee is not None and not df_filt.empty:
+        if "disciplina" in df_filt.columns:
+            df_ee_filt = df_filt[df_filt["disciplina"] == "EE"].copy()
+        else:
+            df_ee_filt = df_filt.copy()
 
     return df_vp_filt, df_ee_filt
 
@@ -264,11 +283,15 @@ def _render_aba_visao_geral(
 
     st.markdown("---")
 
-    render_unifilar_dual(
-        df_vp=df_vp if disciplina_sel in ("VP", "VP+EE") else None,
-        df_ee=df_ee if disciplina_sel in ("EE", "VP+EE") else None,
-        titulo=f"📡 Unifilar — Gerência VP · {disciplina_sel}",
-    )
+    # Combina VP e/ou EE conforme seleção e passa cfg com bin_km
+    dfs_uni = []
+    if df_vp is not None:
+        dfs_uni.append(df_vp)
+    if df_ee is not None:
+        dfs_uni.append(df_ee)
+    df_uni = pd.concat(dfs_uni, ignore_index=True) if dfs_uni else pd.DataFrame()
+    if not df_uni.empty:
+        render_unifilar(df_uni, _cfg_score)
 
 # endregion
 
@@ -576,7 +599,10 @@ def _elem9_quadro_resumo(df: pd.DataFrame, disc: str) -> None:
     col_rename = {"ramal":"Ramal","score_sum":"Score Total","score_mean":"Score Médio","score_count":"Nº Notas","lead_time_dias_mean":"Lead Time Médio","_muito_alta_sum":"Prioridade Máxima"}
     resumo.rename(columns={k:v for k,v in col_rename.items() if k in resumo.columns}, inplace=True)
     if "Ramal" in resumo.columns:
-        resumo["Ramal"] = resumo["Ramal"].apply(lambda s: nome_ramal(str(s), "completo_sigla"))
+        try:
+            resumo["Ramal"] = resumo["Ramal"].apply(lambda s: nome_ramal(str(s), "completo_sigla"))
+        except Exception:
+            pass  # mantém a sigla original se glossário não suportar a assinatura
     for c in ["Score Total","Score Médio","Lead Time Médio"]:
         if c in resumo.columns:
             resumo[c] = resumo[c].round(1)

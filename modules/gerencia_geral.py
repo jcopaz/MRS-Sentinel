@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 
-from components.unifilar  import render_unifilar_dual
+from components.unifilar  import render_unifilar
 from components.heatmap   import render_ranking_hotspots, render_serie_temporal
 from core.indicadores     import (
     render_indicadores_geral,
@@ -24,6 +24,9 @@ from core.glossarios      import nome_ramal
 # region ====================== SESSÃO 1: Constantes ==========================
 
 LABEL_TELA = "Visao Geral — MRS Sentinel"
+
+# cfg padrão para o unifilar (bin_km)
+_cfg_score: dict = {"bin_km": 0.5}
 
 # endregion
 
@@ -172,7 +175,10 @@ def _render_kpis_consolidados(df: pd.DataFrame) -> None:
     if "ramal" in df.columns and "score" in df.columns:
         por_r = df.groupby("ramal")["score"].sum().dropna()
         if not por_r.empty:
-            ramal_top = nome_ramal(por_r.idxmax())
+            try:
+                ramal_top = nome_ramal(por_r.idxmax())
+            except Exception:
+                ramal_top = str(por_r.idxmax())
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     _kpi(c1, "Total Notas",     f"{total:,}",       "#1e3a5f")
@@ -259,7 +265,10 @@ def _grafico_score_ramal(col, df, ger: str) -> None:
         .sort_values(ascending=True)
         .tail(10)
     )
-    nomes = [nome_ramal(s) for s in por_ramal.index]
+    try:
+        nomes = [nome_ramal(s) for s in por_ramal.index]
+    except Exception:
+        nomes = [str(s) for s in por_ramal.index]
     fig = go.Figure(go.Bar(
         y=nomes, x=por_ramal.values, orientation="h",
         marker_color="#1e3a5f" if ger == "SP" else "#16a34a",
@@ -311,10 +320,18 @@ def _render_aba_unifilar(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Gerencia SP**")
-        render_unifilar_dual(df_vp=df_sp_vp, df_ee=df_sp_ee, titulo="SP — VP + EE", altura=380)
+        df_sp = _concat_safe(df_sp_vp, df_sp_ee)
+        if df_sp is not None and not df_sp.empty:
+            render_unifilar(df_sp, _cfg_score)
+        else:
+            st.info("📭 Sem dados de SP.")
     with c2:
         st.markdown("**Gerencia VP**")
-        render_unifilar_dual(df_vp=df_vp_vp, df_ee=df_vp_ee, titulo="VP — VP + EE", altura=380)
+        df_vp = _concat_safe(df_vp_vp, df_vp_ee)
+        if df_vp is not None and not df_vp.empty:
+            render_unifilar(df_vp, _cfg_score)
+        else:
+            st.info("📭 Sem dados de VP.")
 
 # endregion
 
@@ -384,7 +401,10 @@ def _render_aba_ranking(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
     ranking.rename(columns={k: v for k, v in rename.items() if k in ranking.columns}, inplace=True)
 
     if "Ramal" in ranking.columns:
-        ranking["Ramal"] = ranking["Ramal"].apply(lambda s: nome_ramal(str(s), "completo_sigla"))
+        try:
+            ranking["Ramal"] = ranking["Ramal"].apply(lambda s: nome_ramal(str(s), "completo_sigla"))
+        except Exception:
+            pass  # mantém a sigla original se glossário não suportar a assinatura
     if "Score Total" in ranking.columns:
         ranking["Score Total"] = ranking["Score Total"].round(1)
     if "Lead Time Medio (d)" in ranking.columns:
