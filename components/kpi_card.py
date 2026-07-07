@@ -1,376 +1,307 @@
 # =============================================================================
-# components/kpi_card.py — KPIs Premium com Sparkline
-# Sprint 3 — MRS Sentinel
+# components/kpi_card.py — KPI Cards com Sparklines ECharts
+# Sprint 3 (rev.3) — MRS Sentinel
 #
-# Exporta render_kpi_cards() — exibe 4 KPIs principais com mini-gráfico
-# de tendência (sparkline Plotly) e indicador delta vs período anterior.
+# FIEL AO app1.py:
+#   • kpi_card_sparkline() com ECharts (smooth line + areaStyle gradiente)
+#   • gerar_sparkline()    filtra últimos 12 meses
+#   • render_kpi_cards()   4 KPIs: Total, Prio Alta, Ramal top, Lead Time
 #
-# KPIs exibidos:
-#   1. Total de Notas Abertas
-#   2. Score Médio da Carteira
-#   3. Lead Time Médio (dias)
-#   4. Hot-spots Críticos (score no top 25%)
-#
-# Sessão 1: Imports & constantes
-# Sessão 2: Helpers de cálculo
-# Sessão 3: _sparkline() — mini-gráfico de tendência
-# Sessão 4: _card_kpi() — card individual
-# Sessão 5: render_kpi_cards() — ponto de entrada
+# Sessão 1: Imports & helpers
+# Sessão 2: gerar_sparkline()
+# Sessão 3: kpi_card_sparkline()
+# Sessão 4: render_kpi_cards()
 # =============================================================================
 
-# region ====================== SESSÃO 1: Imports & Constantes =================
+# region ====================== SESSÃO 1: Imports & Helpers ====================
 import streamlit as st
 import pandas as pd
 import numpy as np
+
+try:
+    from streamlit_echarts import st_echarts
+    ECHARTS_OK = True
+except ImportError:
+    ECHARTS_OK = False
+
 import plotly.graph_objects as go
-from datetime import date
+
+from core.glossarios import nome_ramal
 
 COR_PRIMARIA = "#1e3a5f"
-COR_GOLD     = "#ffb000"
 COR_CRIT     = "#dc2626"
 COR_WARN     = "#f59e0b"
 COR_OK       = "#16a34a"
-COR_NA       = "#94a3b8"
+COR_EE       = "#7c3aed"
+
+MESES_PT = {
+    1:"Jan", 2:"Fev", 3:"Mar", 4:"Abr", 5:"Mai", 6:"Jun",
+    7:"Jul", 8:"Ago", 9:"Set", 10:"Out", 11:"Nov", 12:"Dez",
+}
+# endregion
 
 
-def _hex_para_rgba(hex_cor: str, opacidade: float = 0.13) -> str:
+# region ====================== SESSÃO 2: gerar_sparkline() ====================
+
+def gerar_sparkline(df_base: pd.DataFrame, agg_func: str = "count",
+                    coluna: str = "numero_nota") -> dict:
     """
-    Converte cor hex (#rrggbb) para rgba() aceito pelo Plotly.
-    Plotly NÃO aceita hex com canal alpha (#rrggbbaa).
+    Gera dados de sparkline dos últimos 12 meses.
+    FIEL AO app1.py — mesma lógica, mesmo formato de saída.
     """
-    hex_cor = hex_cor.lstrip("#")
-    r = int(hex_cor[0:2], 16)
-    g = int(hex_cor[2:4], 16)
-    b = int(hex_cor[4:6], 16)
-    return f"rgba({r},{g},{b},{opacidade})"
+    col_nota = "numero_nota" if "numero_nota" in df_base.columns else (
+               "nota" if "nota" in df_base.columns else None)
+
+    if len(df_base) == 0 or "data_nota" not in df_base.columns:
+        return {"meses": [], "valores": []}
+
+    s = df_base.dropna(subset=["data_nota"]).copy()
+    if s.empty:
+        return {"meses": [], "valores": []}
+
+    s["data_nota"] = pd.to_datetime(s["data_nota"], errors="coerce")
+    s = s.dropna(subset=["data_nota"])
+    s["mes"] = s["data_nota"].dt.to_period("M").dt.to_timestamp()
+
+    col_eff = coluna if coluna in s.columns else (col_nota or s.columns[0])
+
+    if agg_func == "count":
+        serie = s.groupby("mes").size()
+    else:
+        serie = s.groupby("mes")[col_eff].agg(agg_func)
+
+    serie = serie.tail(12)
+    rotulos = [f"{MESES_PT[d.month]}/{str(d.year)[-2:]}" for d in serie.index]
+    return {"meses": rotulos, "valores": [float(v) for v in serie.values]}
 
 # endregion
 
 
-# region ====================== SESSÃO 2: Helpers de cálculo ===================
+# region ====================== SESSÃO 3: kpi_card_sparkline() =================
 
-def _total_abertas(df: pd.DataFrame) -> int:
-    """Conta notas com status iniciado por 'AB' (ABER = Aberta)."""
-    if "status_usuario" not in df.columns:
-        return len(df)
-    return int(df["status_usuario"].str.upper().str.startswith("AB", na=False).sum())
-
-
-def _score_medio(df: pd.DataFrame) -> float:
-    """Score médio; retorna 0.0 se coluna ausente ou vazia."""
-    if "score" not in df.columns or df["score"].dropna().empty:
-        return 0.0
-    return round(float(df["score"].mean()), 1)
-
-
-def _lead_time_medio(df: pd.DataFrame) -> float:
-    """Lead time médio em dias; usa coluna lead_time_dias se disponível."""
-    if "lead_time_dias" in df.columns:
-        vals = pd.to_numeric(df["lead_time_dias"], errors="coerce").dropna()
-        return round(float(vals.mean()), 1) if len(vals) > 0 else 0.0
-    return 0.0
-
-
-def _hotspots_criticos(df: pd.DataFrame) -> int:
-    """Conta pontos com score no top 25% (limiar = percentil 75)."""
-    if "score" not in df.columns or df["score"].dropna().empty:
-        return 0
-    limiar = df["score"].quantile(0.75)
-    return int((df["score"] >= limiar).sum())
-
-
-def _delta_periodo_anterior(df: pd.DataFrame, col: str, agg: str = "mean") -> float:
+def kpi_card_sparkline(col, valor: str, label: str, sparkline_data: dict,
+                       cor_principal: str, icone: str, spark_key: str = ""):
     """
-    Calcula delta entre o último mês e o penúltimo.
-    Retorna 0.0 se dados insuficientes.
+    KPI Card com sparkline ECharts.
+    FIEL AO app1.py: card HTML + sparkline smooth + areaStyle gradiente.
+
+    Nota: ECharts aceita hex+alpha (#rrggbbaa), diferente do Plotly.
+          Por isso usamos cor_principal + '50' e '05' diretamente.
     """
-    if "data_nota" not in df.columns or col not in df.columns:
-        return 0.0
-
-    df_t = df.copy()
-    df_t["data_nota"] = pd.to_datetime(df_t["data_nota"], errors="coerce")
-    df_t = df_t.dropna(subset=["data_nota"])
-
-    if df_t.empty:
-        return 0.0
-
-    grp = (
-        df_t.groupby(pd.Grouper(key="data_nota", freq="ME"))[col]
-        .agg(agg)
-        .dropna()
-    )
-
-    if len(grp) < 2:
-        return 0.0
-
-    return round(float(grp.iloc[-1] - grp.iloc[-2]), 1)
-
-# endregion
-
-
-# region ====================== SESSÃO 3: Sparkline ============================
-
-def _sparkline(df: pd.DataFrame, col: str, agg: str = "mean",
-               cor: str = COR_PRIMARIA) -> go.Figure:
-    """
-    Gera mini-gráfico de linha (sparkline) com a evolução mensal de uma métrica.
-
-    Args:
-        df: DataFrame com data_nota e a coluna de métrica
-        col: coluna a agregar
-        agg: função de agregação ('mean', 'count', 'sum')
-        cor: cor da linha
-
-    Returns:
-        Figura Plotly minimalista (sem eixos, título, margens)
-    """
-    fig = go.Figure()
-
-    if "data_nota" not in df.columns or col not in df.columns:
-        return fig
-
-    df_t = df.copy()
-    df_t["data_nota"] = pd.to_datetime(df_t["data_nota"], errors="coerce")
-    df_t = df_t.dropna(subset=["data_nota"])
-
-    if df_t.empty:
-        return fig
-
-    grp = (
-        df_t.groupby(pd.Grouper(key="data_nota", freq="ME"))[col]
-        .agg(agg)
-        .dropna()
-        .tail(12)   # últimos 12 meses
-    )
-
-    if grp.empty:
-        return fig
-
-    # Área preenchida suave — usa rgba() pois Plotly não aceita hex+alpha
-    fig.add_trace(go.Scatter(
-        x=grp.index,
-        y=grp.values,
-        mode="lines",
-        line=dict(color=cor, width=2),
-        fill="tozeroy",
-        fillcolor=_hex_para_rgba(cor, 0.13),
-        hoverinfo="skip",
-    ))
-
-    # Ponto final destacado
-    fig.add_trace(go.Scatter(
-        x=[grp.index[-1]],
-        y=[grp.values[-1]],
-        mode="markers",
-        marker=dict(color=cor, size=6),
-        hoverinfo="skip",
-    ))
-
-    fig.update_layout(
-        height=60,
-        margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        showlegend=False,
-    )
-
-    return fig
-
-# endregion
-
-
-# region ====================== SESSÃO 4: Card individual ======================
-
-def _card_kpi(
-    col_st,
-    titulo: str,
-    valor: str,
-    delta: float,
-    delta_label: str,
-    cor_borda: str,
-    cor_delta_inverso: bool,
-    sparkline_fig: go.Figure,
-    icone: str = "📊",
-):
-    """
-    Renderiza um card KPI completo: título, valor, delta e sparkline.
-
-    Args:
-        col_st: coluna Streamlit onde renderizar
-        titulo: nome do KPI
-        valor: valor formatado para exibição
-        delta: variação vs período anterior (número)
-        delta_label: texto descritivo do delta
-        cor_borda: cor da borda esquerda
-        cor_delta_inverso: True = delta positivo é ruim (ex: lead time)
-        sparkline_fig: figura Plotly do sparkline
-        icone: emoji do KPI
-    """
-    with col_st:
-        # Card container
+    with col:
+        # Card HTML (igual app1)
         st.markdown(
             f"""
             <div style='
                 background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
                 border: 1px solid #e5e7eb;
-                border-left: 5px solid {cor_borda};
-                padding: 14px 16px 8px 16px;
+                border-left: 4px solid {cor_principal};
+                padding: 16px 18px;
                 border-radius: 12px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+                box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+                margin-bottom: 8px;
             '>
-                <div style='font-size:0.7rem; color:#6b7280; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;'>
-                    {icone} {titulo}
-                </div>
-                <div style='font-size:1.9rem; font-weight:800;
-                            color:{cor_borda}; margin:4px 0 2px 0;'>
-                    {valor}
-                </div>
-                <div style='font-size:0.72rem; color:#9ca3af;'>
-                    {delta_label}
+                <div style='display:flex; justify-content:space-between; align-items:center;'>
+                    <div>
+                        <div style='font-size:12px; color:#6b7280; font-weight:600;
+                                    text-transform:uppercase; letter-spacing:0.5px;'>
+                            {icone} {label}
+                        </div>
+                        <div style='font-size:28px; font-weight:800;
+                                    color:{cor_principal}; line-height:1.2; margin-top:4px;'>
+                            {valor}
+                        </div>
+                    </div>
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        # Sparkline abaixo do card
-        if sparkline_fig and sparkline_fig.data:
-            st.plotly_chart(
-                sparkline_fig,
-                use_container_width=True,
-                config={"displayModeBar": False},
-                key=f"spark_{titulo}",
-            )
+        meses   = sparkline_data.get("meses", [])
+        valores = sparkline_data.get("valores", [])
 
-        # Delta com st.metric (indicador de seta)
-        if delta != 0.0:
-            delta_color = "normal"
-            if cor_delta_inverso:
-                # Lead time subindo é ruim → inverte sinal visual
-                delta_color = "inverse"
-            st.metric(
-                label="",
-                value="",
-                delta=f"{delta:+.1f} vs mês anterior",
-                delta_color=delta_color,
-                label_visibility="collapsed",
-            )
+        if valores and len(valores) >= 2:
+            if ECHARTS_OK:
+                # ECharts sparkline — igual app1
+                # ECharts aceita #rrggbbaa (8 chars hex+alpha)
+                spark_opt = {
+                    "grid": {"left": 5, "right": 5, "top": 10, "bottom": 5,
+                             "containLabel": False},
+                    "xAxis": {
+                        "type": "category", "show": False,
+                        "data": meses, "boundaryGap": False,
+                    },
+                    "yAxis": {"type": "value", "show": False, "scale": True},
+                    "tooltip": {
+                        "trigger": "axis",
+                        "backgroundColor": "rgba(255,255,255,0.98)",
+                        "borderColor": cor_principal,
+                        "borderWidth": 2,
+                        "padding": [8, 12],
+                        "textStyle": {"color": "#1f2937", "fontSize": 13,
+                                     "fontWeight": "bold"},
+                        "extraCssText": (
+                            "box-shadow:0 4px 12px rgba(0,0,0,0.15);"
+                            "border-radius:8px;"
+                        ),
+                        "axisPointer": {
+                            "type": "line",
+                            "lineStyle": {"color": cor_principal, "width": 1,
+                                         "type": "dashed"},
+                        },
+                    },
+                    "series": [{
+                        "type": "line",
+                        "data": valores,
+                        "smooth": True,
+                        "showSymbol": False,
+                        "emphasis": {
+                            "itemStyle": {
+                                "color": cor_principal,
+                                "borderColor": "#fff", "borderWidth": 2,
+                            },
+                            "scale": 2,
+                        },
+                        "lineStyle": {"color": cor_principal, "width": 2.5},
+                        # ECharts aceita hex+alpha — igual app1
+                        "areaStyle": {
+                            "color": {
+                                "type": "linear",
+                                "x": 0, "y": 0, "x2": 0, "y2": 1,
+                                "colorStops": [
+                                    {"offset": 0,
+                                     "color": f"{cor_principal}50"},
+                                    {"offset": 1,
+                                     "color": f"{cor_principal}05"},
+                                ],
+                            }
+                        },
+                    }],
+                }
+                st_echarts(
+                    spark_opt, height="55px",
+                    key=f"spark_{spark_key}_{label.replace(' ', '_')}",
+                )
+            else:
+                # Fallback Plotly — converte hex para rgba
+                h = cor_principal.lstrip("#")
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=meses, y=valores, mode="lines",
+                    line=dict(color=cor_principal, width=2),
+                    fill="tozeroy",
+                    fillcolor=f"rgba({r},{g},{b},0.15)",
+                ))
+                fig.update_layout(
+                    height=55, margin=dict(l=0, r=0, t=0, b=0),
+                    plot_bgcolor="white", paper_bgcolor="white",
+                    xaxis=dict(visible=False),
+                    yaxis=dict(visible=False),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
 # endregion
 
 
-# region ====================== SESSÃO 5: Ponto de entrada =====================
+# region ====================== SESSÃO 4: render_kpi_cards() ===================
 
-def render_kpi_cards(
-    df: pd.DataFrame,
-    gerencia: str = "SP",
-    disciplina: str = "VP+EE",
-):
+def render_kpi_cards(df: pd.DataFrame, gerencia: str = "SP",
+                     disciplina: str = "VP"):
     """
-    Renderiza os 4 KPIs principais em linha horizontal.
+    Renderiza 4 KPI Cards com sparklines ECharts.
+    FIEL AO app1.py — mesma lógica dos 4 KPIs.
 
     KPIs:
-        1. Notas Abertas        — total de notas com status ABER
-        2. Score Médio          — média do score composto da carteira
-        3. Lead Time Médio      — tempo médio de resolução em dias
-        4. Hot-spots Críticos   — notas no top 25% de score
-
-    Args:
-        df: DataFrame filtrado com score calculado
-        gerencia: 'SP', 'VP' ou 'GERAL' (usado nos títulos)
-        disciplina: 'VP', 'EE' ou 'VP+EE' (exibido no subtítulo)
+      1. Total de Notas         (azul)   — sparkline volume mensal
+      2. Prio Alta/Muito Alta % (vermelho)
+      3. Ramal mais crítico     (amarelo)
+      4. Lead Time Médio (verde) OR Pátio mais crítico (roxo)
     """
     if df.empty:
-        st.info("ℹ️ Sem dados para exibir KPIs.")
+        st.info("Sem dados para exibir KPIs.")
         return
 
-    # ── Calcula valores ───────────────────────────────────────────────────────
-    n_abertas    = _total_abertas(df)
-    score_med    = _score_medio(df)
-    lt_med       = _lead_time_medio(df)
-    n_criticos   = _hotspots_criticos(df)
+    total_notas = len(df)
 
-    # Deltas vs mês anterior
-    # count usa coluna auxiliar — se não tiver numero_nota, usa índice
-    col_count = "numero_nota" if "numero_nota" in df.columns else df.columns[0]
-    delta_abertas  = _delta_periodo_anterior(df, col_count, agg="count")
-    delta_score    = _delta_periodo_anterior(df, "score",        agg="mean") if "score" in df.columns else 0.0
-    delta_lt       = _delta_periodo_anterior(df, "lead_time_dias",agg="mean") if "lead_time_dias" in df.columns else 0.0
+    # ── Prioridade Alta ────────────────────────────────────────────────────────
+    col_prio = "prioridade" if "prioridade" in df.columns else None
+    if col_prio:
+        mask_alta   = df[col_prio].isin(["1-Muito alta", "2-Alta"])
+        pct_critica = (mask_alta.sum() / total_notas * 100) if total_notas else 0.0
+    else:
+        mask_alta   = pd.Series([False] * len(df), index=df.index)
+        pct_critica = 0.0
 
-    # ── Cores dinâmicas ───────────────────────────────────────────────────────
-    # Score: vermelho se alto (crítico), verde se baixo (bom)
-    score_max_ref = 20.0   # referência: score > 20 já é preocupante
-    cor_score = (
-        COR_CRIT if score_med > score_max_ref * 1.5
-        else COR_WARN if score_med > score_max_ref
-        else COR_OK
-    )
+    # ── Ramal mais crítico ─────────────────────────────────────────────────────
+    col_ramal = "ramal" if "ramal" in df.columns else (
+                "trecho" if "trecho" in df.columns else None)
+    if col_ramal and "score" in df.columns and total_notas > 0:
+        ramal_top       = df.groupby(col_ramal)["score"].sum().idxmax()
+        ramal_top_label = nome_ramal(ramal_top, "sigla") if ramal_top else "—"
+    else:
+        ramal_top = ramal_top_label = "—"
 
-    # Lead time: vermelho > 60 dias, amarelo > 30, verde abaixo
-    cor_lt = (
-        COR_CRIT if lt_med > 60
-        else COR_WARN if lt_med > 30
-        else COR_OK
-    )
+    # ── Pátio mais crítico ─────────────────────────────────────────────────────
+    col_patio = "origem" if "origem" in df.columns else None
+    if col_patio and "score" in df.columns and total_notas > 0:
+        patio_top = df.groupby(col_patio)["score"].sum().idxmax()
+    else:
+        patio_top = "—"
+
+    # ── Lead Time ─────────────────────────────────────────────────────────────
+    lead_time_medio = None
+    if "lead_time_dias" in df.columns:
+        lt_valido = pd.to_numeric(df["lead_time_dias"], errors="coerce").dropna()
+        if len(lt_valido) > 0:
+            lead_time_medio = lt_valido.mean()
 
     # ── Sparklines ────────────────────────────────────────────────────────────
-    sp_abertas  = _sparkline(df, col_count, agg="count", cor=COR_PRIMARIA)
-    sp_score    = _sparkline(df, "score",          agg="mean",  cor=cor_score) if "score" in df.columns else go.Figure()
-    sp_lt       = _sparkline(df, "lead_time_dias", agg="mean",  cor=cor_lt)   if "lead_time_dias" in df.columns else go.Figure()
-    sp_criticos = _sparkline(df, "score",          agg="count", cor=COR_CRIT) if "score" in df.columns else go.Figure()
+    spark_total    = gerar_sparkline(df)
+    spark_critica  = gerar_sparkline(df[mask_alta])
+    spark_ramal    = (
+        gerar_sparkline(df[df[col_ramal] == ramal_top])
+        if ramal_top != "—" and col_ramal else {"meses": [], "valores": []}
+    )
 
-    # ── Renderiza os 4 cards em colunas ──────────────────────────────────────
+    if lead_time_medio is not None:
+        df_lt = df.dropna(subset=["data_nota", "lead_time_dias"]).copy()
+        df_lt["data_nota"] = pd.to_datetime(df_lt["data_nota"], errors="coerce")
+        df_lt = df_lt.dropna(subset=["data_nota"])
+        if not df_lt.empty:
+            df_lt["mes"] = df_lt["data_nota"].dt.to_period("M").dt.to_timestamp()
+            serie_lt = df_lt.groupby("mes")["lead_time_dias"].mean().tail(12)
+            spark_kpi4 = {
+                "meses":   [f"{MESES_PT[d.month]}/{str(d.year)[-2:]}"
+                            for d in serie_lt.index],
+                "valores": [round(float(v), 0) for v in serie_lt.values],
+            }
+        else:
+            spark_kpi4 = {"meses": [], "valores": []}
+    else:
+        spark_kpi4 = (
+            gerar_sparkline(df[df[col_patio] == patio_top])
+            if patio_top != "—" and col_patio else {"meses": [], "valores": []}
+        )
+
+    # ── Renderiza ─────────────────────────────────────────────────────────────
     col1, col2, col3, col4 = st.columns(4)
+    kp = f"{gerencia}_{disciplina}"
 
-    _card_kpi(
-        col1,
-        titulo="Notas Abertas",
-        valor=f"{n_abertas:,}",
-        delta=delta_abertas,
-        delta_label=f"Total: {len(df):,} notas · {disciplina}",
-        cor_borda=COR_PRIMARIA,
-        cor_delta_inverso=True,   # mais notas abertas = pior
-        sparkline_fig=sp_abertas,
-        icone="📋",
-    )
+    kpi_card_sparkline(col1, f"{total_notas:,}",
+                       "Total de Notas", spark_total, COR_PRIMARIA, "📋", kp)
+    kpi_card_sparkline(col2, f"{pct_critica:.1f}%",
+                       "Prio. Alta/Muito Alta", spark_critica, COR_CRIT, "🔴", kp)
+    kpi_card_sparkline(col3, ramal_top_label,
+                       "Ramal mais crítico", spark_ramal, COR_WARN, "🗺️", kp)
 
-    _card_kpi(
-        col2,
-        titulo="Score Médio",
-        valor=f"{score_med:.1f}",
-        delta=delta_score,
-        delta_label="Score composto ponderado",
-        cor_borda=cor_score,
-        cor_delta_inverso=True,   # score subindo = pior
-        sparkline_fig=sp_score,
-        icone="⚡",
-    )
-
-    _card_kpi(
-        col3,
-        titulo="Lead Time Médio",
-        valor=f"{lt_med:.0f} dias",
-        delta=delta_lt,
-        delta_label="Tempo médio de resolução",
-        cor_borda=cor_lt,
-        cor_delta_inverso=True,   # lead time subindo = pior
-        sparkline_fig=sp_lt,
-        icone="⏱️",
-    )
-
-    _card_kpi(
-        col4,
-        titulo="Hot-spots Críticos",
-        valor=f"{n_criticos:,}",
-        delta=0.0,   # não calcula delta para hot-spots (muito volátil)
-        delta_label="Score no top 25% da carteira",
-        cor_borda=COR_CRIT,
-        cor_delta_inverso=True,
-        sparkline_fig=sp_criticos,
-        icone="🔴",
-    )
+    if lead_time_medio is not None:
+        kpi_card_sparkline(col4, f"{lead_time_medio:.0f} dias",
+                           "Lead Time Médio", spark_kpi4, COR_OK, "⏱️", kp)
+    else:
+        kpi_card_sparkline(col4, str(patio_top),
+                           "Pátio mais crítico", spark_kpi4, COR_EE, "📍", kp)
 
 # endregion
