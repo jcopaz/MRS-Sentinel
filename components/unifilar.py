@@ -269,13 +269,36 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
         km_ficticio = False
 
     # ── Origem base (para Modo Dual) ──────────────────────────────────────────
+    # Mapeamento robusto: tenta várias colunas e padrões de valores do banco.
+    # Qualquer variação de "aberto/abertas/pendente" → "Abertas"
+    # Qualquer variação de "encerrado/concluido/fechado" → "Concluídas"
+    def _detectar_origem_base(row_df: pd.DataFrame) -> pd.Series:
+        # Colunas candidatas em ordem de prioridade
+        candidatas = ["origem_base", "status_amigavel", "status", "situacao",
+                      "status_nota", "situacao_nota"]
+        for col in candidatas:
+            if col in row_df.columns:
+                return row_df[col].astype(str).str.lower().map(
+                    lambda v: (
+                        "Concluídas" if any(p in v for p in
+                            ["encerr", "conclui", "fecha", "resolv", "conclu"])
+                        else "Abertas"
+                    )
+                )
+        # Fallback: tudo como Abertas
+        return pd.Series(["Abertas"] * len(row_df), index=row_df.index)
+
     if "origem_base" not in df_u.columns:
-        if "status_amigavel" in df_u.columns:
-            df_u["origem_base"] = df_u["status_amigavel"].map(
-                {"Aberto": "Abertas", "Encerrado": "Concluídas"}
-            ).fillna("Abertas")
-        else:
-            df_u["origem_base"] = "Abertas"
+        df_u["origem_base"] = _detectar_origem_base(df_u)
+    else:
+        # Normaliza valores já existentes (pode vir como "Aberto" ou "Abertas")
+        df_u["origem_base"] = df_u["origem_base"].astype(str).str.lower().map(
+            lambda v: (
+                "Concluídas" if any(p in v for p in
+                    ["encerr", "conclui", "fecha", "resolv", "conclu"])
+                else "Abertas"
+            )
+        )
 
     # ── Filtra notas com KM e matriz ──────────────────────────────────────────
     df_unifilar = df_u.dropna(subset=["km_real"]).copy()
@@ -297,23 +320,25 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
 
     # ── Seleciona Matriz (Ramal) ──────────────────────────────────────────────
     bases_disponiveis  = sorted(df_unifilar["origem_base"].unique())
-    modo_dual_possivel = len(bases_disponiveis) == 2
-    matrizes = sorted(df_unifilar[col_matriz].dropna().unique())                if col_matriz else ["Geral"]
+    # Dual possível sempre que houver ao menos 1 base — o outro lado fica vazio
+    # mas o modo visual já é o principal (fiel ao app1)
+    modo_dual_possivel = True
+    matrizes = sorted(df_unifilar[col_matriz].dropna().unique()) \
+               if col_matriz else ["Geral"]
 
     col_modo, col_ramal_sel = st.columns([1, 3])
 
     with col_modo:
-        if modo_dual_possivel:
-            modo_raw = st.radio(
-                "🎬 Modo:",
-                ["🎯 Dual", "📊 Empilhado"],
-                horizontal=False,
-                help="Dual = Abertas × Concluídas em 2 linhas.",
-                key=f"modo_unif_{gerencia}",
-            )
-            modo_view = "Dual" if "Dual" in modo_raw else "Empilhado"
-        else:
-            modo_view = "Empilhado"
+        modo_raw = st.radio(
+            "🎬 Modo:",
+            ["🎯 Dual", "📊 Empilhado"],
+            horizontal=False,
+            index=0,   # Dual é o padrão
+            help="Dual = Abertas (topo) × Concluídas (base). "
+                 "Empilhado = todas na mesma linha.",
+            key=f"modo_unif_{gerencia}",
+        )
+        modo_view = "Dual" if "Dual" in modo_raw else "Empilhado"
 
     with col_ramal_sel:
         if len(matrizes) == 1:
@@ -362,9 +387,16 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
     km_max_global    = float("-inf")
     score_max_global = 0
 
-    if modo_dual_possivel and modo_view == "Dual":
-        df_a = df_t_completo[df_t_completo["origem_base"] == "Abertas"]
-        df_c = df_t_completo[df_t_completo["origem_base"] == "Concluídas"]
+    if modo_view == "Dual":
+        df_a = df_t_completo[df_t_completo["origem_base"] == "Abertas"].copy()
+        df_c = df_t_completo[df_t_completo["origem_base"] == "Concluídas"].copy()
+        # Se não houver concluídas, avisa mas mantém o modo dual (eixo vazio)
+        if df_c.empty:
+            st.info("ℹ️ Nenhuma nota **Concluída** nos filtros atuais — "
+                    "eixo inferior ficará vazio.")
+        if df_a.empty:
+            st.info("ℹ️ Nenhuma nota **Aberta** nos filtros atuais — "
+                    "eixo superior ficará vazio.")
 
         pn_a, pp_a, agreg_a, kma_min, kma_max = construir_serie_unifilar(
             df_a, bin_km, y_offset=1, label="📋 Abertas (Diagnóstico)"
@@ -560,8 +592,8 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
         },
         "yAxis": {
             "type": "value",
-            "min": -2.5 if modo_dual_possivel and modo_view == "Dual" else -1.2,
-            "max":  2.5 if modo_dual_possivel and modo_view == "Dual" else  1.2,
+            "min": -2.5 if modo_view == "Dual" else -1.2,
+            "max":  2.5 if modo_view == "Dual" else  1.2,
             "show": False,
             "axisLine": {"show": False}, "splitLine": {"show": False},
         },
@@ -582,7 +614,7 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
     }
 
     option_safe = _sanitize(option)
-    altura = 460 if modo_dual_possivel and modo_view == "Dual" else 380
+    altura = 460 if modo_view == "Dual" else 380
     st_echarts(
         options=option_safe,
         height=f"{altura}px",
