@@ -13,6 +13,27 @@ from core.glossarios import normalizar_coluna_ramal
 
 # region ====================== SESSÃO 1: Queries base (Sprint 1) ==============
 
+def _upload_ids_ativos(gerencia: str, disciplina: str | None = None) -> list[str]:
+    """
+    Retorna os IDs de uploads com status 'ativo' para a gerencia
+    (e disciplina, se informada). Base da leitura anti-duplicação.
+    """
+    try:
+        supabase = get_supabase()
+        q = (
+            supabase.table("uploads_historico")
+            .select("id")
+            .eq("gerencia", gerencia)
+            .eq("status", "ativo")
+        )
+        if disciplina:
+            q = q.eq("disciplina", disciplina)
+        resp = q.execute()
+        return [r["id"] for r in (resp.data or [])]
+    except Exception:
+        return []
+
+
 def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataFrame:
     """
     Busca todas as notas ativas de uma gerência.
@@ -29,10 +50,19 @@ def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataF
     """
     try:
         supabase = get_supabase()
+
+        # ⭐ ANTI-DUPLICAÇÃO: lê apenas as notas do(s) upload(s) ATIVO(s).
+        # Um novo upload marca o anterior como 'substituido' mas NÃO apaga as
+        # notas antigas — por isso filtramos pelos upload_id ainda ativos.
+        upload_ids = _upload_ids_ativos(gerencia, disciplina)
+        if not upload_ids:
+            return pd.DataFrame()
+
         query = (
             supabase.table("notas")
             .select("*, uploads_historico(enviado_em, usuario_id, nome_arquivo)")
             .eq("gerencia", gerencia)
+            .in_("upload_id", upload_ids)
         )
         if disciplina:
             query = query.eq("disciplina", disciplina)
