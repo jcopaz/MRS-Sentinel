@@ -1,443 +1,549 @@
-# components/unifilar.py
-# Unifilar ECharts completo — bolhas por KM Real + Dual Mode + dataZoom
-# Restaurado do app1.py (Sprint 3.5)
+# =============================================================================
+# components/unifilar.py — Unifilar Dual VP + EE
+# Sprint 3 (rev.2) — MRS Sentinel
 #
-# Uso:
-#   from components.unifilar import render_unifilar
-#   render_unifilar(df_filtrado, cfg)
+# Problema resolvido: agrupamento granular por trecho gerava dezenas de
+# bolhinhas. Agora o nível de agrupamento é configurável pelo usuário:
+#   • Ramal  → 1 bolha por ramal (visão ampla, padrão)
+#   • Pátio  → 1 bolha por pátio de origem dentro dos ramais selecionados
+#   • Trecho → 1 bolha por par Origem-Destino (detalhe máximo)
 #
-# cfg vem de render_filtros_sidebar() em components/filtros.py
+# Estrutura:
+#   Sessão 1: Imports & constantes
+#   Sessão 2: Funções de agregação
+#   Sessão 3: Funções de layout (posições x, y)
+#   Sessão 4: Funções de renderização Plotly
+#   Sessão 5: Ponto de entrada render_unifilar_dual()
+# =============================================================================
 
-import math
-import pandas as pd
+# region ====================== SESSÃO 1: Imports & Constantes =================
 import streamlit as st
-from streamlit_echarts import st_echarts, JsCode
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+
+from core.glossarios import nome_ramal, RAMAIS_MRS, normalizar_coluna_ramal
+
+# Paleta MRS
+COR_VP      = "#1e3a5f"   # azul-marinho VP
+COR_EE      = "#7c3aed"   # roxo EE
+COR_CRIT    = "#dc2626"   # vermelho — score alto (crítico)
+COR_WARN    = "#f59e0b"   # amarelo — score médio (atenção)
+COR_OK      = "#16a34a"   # verde — score baixo (normal)
+COR_BG      = "#f8fafc"   # fundo do gráfico
+COR_TRILHO  = "#94a3b8"   # cor da "linha ferroviária"
+
+# Escala de cor score (verde → amarelo → vermelho)
+COLORSCALE = [
+    [0.0,  COR_OK],
+    [0.5,  COR_WARN],
+    [1.0,  COR_CRIT],
+]
+
+# Posição Y por disciplina (dual lane)
+Y_VP = 1.0    # trilho superior = Via Permanente
+Y_EE = -1.0   # trilho inferior = Eletroeletrônica
+Y_GERAL = 0.0 # linha central para visão combinada
+
+# endregion
 
 
-# ---------------------------------------------------------------------------
-# Helpers de agregação
-# ---------------------------------------------------------------------------
+# region ====================== SESSÃO 2: Funções de agregação =================
 
-def _top5_defeitos(x: pd.Series) -> str:
-    vc = x.dropna().value_counts().head(5)
-    if len(vc) == 0:
+def _top3_defeitos(serie: pd.Series) -> str:
+    """
+    Retorna os 3 defeitos mais frequentes como string HTML.
+    Defensivo: ignora NaN e listas vazias.
+    """
+    vc = serie.dropna().value_counts().head(3)
+    if vc.empty:
         return "—"
-    return "<br/>".join(
-        f"&nbsp;&nbsp;• {d} <span style='color:#9ca3af;'>({n})</span>"
-        for d, n in vc.items()
-    )
+    return "<br>".join(f"• {d}" for d in vc.index)
 
 
-def _patios_unicos(x: pd.Series) -> str:
-    vals = [v for v in x.dropna().unique() if str(v).strip()]
-    return ", ".join(sorted(vals)) if vals else "—"
+def _agregar(df: pd.DataFrame, nivel: str) -> pd.DataFrame:
+    """
+    Agrega o DataFrame no nível escolhido: 'Ramal', 'Pátio' ou 'Trecho'.
 
+    Colunas produzidas:
+        label       — nome exibido no eixo X e no hover
+        chave       — identificador interno (sigla ou código)
+        ramal_sigla — sigla do ramal pai (para ordenação e cor)
+        disciplina  — 'VP', 'EE' ou 'VP+EE'
+        qtd         — total de notas
+        score_med   — score médio (ou 0 se ausente)
+        lt_med      — lead time médio em dias
+        top_defeitos— string HTML com top-3 defeitos
+        y_pos       — posição y no gráfico (lane VP ou EE)
+    """
+    if df.empty:
+        return pd.DataFrame()
 
-def _top3_inspecoes(x: pd.Series) -> str:
-    vc = x.dropna().value_counts().head(3)
-    vc = vc[vc.index.astype(str).str.strip() != ""]
-    return ", ".join(str(t) for t in vc.index) if len(vc) else "—"
-
-
-# ---------------------------------------------------------------------------
-# Construtor de série (normal + pulsante)
-# ---------------------------------------------------------------------------
-
-def _construir_serie(
-    df_base: pd.DataFrame,
-    bin_km: float,
-    y_offset: float = 0,
-    label: str = "",
-) -> tuple[list, list, pd.DataFrame, float | None, float | None]:
-    if df_base.empty:
-        return [], [], pd.DataFrame(), None, None
-
-    df_t = df_base.copy()
-    df_t["bin_km"] = (df_t["km_real"] // bin_km) * bin_km
-
-    col_nota = "numero_nota" if "numero_nota" in df_t.columns else df_t.index.name or "index"
-
-    agreg = df_t.groupby("bin_km").agg(
-        qtd_notas        =(col_nota,          "count"),
-        score_total      =("score",            "sum"),
-        score_medio      =("score",            "mean"),
-        patios           =("origem",           _patios_unicos),
-        defeitos         =("defeito_legivel",  _top5_defeitos),
-        tipos_inspecao   =("tipo_atividade",   _top3_inspecoes),
-        prio_1           =("prioridade",       lambda x: (x == "1-Muito alta").sum()),
-        prio_2           =("prioridade",       lambda x: (x == "2-Alta").sum()),
-        lt_medio         =("lead_time_dias",   lambda x: x.dropna().mean() if len(x.dropna()) else None),
-    ).reset_index()
-
-    if agreg.empty:
-        return [], [], pd.DataFrame(), None, None
-
-    qtd_max   = agreg["qtd_notas"].max()
-    score_max = agreg["score_total"].max()
-
-    limiar_pulsante = (
-        agreg["score_total"].quantile(0.90) if len(agreg) >= 10 else score_max
-    )
-
-    pontos_normais   = []
-    pontos_pulsantes = []
-
-    for _, row in agreg.iterrows():
-        tamanho = 12 + (row["qtd_notas"] / qtd_max) * 43
-        lt_txt = (
-            f"⏱️ Lead time médio: <b>{row['lt_medio']:.0f} dias</b><br/>"
-            if pd.notna(row.get("lt_medio")) else ""
-        )
-        hover = (
-            f"<div style='min-width:220px;'>"
-            f"<div style='font-size:13px;color:#9ca3af;margin-bottom:4px;'>{label}</div>"
-            f"<div style='font-size:15px;font-weight:700;color:#1e3a5f;margin-bottom:6px;'>"
-            f"KM {row['bin_km']:.1f} → {row['bin_km'] + bin_km:.1f}</div>"
-            f"<hr style='border:0;border-top:1px solid #e5e7eb;margin:6px 0;'/>"
-            f"📋 <b>{row['qtd_notas']}</b> notas<br/>"
-            f"⚡ Score: <b>{row['score_total']:.0f}</b><br/>"
-            f"🔴 Muito alta: <b>{row['prio_1']}</b> &nbsp;|&nbsp; "
-            f"🟠 Alta: <b>{row['prio_2']}</b><br/>"
-            f"{lt_txt}"
-            f"📍 Pátio(s): <b>{row['patios']}</b><br/>"
-            f"🔍 Inspeção: <b>{row['tipos_inspecao']}</b><br/>"
-            f"<div style='margin-top:6px;font-size:12px;color:#6b7280;'><b>Top defeitos:</b></div>"
-            f"<div style='font-size:12px;'>{row['defeitos']}</div>"
-            f"</div>"
-        )
-
-        ponto = {
-            "value":       [float(row["bin_km"] + bin_km / 2), y_offset,
-                            float(row["score_total"]), int(row["qtd_notas"])],
-            "symbolSize":  tamanho,
-            "tooltipHTML": hover,
-        }
-
-        if row["score_total"] >= limiar_pulsante:
-            pontos_pulsantes.append(ponto)
+    # Define a coluna de agrupamento conforme o nível
+    if nivel == "Ramal":
+        col_chave = "ramal"
+    elif nivel == "Pátio":
+        col_chave = "origem"
+    else:  # Trecho
+        # Constrói coluna trecho = "ORIGEM → DESTINO"
+        if "origem" in df.columns and "destino" in df.columns:
+            df = df.copy()
+            df["_trecho_label"] = (
+                df["origem"].fillna("?") + " → " + df["destino"].fillna("?")
+            )
+            col_chave = "_trecho_label"
         else:
-            pontos_normais.append(ponto)
+            col_chave = "trecho"
 
-    km_min = float(agreg["bin_km"].min())
-    km_max = float(agreg["bin_km"].max() + bin_km)
-    return pontos_normais, pontos_pulsantes, agreg, km_min, km_max
+    # Garante que a coluna existe
+    if col_chave not in df.columns:
+        return pd.DataFrame()
 
+    # Agrega por chave + disciplina
+    # Usa disciplina_label para separar VP de EE nas lanes
+    disc_col = "disciplina_label" if "disciplina_label" in df.columns else None
 
-# ---------------------------------------------------------------------------
-# Sanitizador contra Infinity / NaN no JSON do ECharts
-# ---------------------------------------------------------------------------
+    group_cols = [col_chave]
+    if disc_col:
+        group_cols.append(disc_col)
 
-def _sanitize(obj):
-    if isinstance(obj, dict):
-        return {k: _sanitize(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_sanitize(v) for v in obj]
-    if isinstance(obj, float) and (math.isinf(obj) or math.isnan(obj)):
-        return 0
-    return obj
-
-
-# ---------------------------------------------------------------------------
-# Renderização principal
-# ---------------------------------------------------------------------------
-
-def render_unifilar(df_filtrado: pd.DataFrame, cfg: dict) -> None:
-    bin_km = cfg.get("bin_km", 5.0)
-
-    df_uni = df_filtrado.dropna(subset=["km_real", "trecho"]).copy()
-
-    if df_uni.empty:
-        st.warning(
-            "⚠️ Nenhuma nota com KM identificado após os filtros. "
-            "Tente liberar mais matrizes, pátios ou bases nos filtros. "
-            "Se o problema persistir, faça um novo upload da planilha."
+    agg = (
+        df.groupby(group_cols, dropna=False)
+        .agg(
+            qtd=("numero_nota", "count") if "numero_nota" in df.columns
+                else (col_chave, "count"),
+            score_med=("score", "mean") if "score" in df.columns
+                else (col_chave, lambda x: 0),
+            lt_med=("lead_time_dias", "mean") if "lead_time_dias" in df.columns
+                else (col_chave, lambda x: 0),
+            ramal_sigla=("ramal", "first") if "ramal" in df.columns
+                else (col_chave, "first"),
+            top_defeitos=("defeito_legivel", _top3_defeitos)
+                if "defeito_legivel" in df.columns
+                else (col_chave, lambda x: "—"),
         )
+        .reset_index()
+    )
+
+    agg = agg.rename(columns={col_chave: "chave"})
+
+    # Rótulo legível (nome completo para ramal, sigla direta para pátio/trecho)
+    if nivel == "Ramal":
+        agg["label"] = agg["chave"].apply(lambda s: nome_ramal(s, "completo_sigla"))
+    else:
+        agg["label"] = agg["chave"].fillna("?")
+        # Garante que ramal_sigla não é a chave errada
+        if "ramal_sigla" not in agg.columns and "ramal" in df.columns:
+            agg["ramal_sigla"] = df["ramal"].iloc[0]
+
+    # Posição Y (lane VP ou EE)
+    if disc_col and disc_col in agg.columns:
+        agg["y_pos"] = agg[disc_col].map({"VP": Y_VP, "EE": Y_EE}).fillna(Y_GERAL)
+        agg["disciplina"] = agg[disc_col]
+    else:
+        agg["y_pos"] = Y_GERAL
+        agg["disciplina"] = "VP+EE"
+
+    # Limpa NaN numéricos
+    agg["score_med"] = agg["score_med"].fillna(0)
+    agg["lt_med"]    = agg["lt_med"].fillna(0)
+
+    return agg
+
+# endregion
+
+
+# region ====================== SESSÃO 3: Layout (posições x) ==================
+
+def _atribuir_posicoes_x(agg: pd.DataFrame, nivel: str) -> pd.DataFrame:
+    """
+    Atribui posição x a cada ponto do unifilar.
+
+    Estratégia:
+    - Ordena os ramais pela ordem oficial MRS (lista RAMAIS_MRS)
+    - Pátios/trechos são ordenados dentro do ramal pai
+    - Garante separação visual entre ramais distintos (gap de 1.5)
+    """
+    if agg.empty:
+        return agg
+
+    agg = agg.copy()
+
+    # Ordem canônica dos ramais (por posição no dict RAMAIS_MRS)
+    ordem_ramais = list(RAMAIS_MRS.keys())
+
+    def _ordem_ramal(sigla):
+        try:
+            return ordem_ramais.index(str(sigla).strip().upper())
+        except ValueError:
+            return len(ordem_ramais)  # desconhecidos no final
+
+    agg["_ordem_ramal"] = agg["ramal_sigla"].apply(_ordem_ramal)
+
+    if nivel == "Ramal":
+        # Ordena por posição oficial do ramal
+        agg = agg.sort_values(["_ordem_ramal", "disciplina"]).reset_index(drop=True)
+        # X = índice sequencial dentro de cada ramal (VP e EE ficam na mesma coluna x)
+        ramais_unicos = agg["chave"].unique()
+        pos_x = {r: i * 2.0 for i, r in enumerate(ramais_unicos)}
+        agg["x_pos"] = agg["chave"].map(pos_x)
+
+    else:
+        # Para Pátio/Trecho: ordena por ramal pai, depois por chave
+        agg = agg.sort_values(["_ordem_ramal", "chave", "disciplina"]).reset_index(drop=True)
+        # Calcula posição x com gap entre ramais
+        x_atual = 0.0
+        ramal_ant = None
+        posicoes = []
+        for _, row in agg.iterrows():
+            if ramal_ant is not None and row["ramal_sigla"] != ramal_ant:
+                x_atual += 1.5  # gap entre ramais
+            posicoes.append(x_atual)
+            x_atual += 1.0
+            ramal_ant = row["ramal_sigla"]
+        agg["x_pos"] = posicoes
+
+    return agg
+
+# endregion
+
+
+# region ====================== SESSÃO 4: Renderização Plotly ==================
+
+def _cor_por_score(score: float, score_max: float) -> str:
+    """Retorna cor hex interpolada entre verde e vermelho pelo score relativo."""
+    if score_max == 0:
+        return COR_OK
+    ratio = min(score / score_max, 1.0)
+    if ratio < 0.5:
+        # verde → amarelo
+        t = ratio * 2
+        r = int(22  + t * (245 - 22))
+        g = int(163 + t * (158 - 163))
+        b = int(74  + t * (11  - 74))
+    else:
+        # amarelo → vermelho
+        t = (ratio - 0.5) * 2
+        r = int(245 + t * (220 - 245))
+        g = int(158 + t * (38  - 158))
+        b = int(11  + t * (38  - 11))
+    return f"rgb({r},{g},{b})"
+
+
+def _construir_figura(agg: pd.DataFrame, gerencia: str, nivel: str) -> go.Figure:
+    """
+    Constrói a figura Plotly do unifilar.
+
+    Layout:
+    - Linha "trilho" horizontal conectando os pontos
+    - Bolhas = notas agregadas (tamanho ∝ qtd, cor ∝ score)
+    - Hover rico com nome completo, qtd, score, lead time, top defeitos
+    - Labels abaixo das bolhas (nomes curtos)
+    """
+    if agg.empty:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="Sem dados para exibir",
+            x=0.5, y=0.5, xref="paper", yref="paper",
+            showarrow=False, font=dict(size=16, color="#6b7280"),
+        )
+        return fig
+
+    score_max = agg["score_med"].max() if agg["score_med"].max() > 0 else 1.0
+
+    # Normaliza tamanho das bolhas (mín 18, máx 60 px)
+    qtd_max = agg["qtd"].max() if agg["qtd"].max() > 0 else 1
+    agg["_size"] = 18 + (agg["qtd"] / qtd_max) * 42
+
+    fig = go.Figure()
+
+    # ── Linhas de trilho (uma por disciplina/lane) ──────────────────────────
+    for disciplina, y_val, cor_linha in [
+        ("VP", Y_VP, COR_VP),
+        ("EE", Y_EE, COR_EE),
+    ]:
+        sub = agg[agg["y_pos"] == y_val].sort_values("x_pos")
+        if sub.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=sub["x_pos"],
+            y=[y_val] * len(sub),
+            mode="lines",
+            line=dict(color=cor_linha, width=3, dash="solid"),
+            name=f"Trilho {disciplina}",
+            hoverinfo="skip",
+            showlegend=True,
+        ))
+
+    # Trilho central (se disciplina única / visão geral)
+    sub_geral = agg[agg["y_pos"] == Y_GERAL].sort_values("x_pos")
+    if not sub_geral.empty:
+        fig.add_trace(go.Scatter(
+            x=sub_geral["x_pos"],
+            y=[Y_GERAL] * len(sub_geral),
+            mode="lines",
+            line=dict(color=COR_TRILHO, width=3),
+            name="Trilho",
+            hoverinfo="skip",
+            showlegend=False,
+        ))
+
+    # ── Bolhas por linha ────────────────────────────────────────────────────
+    cores = agg["score_med"].apply(lambda s: _cor_por_score(s, score_max))
+
+    hover_texts = []
+    for _, row in agg.iterrows():
+        ger_tag = f"<b>Gerência: {row.get('gerencia_label', gerencia)}</b><br>" \
+                  if "gerencia_label" in row else ""
+        disc_tag = f"Disciplina: {row.get('disciplina','—')}<br>"
+        texto = (
+            f"<b>{row['label']}</b><br>"
+            f"{ger_tag}{disc_tag}"
+            f"📌 Notas: <b>{int(row['qtd']):,}</b><br>"
+            f"⚡ Score médio: <b>{row['score_med']:.1f}</b><br>"
+            f"⏱️ Lead time médio: <b>{row['lt_med']:.0f} dias</b><br>"
+            f"─────────────<br>"
+            f"Top defeitos:<br>{row['top_defeitos']}"
+        )
+        hover_texts.append(texto)
+
+    fig.add_trace(go.Scatter(
+        x=agg["x_pos"],
+        y=agg["y_pos"],
+        mode="markers+text",
+        marker=dict(
+            size=agg["_size"],
+            color=cores,
+            opacity=0.88,
+            line=dict(color="white", width=2),
+        ),
+        text=agg["label"].apply(
+            lambda s: s[:20] + "…" if len(s) > 20 else s
+        ),
+        textposition="bottom center",
+        textfont=dict(size=9, color="#1f2937"),
+        hovertext=hover_texts,
+        hoverinfo="text",
+        hoverlabel=dict(
+            bgcolor="white",
+            bordercolor="#1e3a5f",
+            font_size=12,
+            font_color="#1f2937",
+        ),
+        name="Notas",
+        showlegend=False,
+    ))
+
+    # ── Rótulos de ramal (faixa de fundo entre grupos) ──────────────────────
+    if nivel in ("Pátio", "Trecho"):
+        ramais_grp = agg.groupby("ramal_sigla")["x_pos"].agg(["min", "max"]).reset_index()
+        for _, rg in ramais_grp.iterrows():
+            mid_x = (rg["min"] + rg["max"]) / 2
+            fig.add_annotation(
+                x=mid_x, y=1.55,
+                text=f"<b>{nome_ramal(rg['ramal_sigla'], 'completo_sigla')}</b>",
+                showarrow=False,
+                font=dict(size=9, color="#1e3a5f"),
+                bgcolor="rgba(30,58,95,0.08)",
+                bordercolor="#1e3a5f",
+                borderwidth=1,
+                borderpad=3,
+            )
+            # linha divisória entre ramais
+            if rg["min"] > agg["x_pos"].min():
+                fig.add_vline(
+                    x=rg["min"] - 0.75,
+                    line=dict(color="#e5e7eb", width=1, dash="dot"),
+                )
+
+    # ── Labels fixos de lane ─────────────────────────────────────────────────
+    x_label = agg["x_pos"].min() - 1.2 if not agg.empty else -1
+    if agg["y_pos"].isin([Y_VP]).any():
+        fig.add_annotation(x=x_label, y=Y_VP, text="<b>VP</b>",
+                           showarrow=False, font=dict(size=11, color=COR_VP))
+    if agg["y_pos"].isin([Y_EE]).any():
+        fig.add_annotation(x=x_label, y=Y_EE, text="<b>EE</b>",
+                           showarrow=False, font=dict(size=11, color=COR_EE))
+
+    # ── Layout geral ─────────────────────────────────────────────────────────
+    titulo_nivel = {"Ramal": "por Ramal", "Pátio": "por Pátio", "Trecho": "por Trecho"}
+    x_range = [
+        agg["x_pos"].min() - 1.5,
+        agg["x_pos"].max() + 1.5,
+    ] if not agg.empty else [-1, 10]
+
+    fig.update_layout(
+        title=dict(
+            text=f"🗺️ Unifilar Dual VP + EE — {titulo_nivel.get(nivel, '')}",
+            font=dict(size=14, color="#1f2937"),
+            x=0,
+        ),
+        xaxis=dict(
+            showgrid=False, zeroline=False,
+            showticklabels=False,
+            range=x_range,
+        ),
+        yaxis=dict(
+            showgrid=False, zeroline=False,
+            showticklabels=False,
+            range=[-2.0, 2.2],
+            fixedrange=True,
+        ),
+        plot_bgcolor=COR_BG,
+        paper_bgcolor="white",
+        height=420,
+        margin=dict(l=60, r=20, t=50, b=60),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=-0.18,
+            xanchor="center", x=0.5,
+            font=dict(size=11),
+        ),
+        hovermode="closest",
+        dragmode="pan",
+    )
+
+    # Barra de cor (legenda de score)
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode="markers",
+        marker=dict(
+            colorscale=COLORSCALE,
+            showscale=True,
+            cmin=0, cmax=score_max,
+            colorbar=dict(
+                title=dict(text="Score", side="right"),
+                thickness=12, len=0.6,
+                tickfont=dict(size=10),
+            ),
+        ),
+        hoverinfo="skip",
+        showlegend=False,
+    ))
+
+    return fig
+
+# endregion
+
+
+# region ====================== SESSÃO 5: Ponto de entrada =====================
+
+def render_unifilar_dual(df: pd.DataFrame, gerencia: str = "SP"):
+    """
+    Renderiza o unifilar dual VP+EE com nível de detalhe configurável.
+
+    Controles exibidos acima do gráfico:
+    - Nível de agrupamento: Ramal | Pátio | Trecho
+    - Multiselect de ramais (filtra quais ramais aparecem)
+    - Checkbox para mostrar apenas hot-spots críticos
+
+    Args:
+        df: DataFrame já filtrado e com score calculado
+        gerencia: 'SP', 'VP' ou 'GERAL'
+    """
+    if df.empty:
+        st.info("ℹ️ Sem dados para o unifilar. Aplique um upload de dados primeiro.")
         return
 
-    matrizes_com_dados = sorted(df_uni["trecho"].unique())
+    # ── Controles acima do gráfico ───────────────────────────────────────────
+    col_nivel, col_ramais, col_crit = st.columns([1, 3, 1])
 
-    col_modo, col_matriz = st.columns([1, 3])
-
-    if "origem_base" in df_uni.columns:
-        bases = sorted(df_uni["origem_base"].unique())
-        modo_dual_possivel = len(bases) == 2
-    else:
-        abertas    = df_uni["status_amigavel"].isin(["Aberta", "Diferida"]) if "status_amigavel" in df_uni.columns else pd.Series(False, index=df_uni.index)
-        concluidas = df_uni["status_amigavel"].isin(["Concluída"]) if "status_amigavel" in df_uni.columns else pd.Series(False, index=df_uni.index)
-        if abertas.any() and concluidas.any():
-            df_uni.loc[abertas,    "origem_base"] = "Abertas"
-            df_uni.loc[concluidas, "origem_base"] = "Concluídas"
-            df_uni.loc[~abertas & ~concluidas, "origem_base"] = "Outros"
-            bases = ["Abertas", "Concluídas"]
-            modo_dual_possivel = True
-        else:
-            df_uni["origem_base"] = "Notas"
-            modo_dual_possivel = False
-
-    with col_modo:
-        if modo_dual_possivel:
-            modo_view = st.radio(
-                "🎬 Modo:",
-                ["🎯 Dual", "📊 Empilhado"],
-                horizontal=False,
-                key="uni_modo",
-                help="Dual = Abertas vs Concluídas em 2 linhas. Empilhado = soma.",
-            )
-            modo_dual = "Dual" in modo_view
-        else:
-            modo_dual = False
-            st.caption("📊 Modo empilhado")
-
-    with col_matriz:
-        if len(matrizes_com_dados) == 1:
-            trecho_view = matrizes_com_dados[0]
-            st.markdown(
-                f"<div style='padding:8px 12px;background:#1e3a5f;color:#fff;"
-                f"border-radius:8px;text-align:center;margin-top:28px;'>"
-                f"🚂 Visualizando: <b>{trecho_view}</b></div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            opcoes = []
-            for m in matrizes_com_dados:
-                qtd = len(df_uni[df_uni["trecho"] == m])
-                opcoes.append(f"{m} ({qtd:,})")
-
-            # Até 5 matrizes → radio horizontal; mais → selectbox para não quebrar layout
-            if len(opcoes) <= 5:
-                escolha = st.radio(
-                    "🚂 Matriz:",
-                    opcoes,
-                    horizontal=True,
-                    key="uni_matriz",
-                    help="Cada Matriz gera seu próprio unifilar. "
-                         "Número entre parênteses = notas após filtros.",
-                )
-            else:
-                escolha = st.selectbox(
-                    "🚂 Selecione a Matriz:",
-                    opcoes,
-                    key="uni_matriz",
-                    help="Cada Matriz gera seu próprio unifilar. "
-                         "Número entre parênteses = notas após filtros.",
-                )
-            trecho_view = escolha.split(" (")[0]
-
-    df_trecho = df_uni[df_uni["trecho"] == trecho_view].copy()
-
-    st.caption(
-        f"Cada bolha = agrupamento de notas em janela de **{bin_km:.0f} km**. "
-        f"**Tamanho** = qtd de notas | **Cor** = score de criticidade | "
-        f"**Bolhas pulsantes** = top 10% mais críticos. "
-        f"Use a **barra inferior** para dar zoom num intervalo de KM. "
-        f"Ajuste a granularidade em '🔬 Resolução do Mapa' na sidebar."
-    )
-
-    series       = []
-    km_min_g     = float("inf")
-    km_max_g     = float("-inf")
-    score_max_g  = 0.0
-
-    if modo_dual:
-        df_a = df_trecho[df_trecho["origem_base"] == "Abertas"]
-        df_c = df_trecho[df_trecho["origem_base"] == "Concluídas"]
-
-        pn_a, pp_a, ag_a, kma0, kma1 = _construir_serie(df_a, bin_km, y_offset=1,  label="📋 Abertas")
-        pn_c, pp_c, ag_c, kmc0, kmc1 = _construir_serie(df_c, bin_km, y_offset=-1, label="✅ Concluídas")
-
-        for v in [kma0, kma1, kmc0, kmc1]:
-            if v is not None and pd.notna(v):
-                km_min_g = min(km_min_g, v)
-                km_max_g = max(km_max_g, v)
-
-        if km_min_g == float("inf"):
-            km_min_g = float(df_trecho["km_real"].min())
-            km_max_g = float(df_trecho["km_real"].max())
-
-        if len(ag_a): score_max_g = max(score_max_g, float(ag_a["score_total"].max()))
-        if len(ag_c): score_max_g = max(score_max_g, float(ag_c["score_total"].max()))
-
-        series += [
-            {"name": "Via (Abertas)",    "type": "line",
-             "data": [[km_min_g, 1], [km_max_g, 1]],
-             "lineStyle": {"color": "#374151", "width": 3},
-             "symbol": "none", "silent": True, "tooltip": {"show": False}},
-            {"name": "Via (Concluídas)", "type": "line",
-             "data": [[km_min_g, -1], [km_max_g, -1]],
-             "lineStyle": {"color": "#374151", "width": 3},
-             "symbol": "none", "silent": True, "tooltip": {"show": False}},
-        ]
-
-        if pn_a:
-            series.append({"name": "📋 Abertas", "type": "scatter", "data": pn_a,
-                           "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85}})
-        if pn_c:
-            series.append({"name": "✅ Concluídas", "type": "scatter", "data": pn_c,
-                           "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85}})
-        if pp_a:
-            series.append({"name": "🔥 Abertas Críticos", "type": "effectScatter", "data": pp_a,
-                           "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
-                           "showEffectOn": "render",
-                           "itemStyle": {"borderColor": "#fff", "borderWidth": 2}})
-        if pp_c:
-            series.append({"name": "🔥 Concluídas Críticos", "type": "effectScatter", "data": pp_c,
-                           "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
-                           "showEffectOn": "render",
-                           "itemStyle": {"borderColor": "#fff", "borderWidth": 2}})
-
-        c_l, c_r = st.columns(2)
-        c_l.markdown(
-            "<div style='text-align:center;padding:8px;background:#fef2f2;"
-            "border-left:4px solid #dc2626;border-radius:6px;'>"
-            "<b style='color:#dc2626;'>📋 Linha superior = Notas Abertas</b><br>"
-            "<span style='color:#6b7280;font-size:12px;'>diagnóstico — o que atacar</span></div>",
-            unsafe_allow_html=True,
-        )
-        c_r.markdown(
-            "<div style='text-align:center;padding:8px;background:#f0fdf4;"
-            "border-left:4px solid #16a34a;border-radius:6px;'>"
-            "<b style='color:#16a34a;'>✅ Linha inferior = Notas Concluídas</b><br>"
-            "<span style='color:#6b7280;font-size:12px;'>histórico — o que foi resolvido</span></div>",
-            unsafe_allow_html=True,
-        )
-
-        qtd_a = len(df_a)
-        qtd_c = len(df_c)
-        st.markdown(
-            f"<div style='text-align:center;font-size:17px;margin:8px 0;color:#1f2937;'>"
-            f"<b>Matriz {trecho_view}</b> — "
-            f"<span style='color:#dc2626;font-weight:600;'>📋 {qtd_a:,} abertas</span>"
-            f" &nbsp;×&nbsp; "
-            f"<span style='color:#16a34a;font-weight:600;'>✅ {qtd_c:,} concluídas</span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-    else:
-        pn, pp, ag, kmm, kmx = _construir_serie(
-            df_trecho, bin_km, y_offset=0, label=f"📊 {trecho_view}"
-        )
-        km_min_g = kmm if (kmm is not None and pd.notna(kmm)) else 0.0
-        km_max_g = kmx if (kmx is not None and pd.notna(kmx)) else 100.0
-        if len(ag):
-            score_max_g = float(ag["score_total"].max())
-
-        series.append({
-            "name": "Via", "type": "line",
-            "data": [[km_min_g, 0], [km_max_g, 0]],
-            "lineStyle": {"color": "#374151", "width": 3},
-            "symbol": "none", "silent": True, "tooltip": {"show": False},
-        })
-        if pn:
-            series.append({"name": "Notas", "type": "scatter", "data": pn,
-                           "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85}})
-        if pp:
-            series.append({"name": "🔥 Hot-spots críticos", "type": "effectScatter", "data": pp,
-                           "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
-                           "showEffectOn": "render",
-                           "itemStyle": {"borderColor": "#fff", "borderWidth": 2}})
-
-        st.markdown(
-            f"<div style='text-align:center;font-size:17px;margin:8px 0;color:#1f2937;'>"
-            f"<b>Matriz {trecho_view}</b> — {len(df_trecho):,} notas distribuídas"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-    y_range = 2.5 if modo_dual else 1.2
-
-    option = {
-        "tooltip": {
-            "trigger": "item",
-            "backgroundColor": "rgba(255,255,255,0.98)",
-            "borderColor": "#1e3a5f", "borderWidth": 2,
-            "padding": [10, 14],
-            "extraCssText": (
-                "box-shadow:0 6px 20px rgba(0,0,0,0.15);"
-                "border-radius:10px;max-width:320px;"
+    with col_nivel:
+        nivel = st.selectbox(
+            "🔎 Nível de detalhe",
+            options=["Ramal", "Pátio", "Trecho"],
+            index=0,
+            help=(
+                "Ramal = visão ampla (1 bolha por ramal)\n"
+                "Pátio = detalha os pátios de origem\n"
+                "Trecho = máximo detalhe (par Origem→Destino)"
             ),
-            "textStyle": {"color": "#1f2937", "fontSize": 12},
-            "formatter": JsCode(
-                "function(params){ return params.data.tooltipHTML || ''; }"
-            ).js_code,
-        },
-        "visualMap": {
-            "min": 0,
-            "max": float(score_max_g) if score_max_g > 0 else 100,
-            "dimension": 2, "show": True, "orient": "vertical",
-            "right": 10, "top": "middle",
-            "itemHeight": 120, "itemWidth": 14, "calculable": True,
-            "text": ["Crítico", "OK"],
-            "textStyle": {"color": "#1f2937", "fontSize": 11},
-            "inRange": {
-                "color": ["#16a34a", "#84cc16", "#eab308", "#f59e0b", "#dc2626"]
-            },
-        },
-        "grid": {
-            "left": 50, "right": 90,
-            "top": 20, "bottom": 80,
-            "containLabel": True,
-        },
-        "xAxis": {
-            "type": "value",
-            "name": "Quilometragem (KM)",
-            "nameLocation": "middle", "nameGap": 32,
-            "nameTextStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
-            "axisLine":  {"lineStyle": {"color": "#9ca3af"}},
-            "axisLabel": {"color": "#374151", "fontSize": 11},
-            "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}},
-        },
-        "yAxis": {
-            "type": "value",
-            "min": -y_range, "max": y_range,
-            "show": False,
-            "axisLine":  {"show": False},
-            "splitLine": {"show": False},
-        },
-        "dataZoom": [
-            {
-                "type": "slider", "show": True, "xAxisIndex": [0],
-                "bottom": 15, "height": 22,
-                "borderColor":    "#d1d5db",
-                "fillerColor":    "rgba(30,58,95,0.15)",
-                "handleStyle":    {"color": "#1e3a5f"},
-                "moveHandleStyle":{"color": "#1e3a5f"},
-                "textStyle":      {"color": "#374151", "fontSize": 10},
-            },
-            {"type": "inside", "xAxisIndex": [0]},
-        ],
-        "series": series,
-    }
+            key=f"unif_nivel_{gerencia}",
+        )
 
-    option_safe = _sanitize(option)
-    altura = 460 if modo_dual else 380
+    with col_ramais:
+        # Ramais disponíveis nos dados (normalizados)
+        if "ramal" in df.columns:
+            ramais_disp = sorted(df["ramal"].dropna().unique())
+        else:
+            ramais_disp = []
 
-    st_echarts(
-        options=option_safe,
-        height=f"{altura}px",
-        key=f"unifilar_{trecho_view}_{str(modo_dual)}",
+        # Monta labels nome completo → sigla
+        opcoes_label = {
+            nome_ramal(s, "completo_sigla"): s
+            for s in ramais_disp
+        }
+
+        selecionados_nome = st.multiselect(
+            "🚂 Ramais visíveis",
+            options=list(opcoes_label.keys()),
+            default=list(opcoes_label.keys()),
+            help="Desmarque ramais para removê-los do unifilar",
+            key=f"unif_ramais_{gerencia}",
+        )
+
+        # Converte de volta para siglas (uso interno no DataFrame)
+        ramais_sel_sigla = [opcoes_label[n] for n in selecionados_nome]
+
+    with col_crit:
+        apenas_criticos = st.checkbox(
+            "🔴 Só críticos",
+            value=False,
+            help="Mostra apenas pontos com score acima de 75% do máximo",
+            key=f"unif_crit_{gerencia}",
+        )
+
+    # ── Filtra pelos ramais selecionados ─────────────────────────────────────
+    df_plot = df.copy()
+
+    if ramais_sel_sigla and "ramal" in df_plot.columns:
+        df_plot = df_plot[df_plot["ramal"].isin(ramais_sel_sigla)]
+
+    if df_plot.empty:
+        st.warning("Nenhum dado com os ramais selecionados.")
+        return
+
+    # ── Filtra hot-spots críticos se pedido ──────────────────────────────────
+    if apenas_criticos and "score" in df_plot.columns:
+        limiar = df_plot["score"].quantile(0.75)
+        df_plot = df_plot[df_plot["score"] >= limiar]
+        if df_plot.empty:
+            st.info("Sem hot-spots críticos com os filtros aplicados.")
+            return
+
+    # ── Agrega no nível escolhido ────────────────────────────────────────────
+    agg = _agregar(df_plot, nivel)
+
+    if agg.empty:
+        st.warning("Dados insuficientes para montar o unifilar.")
+        return
+
+    # ── Atribui posições x ───────────────────────────────────────────────────
+    agg = _atribuir_posicoes_x(agg, nivel)
+
+    # ── Constrói e exibe figura ──────────────────────────────────────────────
+    fig = _construir_figura(agg, gerencia, nivel)
+    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+    # ── Resumo em texto abaixo do gráfico ────────────────────────────────────
+    n_pontos = len(agg)
+    n_ramais = agg["ramal_sigla"].nunique() if "ramal_sigla" in agg.columns else "?"
+    st.caption(
+        f"📍 {n_pontos} pontos exibidos · "
+        f"🚂 {n_ramais} ramal(is) · "
+        f"Nível: {nivel} · "
+        f"Use o scroll do mouse para zoom"
     )
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
+    # ── Tabela drill-down (expander) ─────────────────────────────────────────
+    with st.expander("📋 Ver tabela detalhada dos pontos"):
+        tab_exib = agg[["label", "disciplina", "qtd", "score_med", "lt_med", "top_defeitos"]].copy()
+        tab_exib.columns = ["Ponto", "Disciplina", "Qtd. Notas", "Score Médio", "Lead Time (dias)", "Top Defeitos"]
+        tab_exib["Score Médio"] = tab_exib["Score Médio"].round(1)
+        tab_exib["Lead Time (dias)"] = tab_exib["Lead Time (dias)"].round(0).astype(int)
+        tab_exib = tab_exib.sort_values("Score Médio", ascending=False)
+        # Remove HTML das células de defeitos para exibição limpa
+        tab_exib["Top Defeitos"] = tab_exib["Top Defeitos"].str.replace("<br>", " | ", regex=False).str.replace("•", "→", regex=False)
+        st.dataframe(tab_exib, use_container_width=True, hide_index=True)
 
-    extensao = (km_max_g - km_min_g) if km_max_g > km_min_g else 0
-    c1.metric("📍 Extensão", f"{extensao:.1f} km")
-    c2.metric(
-        "📊 Densidade",
-        f"{len(df_trecho) / max(extensao, 1):.1f} notas/km",
-    )
-
-    df_trecho["_bin"] = (df_trecho["km_real"] // bin_km) * bin_km
-    agreg_tot = df_trecho.groupby("_bin")["score"].sum()
-    if len(agreg_tot):
-        hotspot = agreg_tot.idxmax()
-        c3.metric("🎯 Hot-spot principal", f"KM {hotspot:.1f}")
-    else:
-        c3.metric("🎯 Hot-spot principal", "—")
-
-    if "lead_time_dias" in df_trecho.columns and df_trecho["lead_time_dias"].notna().any():
-        lt = df_trecho["lead_time_dias"].dropna().mean()
-        c4.metric("⏱️ Lead time médio", f"{lt:.0f} dias")
-    else:
-        c4.metric("⏱️ Lead time médio", "—")
+# endregion
