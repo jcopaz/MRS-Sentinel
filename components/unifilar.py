@@ -1,205 +1,184 @@
 # =============================================================================
-# components/unifilar.py — Unifilar Dual VP + EE
-# Sprint 3 (rev.2) — MRS Sentinel
+# components/unifilar.py — Unifilar Dual VP + EE com ECharts
+# Sprint 3 (rev.3) — MRS Sentinel
 #
-# Problema resolvido: agrupamento granular por trecho gerava dezenas de
-# bolhinhas. Agora o nível de agrupamento é configurável pelo usuário:
-#   • Ramal  → 1 bolha por ramal (visão ampla, padrão)
-#   • Pátio  → 1 bolha por pátio de origem dentro dos ramais selecionados
-#   • Trecho → 1 bolha por par Origem-Destino (detalhe máximo)
+# Usa streamlit-echarts com:
+#   • effectScatter  — bolhas pulsantes/irradiantes para hot-spots críticos
+#   • scatter        — bolhas normais para demais pontos
+#   • line           — trilhos VP (superior) e EE (inferior)
+#   • dataZoom       — zoom deslizante (slider + scroll do mouse)
+#   • tooltip rico   — nome completo, qtd, score, lead time, top defeitos
 #
-# Estrutura:
-#   Sessão 1: Imports & constantes
-#   Sessão 2: Funções de agregação
-#   Sessão 3: Funções de layout (posições x, y)
-#   Sessão 4: Funções de renderização Plotly
-#   Sessão 5: Ponto de entrada render_unifilar_dual()
+# Controles acima do gráfico:
+#   • Nível de detalhe: Ramal | Pátio | Trecho
+#   • Multiselect de ramais (nome completo)
+#   • Checkbox "Só críticos"
+#
+# Sessão 1: Imports & constantes
+# Sessão 2: Funções de agregação
+# Sessão 3: Posicionamento x
+# Sessão 4: Conversão para formato ECharts
+# Sessão 5: Construção do option ECharts
+# Sessão 6: Ponto de entrada render_unifilar_dual()
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+
+try:
+    from streamlit_echarts import st_echarts
+    ECHARTS_OK = True
+except ImportError:
+    ECHARTS_OK = False
+
+import plotly.graph_objects as go  # fallback se echarts ausente
 
 from core.glossarios import nome_ramal, RAMAIS_MRS, normalizar_coluna_ramal
 
 # Paleta MRS
-COR_VP      = "#1e3a5f"   # azul-marinho VP
-COR_EE      = "#7c3aed"   # roxo EE
-COR_CRIT    = "#dc2626"   # vermelho — score alto (crítico)
-COR_WARN    = "#f59e0b"   # amarelo — score médio (atenção)
-COR_OK      = "#16a34a"   # verde — score baixo (normal)
-COR_BG      = "#f8fafc"   # fundo do gráfico
-COR_TRILHO  = "#94a3b8"   # cor da "linha ferroviária"
+COR_VP      = "#1e3a5f"   # azul-marinho — trilho Via Permanente
+COR_EE      = "#7c3aed"   # roxo — trilho Eletroeletrônica
+COR_GOLD    = "#ffb000"   # dourado MRS
+COR_CRIT    = "#dc2626"   # vermelho — score crítico
+COR_WARN    = "#f59e0b"   # amarelo — score atenção
+COR_OK      = "#16a34a"   # verde — score normal
+COR_BG      = "#f8fafc"   # fundo
 
-# Escala de cor score (verde → amarelo → vermelho)
-COLORSCALE = [
-    [0.0,  COR_OK],
-    [0.5,  COR_WARN],
-    [1.0,  COR_CRIT],
-]
+# Posições Y das duas lanes
+Y_VP    =  1.0   # trilho superior (Via Permanente)
+Y_EE    = -1.0   # trilho inferior (Eletroeletrônica)
+Y_GERAL =  0.0   # linha central (modo combinado)
 
-# Posição Y por disciplina (dual lane)
-Y_VP = 1.0    # trilho superior = Via Permanente
-Y_EE = -1.0   # trilho inferior = Eletroeletrônica
-Y_GERAL = 0.0 # linha central para visão combinada
+# Limiar de criticidade: notas acima do percentil 75 do score
+PERCENTIL_CRITICO = 0.75
 
 # endregion
 
 
 # region ====================== SESSÃO 2: Funções de agregação =================
 
-def _top3_defeitos(serie: pd.Series) -> str:
-    """
-    Retorna os 3 defeitos mais frequentes como string HTML.
-    Defensivo: ignora NaN e listas vazias.
-    """
+def _top3_str(serie: pd.Series) -> str:
+    """Retorna os 3 defeitos mais frequentes separados por quebra de linha."""
     vc = serie.dropna().value_counts().head(3)
     if vc.empty:
         return "—"
-    return "<br>".join(f"• {d}" for d in vc.index)
+    return "\n".join(f"• {d}" for d in vc.index)
 
 
 def _agregar(df: pd.DataFrame, nivel: str) -> pd.DataFrame:
     """
-    Agrega o DataFrame no nível escolhido: 'Ramal', 'Pátio' ou 'Trecho'.
+    Agrega o DataFrame no nível escolhido.
 
     Colunas produzidas:
-        label       — nome exibido no eixo X e no hover
-        chave       — identificador interno (sigla ou código)
-        ramal_sigla — sigla do ramal pai (para ordenação e cor)
-        disciplina  — 'VP', 'EE' ou 'VP+EE'
-        qtd         — total de notas
-        score_med   — score médio (ou 0 se ausente)
-        lt_med      — lead time médio em dias
-        top_defeitos— string HTML com top-3 defeitos
-        y_pos       — posição y no gráfico (lane VP ou EE)
+        chave, label, ramal_sigla, disciplina, qtd,
+        score_med, lt_med, top_defeitos, y_pos, critico
     """
     if df.empty:
         return pd.DataFrame()
 
-    # Define a coluna de agrupamento conforme o nível
+    # Define coluna de agrupamento
     if nivel == "Ramal":
         col_chave = "ramal"
     elif nivel == "Pátio":
         col_chave = "origem"
-    else:  # Trecho
-        # Constrói coluna trecho = "ORIGEM → DESTINO"
+    else:
+        # Trecho = par Origem→Destino
         if "origem" in df.columns and "destino" in df.columns:
             df = df.copy()
-            df["_trecho_label"] = (
-                df["origem"].fillna("?") + " → " + df["destino"].fillna("?")
+            df["_trecho"] = (
+                df["origem"].fillna("?") + "→" + df["destino"].fillna("?")
             )
-            col_chave = "_trecho_label"
+            col_chave = "_trecho"
         else:
-            col_chave = "trecho"
+            col_chave = "trecho" if "trecho" in df.columns else "origem"
 
-    # Garante que a coluna existe
     if col_chave not in df.columns:
         return pd.DataFrame()
 
-    # Agrega por chave + disciplina
-    # Usa disciplina_label para separar VP de EE nas lanes
     disc_col = "disciplina_label" if "disciplina_label" in df.columns else None
+    group_cols = [col_chave] + ([disc_col] if disc_col else [])
 
-    group_cols = [col_chave]
-    if disc_col:
-        group_cols.append(disc_col)
+    # Coluna de contagem
+    cnt_col = "numero_nota" if "numero_nota" in df.columns else col_chave
 
     agg = (
         df.groupby(group_cols, dropna=False)
         .agg(
-            qtd=("numero_nota", "count") if "numero_nota" in df.columns
-                else (col_chave, "count"),
-            score_med=("score", "mean") if "score" in df.columns
-                else (col_chave, lambda x: 0),
-            lt_med=("lead_time_dias", "mean") if "lead_time_dias" in df.columns
-                else (col_chave, lambda x: 0),
-            ramal_sigla=("ramal", "first") if "ramal" in df.columns
-                else (col_chave, "first"),
-            top_defeitos=("defeito_legivel", _top3_defeitos)
-                if "defeito_legivel" in df.columns
-                else (col_chave, lambda x: "—"),
+            qtd        =(cnt_col,           "count"),
+            score_med  =("score",           "mean")         if "score"           in df.columns else (col_chave, lambda x: 0),
+            lt_med     =("lead_time_dias",   "mean")        if "lead_time_dias"  in df.columns else (col_chave, lambda x: 0),
+            ramal_sigla=("ramal",           "first")        if "ramal"           in df.columns else (col_chave, "first"),
+            top_defeitos=("defeito_legivel", _top3_str)     if "defeito_legivel" in df.columns else (col_chave, lambda x: "—"),
         )
         .reset_index()
+        .rename(columns={col_chave: "chave"})
     )
 
-    agg = agg.rename(columns={col_chave: "chave"})
-
-    # Rótulo legível (nome completo para ramal, sigla direta para pátio/trecho)
+    # Label legível
     if nivel == "Ramal":
-        agg["label"] = agg["chave"].apply(lambda s: nome_ramal(s, "completo_sigla"))
+        agg["label"] = agg["chave"].apply(lambda s: nome_ramal(str(s), "completo_sigla"))
     else:
-        agg["label"] = agg["chave"].fillna("?")
-        # Garante que ramal_sigla não é a chave errada
-        if "ramal_sigla" not in agg.columns and "ramal" in df.columns:
-            agg["ramal_sigla"] = df["ramal"].iloc[0]
+        agg["label"] = agg["chave"].fillna("?").astype(str)
 
-    # Posição Y (lane VP ou EE)
+    # Lane Y por disciplina
     if disc_col and disc_col in agg.columns:
-        agg["y_pos"] = agg[disc_col].map({"VP": Y_VP, "EE": Y_EE}).fillna(Y_GERAL)
+        agg["y_pos"]     = agg[disc_col].map({"VP": Y_VP, "EE": Y_EE}).fillna(Y_GERAL)
         agg["disciplina"] = agg[disc_col]
     else:
-        agg["y_pos"] = Y_GERAL
+        agg["y_pos"]     = Y_GERAL
         agg["disciplina"] = "VP+EE"
 
-    # Limpa NaN numéricos
-    agg["score_med"] = agg["score_med"].fillna(0)
-    agg["lt_med"]    = agg["lt_med"].fillna(0)
+    # Limpa numéricos
+    agg["score_med"] = pd.to_numeric(agg["score_med"], errors="coerce").fillna(0)
+    agg["lt_med"]    = pd.to_numeric(agg["lt_med"],    errors="coerce").fillna(0)
+
+    # Flag crítico: score acima do percentil 75
+    limiar = agg["score_med"].quantile(PERCENTIL_CRITICO) if agg["score_med"].max() > 0 else 0
+    agg["critico"] = agg["score_med"] >= limiar
 
     return agg
 
 # endregion
 
 
-# region ====================== SESSÃO 3: Layout (posições x) ==================
+# region ====================== SESSÃO 3: Posicionamento x ====================
 
-def _atribuir_posicoes_x(agg: pd.DataFrame, nivel: str) -> pd.DataFrame:
+def _posicionar_x(agg: pd.DataFrame, nivel: str) -> pd.DataFrame:
     """
-    Atribui posição x a cada ponto do unifilar.
-
-    Estratégia:
-    - Ordena os ramais pela ordem oficial MRS (lista RAMAIS_MRS)
-    - Pátios/trechos são ordenados dentro do ramal pai
-    - Garante separação visual entre ramais distintos (gap de 1.5)
+    Atribui posição x sequencial respeitando a ordem canônica dos ramais.
+    Adiciona gap de 1.5 entre ramais diferentes nos níveis Pátio/Trecho.
     """
     if agg.empty:
         return agg
 
     agg = agg.copy()
-
-    # Ordem canônica dos ramais (por posição no dict RAMAIS_MRS)
     ordem_ramais = list(RAMAIS_MRS.keys())
 
-    def _ordem_ramal(sigla):
+    def _rank(sigla):
         try:
             return ordem_ramais.index(str(sigla).strip().upper())
         except ValueError:
-            return len(ordem_ramais)  # desconhecidos no final
+            return len(ordem_ramais)
 
-    agg["_ordem_ramal"] = agg["ramal_sigla"].apply(_ordem_ramal)
+    agg["_ord"] = agg["ramal_sigla"].apply(_rank)
 
     if nivel == "Ramal":
-        # Ordena por posição oficial do ramal
-        agg = agg.sort_values(["_ordem_ramal", "disciplina"]).reset_index(drop=True)
-        # X = índice sequencial dentro de cada ramal (VP e EE ficam na mesma coluna x)
-        ramais_unicos = agg["chave"].unique()
-        pos_x = {r: i * 2.0 for i, r in enumerate(ramais_unicos)}
+        agg = agg.sort_values(["_ord", "disciplina"]).reset_index(drop=True)
+        # Mesma posição x para VP e EE do mesmo ramal (aparecem em lanes diferentes)
+        ramais_unicos = list(dict.fromkeys(agg["chave"].tolist()))
+        pos_x = {r: i * 2.5 for i, r in enumerate(ramais_unicos)}
         agg["x_pos"] = agg["chave"].map(pos_x)
-
     else:
-        # Para Pátio/Trecho: ordena por ramal pai, depois por chave
-        agg = agg.sort_values(["_ordem_ramal", "chave", "disciplina"]).reset_index(drop=True)
-        # Calcula posição x com gap entre ramais
-        x_atual = 0.0
-        ramal_ant = None
+        agg = agg.sort_values(["_ord", "chave", "disciplina"]).reset_index(drop=True)
+        x, ramal_ant = 0.0, None
         posicoes = []
         for _, row in agg.iterrows():
             if ramal_ant is not None and row["ramal_sigla"] != ramal_ant:
-                x_atual += 1.5  # gap entre ramais
-            posicoes.append(x_atual)
-            x_atual += 1.0
+                x += 1.5  # gap visual entre ramais
+            posicoes.append(x)
+            x += 1.0
             ramal_ant = row["ramal_sigla"]
         agg["x_pos"] = posicoes
 
@@ -208,342 +187,457 @@ def _atribuir_posicoes_x(agg: pd.DataFrame, nivel: str) -> pd.DataFrame:
 # endregion
 
 
-# region ====================== SESSÃO 4: Renderização Plotly ==================
+# region ====================== SESSÃO 4: Formato ECharts =====================
 
-def _cor_por_score(score: float, score_max: float) -> str:
-    """Retorna cor hex interpolada entre verde e vermelho pelo score relativo."""
+def _score_para_cor(score: float, score_max: float) -> str:
+    """Interpola cor hex entre verde e vermelho pelo score relativo."""
     if score_max == 0:
         return COR_OK
-    ratio = min(score / score_max, 1.0)
-    if ratio < 0.5:
-        # verde → amarelo
-        t = ratio * 2
-        r = int(22  + t * (245 - 22))
-        g = int(163 + t * (158 - 163))
-        b = int(74  + t * (11  - 74))
+    t = min(score / score_max, 1.0)
+    if t < 0.5:
+        r = int(22  + (t * 2) * (245 - 22))
+        g = int(163 + (t * 2) * (158 - 163))
+        b = int(74  + (t * 2) * (11  - 74))
     else:
-        # amarelo → vermelho
-        t = (ratio - 0.5) * 2
-        r = int(245 + t * (220 - 245))
-        g = int(158 + t * (38  - 158))
-        b = int(11  + t * (38  - 11))
-    return f"rgb({r},{g},{b})"
+        t2 = (t - 0.5) * 2
+        r = int(245 + t2 * (220 - 245))
+        g = int(158 + t2 * (38  - 158))
+        b = int(11  + t2 * (38  - 11))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def _construir_figura(agg: pd.DataFrame, gerencia: str, nivel: str) -> go.Figure:
+def _tamanho_bolha(qtd: int, qtd_max: int,
+                   min_size: int = 14, max_size: int = 55) -> int:
+    """Normaliza tamanho da bolha entre min_size e max_size."""
+    if qtd_max == 0:
+        return min_size
+    return int(min_size + (qtd / qtd_max) * (max_size - min_size))
+
+
+def _ponto_echarts(row: pd.Series, score_max: float, qtd_max: int) -> dict:
     """
-    Constrói a figura Plotly do unifilar.
-
-    Layout:
-    - Linha "trilho" horizontal conectando os pontos
-    - Bolhas = notas agregadas (tamanho ∝ qtd, cor ∝ score)
-    - Hover rico com nome completo, qtd, score, lead time, top defeitos
-    - Labels abaixo das bolhas (nomes curtos)
+    Converte uma linha do DataFrame agregado para o formato de ponto ECharts.
+    Usado tanto em scatter quanto em effectScatter.
     """
-    if agg.empty:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="Sem dados para exibir",
-            x=0.5, y=0.5, xref="paper", yref="paper",
-            showarrow=False, font=dict(size=16, color="#6b7280"),
-        )
-        return fig
+    cor = _score_para_cor(row["score_med"], score_max)
+    tam = _tamanho_bolha(int(row["qtd"]), qtd_max)
 
-    score_max = agg["score_med"].max() if agg["score_med"].max() > 0 else 1.0
-
-    # Normaliza tamanho das bolhas (mín 18, máx 60 px)
-    qtd_max = agg["qtd"].max() if agg["qtd"].max() > 0 else 1
-    agg["_size"] = 18 + (agg["qtd"] / qtd_max) * 42
-
-    fig = go.Figure()
-
-    # ── Linhas de trilho (uma por disciplina/lane) ──────────────────────────
-    for disciplina, y_val, cor_linha in [
-        ("VP", Y_VP, COR_VP),
-        ("EE", Y_EE, COR_EE),
-    ]:
-        sub = agg[agg["y_pos"] == y_val].sort_values("x_pos")
-        if sub.empty:
-            continue
-        fig.add_trace(go.Scatter(
-            x=sub["x_pos"],
-            y=[y_val] * len(sub),
-            mode="lines",
-            line=dict(color=cor_linha, width=3, dash="solid"),
-            name=f"Trilho {disciplina}",
-            hoverinfo="skip",
-            showlegend=True,
-        ))
-
-    # Trilho central (se disciplina única / visão geral)
-    sub_geral = agg[agg["y_pos"] == Y_GERAL].sort_values("x_pos")
-    if not sub_geral.empty:
-        fig.add_trace(go.Scatter(
-            x=sub_geral["x_pos"],
-            y=[Y_GERAL] * len(sub_geral),
-            mode="lines",
-            line=dict(color=COR_TRILHO, width=3),
-            name="Trilho",
-            hoverinfo="skip",
-            showlegend=False,
-        ))
-
-    # ── Bolhas por linha ────────────────────────────────────────────────────
-    cores = agg["score_med"].apply(lambda s: _cor_por_score(s, score_max))
-
-    hover_texts = []
-    for _, row in agg.iterrows():
-        ger_tag = f"<b>Gerência: {row.get('gerencia_label', gerencia)}</b><br>" \
-                  if "gerencia_label" in row else ""
-        disc_tag = f"Disciplina: {row.get('disciplina','—')}<br>"
-        texto = (
-            f"<b>{row['label']}</b><br>"
-            f"{ger_tag}{disc_tag}"
-            f"📌 Notas: <b>{int(row['qtd']):,}</b><br>"
-            f"⚡ Score médio: <b>{row['score_med']:.1f}</b><br>"
-            f"⏱️ Lead time médio: <b>{row['lt_med']:.0f} dias</b><br>"
-            f"─────────────<br>"
-            f"Top defeitos:<br>{row['top_defeitos']}"
-        )
-        hover_texts.append(texto)
-
-    fig.add_trace(go.Scatter(
-        x=agg["x_pos"],
-        y=agg["y_pos"],
-        mode="markers+text",
-        marker=dict(
-            size=agg["_size"],
-            color=cores,
-            opacity=0.88,
-            line=dict(color="white", width=2),
-        ),
-        text=agg["label"].apply(
-            lambda s: s[:20] + "…" if len(s) > 20 else s
-        ),
-        textposition="bottom center",
-        textfont=dict(size=9, color="#1f2937"),
-        hovertext=hover_texts,
-        hoverinfo="text",
-        hoverlabel=dict(
-            bgcolor="white",
-            bordercolor="#1e3a5f",
-            font_size=12,
-            font_color="#1f2937",
-        ),
-        name="Notas",
-        showlegend=False,
-    ))
-
-    # ── Rótulos de ramal (faixa de fundo entre grupos) ──────────────────────
-    if nivel in ("Pátio", "Trecho"):
-        ramais_grp = agg.groupby("ramal_sigla")["x_pos"].agg(["min", "max"]).reset_index()
-        for _, rg in ramais_grp.iterrows():
-            mid_x = (rg["min"] + rg["max"]) / 2
-            fig.add_annotation(
-                x=mid_x, y=1.55,
-                text=f"<b>{nome_ramal(rg['ramal_sigla'], 'completo_sigla')}</b>",
-                showarrow=False,
-                font=dict(size=9, color="#1e3a5f"),
-                bgcolor="rgba(30,58,95,0.08)",
-                bordercolor="#1e3a5f",
-                borderwidth=1,
-                borderpad=3,
-            )
-            # linha divisória entre ramais
-            if rg["min"] > agg["x_pos"].min():
-                fig.add_vline(
-                    x=rg["min"] - 0.75,
-                    line=dict(color="#e5e7eb", width=1, dash="dot"),
-                )
-
-    # ── Labels fixos de lane ─────────────────────────────────────────────────
-    x_label = agg["x_pos"].min() - 1.2 if not agg.empty else -1
-    if agg["y_pos"].isin([Y_VP]).any():
-        fig.add_annotation(x=x_label, y=Y_VP, text="<b>VP</b>",
-                           showarrow=False, font=dict(size=11, color=COR_VP))
-    if agg["y_pos"].isin([Y_EE]).any():
-        fig.add_annotation(x=x_label, y=Y_EE, text="<b>EE</b>",
-                           showarrow=False, font=dict(size=11, color=COR_EE))
-
-    # ── Layout geral ─────────────────────────────────────────────────────────
-    titulo_nivel = {"Ramal": "por Ramal", "Pátio": "por Pátio", "Trecho": "por Trecho"}
-    x_range = [
-        agg["x_pos"].min() - 1.5,
-        agg["x_pos"].max() + 1.5,
-    ] if not agg.empty else [-1, 10]
-
-    fig.update_layout(
-        title=dict(
-            text=f"🗺️ Unifilar Dual VP + EE — {titulo_nivel.get(nivel, '')}",
-            font=dict(size=14, color="#1f2937"),
-            x=0,
-        ),
-        xaxis=dict(
-            showgrid=False, zeroline=False,
-            showticklabels=False,
-            range=x_range,
-        ),
-        yaxis=dict(
-            showgrid=False, zeroline=False,
-            showticklabels=False,
-            range=[-2.0, 2.2],
-            fixedrange=True,
-        ),
-        plot_bgcolor=COR_BG,
-        paper_bgcolor="white",
-        height=420,
-        margin=dict(l=60, r=20, t=50, b=60),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom", y=-0.18,
-            xanchor="center", x=0.5,
-            font=dict(size=11),
-        ),
-        hovermode="closest",
-        dragmode="pan",
+    tooltip_txt = (
+        f"{row['label']}\n"
+        f"Disciplina: {row['disciplina']}\n"
+        f"📌 Notas: {int(row['qtd']):,}\n"
+        f"⚡ Score médio: {row['score_med']:.1f}\n"
+        f"⏱️ Lead time: {row['lt_med']:.0f} dias\n"
+        f"─────────────\n"
+        f"Top defeitos:\n{row['top_defeitos']}"
     )
 
-    # Barra de cor (legenda de score)
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode="markers",
-        marker=dict(
-            colorscale=COLORSCALE,
-            showscale=True,
-            cmin=0, cmax=score_max,
-            colorbar=dict(
-                title=dict(text="Score", side="right"),
-                thickness=12, len=0.6,
-                tickfont=dict(size=10),
-            ),
-        ),
-        hoverinfo="skip",
-        showlegend=False,
-    ))
-
-    return fig
+    return {
+        "value":  [float(row["x_pos"]), float(row["y_pos"]), float(row["score_med"])],
+        "name":   row["label"],
+        "symbol": "circle",
+        "symbolSize": tam,
+        "itemStyle": {"color": cor, "borderColor": "#ffffff", "borderWidth": 2},
+        "label": {
+            "show":     True,
+            "position": "bottom",
+            "formatter": row["label"][:18] + ("…" if len(row["label"]) > 18 else ""),
+            "fontSize": 9,
+            "color":   "#374151",
+        },
+        "_tooltip": tooltip_txt,  # campo auxiliar (não usado pelo ECharts diretamente)
+    }
 
 # endregion
 
 
-# region ====================== SESSÃO 5: Ponto de entrada =====================
+# region ====================== SESSÃO 5: Construção do option ECharts =========
+
+def _trilhos_echarts(agg: pd.DataFrame) -> list:
+    """
+    Gera as séries de linhas que representam os trilhos VP e EE.
+    Conecta os pontos de cada lane em ordem de x_pos.
+    """
+    series = []
+    for lane_disc, y_val, cor_linha, nome_lane in [
+        ("VP",    Y_VP,    COR_VP, "Trilho VP"),
+        ("EE",    Y_EE,    COR_EE, "Trilho EE"),
+        ("VP+EE", Y_GERAL, "#94a3b8", "Trilho"),
+    ]:
+        sub = agg[agg["y_pos"] == y_val].sort_values("x_pos")
+        if sub.empty:
+            continue
+        series.append({
+            "type": "line",
+            "name": nome_lane,
+            "data": [[float(r["x_pos"]), float(r["y_pos"])] for _, r in sub.iterrows()],
+            "symbol": "none",
+            "lineStyle": {"color": cor_linha, "width": 3, "type": "solid"},
+            "z": 1,
+            "silent": True,
+            "legend": {"show": False},
+        })
+    return series
+
+
+def _construir_option(agg: pd.DataFrame, gerencia: str, nivel: str) -> dict:
+    """
+    Monta o dict completo do option ECharts.
+
+    Lógica de separação:
+    - Pontos críticos (flag critico=True)  → effectScatter (pulsante)
+    - Pontos normais  (flag critico=False) → scatter (estático)
+    - Trilhos VP e EE                      → line
+    """
+    if agg.empty:
+        return {
+            "graphic": [{
+                "type": "text",
+                "left": "center", "top": "middle",
+                "style": {"text": "Sem dados para exibir", "fontSize": 16, "fill": "#6b7280"},
+            }]
+        }
+
+    score_max = agg["score_med"].max() if agg["score_med"].max() > 0 else 1.0
+    qtd_max   = int(agg["qtd"].max())  if agg["qtd"].max()   > 0 else 1
+
+    criticos = agg[agg["critico"]].copy()
+    normais  = agg[~agg["critico"]].copy()
+
+    # Dados para as séries
+    dados_criticos = [_ponto_echarts(r, score_max, qtd_max) for _, r in criticos.iterrows()]
+    dados_normais  = [_ponto_echarts(r, score_max, qtd_max) for _, r in normais.iterrows()]
+
+    # Limites do eixo X
+    x_min = float(agg["x_pos"].min()) - 1.5
+    x_max = float(agg["x_pos"].max()) + 1.5
+
+    series = []
+
+    # ── Trilhos (linhas) ──────────────────────────────────────────────────────
+    series.extend(_trilhos_echarts(agg))
+
+    # ── Scatter normal (pontos não críticos) ──────────────────────────────────
+    if dados_normais:
+        series.append({
+            "type":      "scatter",
+            "name":      "Normal",
+            "data":      dados_normais,
+            "z":         3,
+            "emphasis":  {"scale": 1.3},
+        })
+
+    # ── effectScatter (hot-spots pulsantes) ───────────────────────────────────
+    if dados_criticos:
+        series.append({
+            "type": "effectScatter",
+            "name": "🔴 Hot-spot crítico",
+            "data": dados_criticos,
+            "z":    4,
+            "showEffectOn": "render",       # pulsa sempre
+            "rippleEffect": {
+                "brushType": "stroke",      # anel irradiante
+                "scale":     3.5,           # tamanho do pulso
+                "period":    3,             # velocidade (segundos)
+                "color":     COR_CRIT,
+            },
+            "emphasis": {"scale": 1.4},
+        })
+
+    titulo_nivel = {"Ramal": "por Ramal", "Pátio": "por Pátio", "Trecho": "por Trecho"}
+
+    option = {
+        "backgroundColor": COR_BG,
+        "title": {
+            "text":    f"Unifilar Dual VP+EE — {titulo_nivel.get(nivel, '')}",
+            "subtext": f"Gerência {gerencia} · 🔴 Pulsante = hot-spot crítico (top 25% score)",
+            "left":    "left",
+            "textStyle":    {"color": "#1f2937", "fontSize": 14, "fontWeight": "bold"},
+            "subtextStyle": {"color": "#6b7280", "fontSize": 11},
+        },
+        "tooltip": {
+            "trigger":         "item",
+            "backgroundColor": "rgba(255,255,255,0.98)",
+            "borderColor":     COR_VP,
+            "borderWidth":     2,
+            "padding":         [10, 14],
+            "extraCssText":    "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
+            "textStyle":       {"color": "#1f2937", "fontSize": 12},
+            # Formatter em JS — exibe o campo 'name' + values formatados
+            "formatter": """function(p){
+                if(!p.data || !p.value) return p.name || '';
+                var d = p.data;
+                var lines = [
+                    '<b>' + (d.name||'') + '</b>',
+                ];
+                if(d._tooltip){
+                    lines = lines.concat(d._tooltip.split('\\n'));
+                }
+                return lines.join('<br/>');
+            }""",
+        },
+        "legend": {
+            "data":   ["Normal", "🔴 Hot-spot crítico"],
+            "bottom": 0,
+            "textStyle": {"color": "#374151", "fontSize": 11},
+        },
+        "grid": {
+            "left":         "8%",
+            "right":        "5%",
+            "top":          "15%",
+            "bottom":       "18%",
+            "containLabel": False,
+        },
+        "xAxis": {
+            "type":        "value",
+            "min":          x_min,
+            "max":          x_max,
+            "show":         False,
+            "axisLine":     {"show": False},
+            "splitLine":    {"show": False},
+        },
+        "yAxis": {
+            "type":      "value",
+            "min":       -2.2,
+            "max":        2.2,
+            "show":       False,
+            "axisLine":  {"show": False},
+            "splitLine": {"show": False},
+        },
+        # ── dataZoom: zoom horizontal (simula km quando há coordenadas reais) ──
+        "dataZoom": [
+            {
+                "type":       "slider",          # barra deslizante abaixo do gráfico
+                "xAxisIndex": 0,
+                "start":      0,
+                "end":        100,
+                "height":     18,
+                "bottom":     "8%",
+                "borderColor": "#e5e7eb",
+                "fillerColor": "rgba(30,58,95,0.15)",
+                "handleStyle": {"color": COR_VP},
+                "textStyle":   {"color": "#6b7280"},
+                "labelFormatter": "",            # sem labels numéricos (eixo oculto)
+            },
+            {
+                "type":       "inside",          # zoom com scroll do mouse
+                "xAxisIndex": 0,
+                "start":      0,
+                "end":        100,
+            },
+        ],
+        # Labels fixos de lane (VP / EE)
+        "graphic": _labels_lane(agg, x_min),
+        "series":  series,
+        "animation": True,
+        "animationDuration": 800,
+    }
+
+    return option
+
+
+def _labels_lane(agg: pd.DataFrame, x_min: float) -> list:
+    """
+    Renderiza os labels fixos 'VP' e 'EE' no lado esquerdo do gráfico.
+    Usa coordenadas de data (não de pixel) para alinhar com as lanes.
+    """
+    labels = []
+
+    if agg["y_pos"].isin([Y_VP]).any():
+        labels.append({
+            "type": "text",
+            "left": "2%", "top": "28%",
+            "style": {
+                "text":        "VP",
+                "fontSize":    13,
+                "fontWeight":  "bold",
+                "fill":        COR_VP,
+            },
+        })
+
+    if agg["y_pos"].isin([Y_EE]).any():
+        labels.append({
+            "type": "text",
+            "left": "2%", "top": "62%",
+            "style": {
+                "text":       "EE",
+                "fontSize":   13,
+                "fontWeight": "bold",
+                "fill":       COR_EE,
+            },
+        })
+
+    return labels
+
+# endregion
+
+
+# region ====================== SESSÃO 6: Ponto de entrada ====================
+
+def _fallback_plotly(agg: pd.DataFrame, gerencia: str, nivel: str):
+    """
+    Renderização alternativa em Plotly quando streamlit-echarts não está instalado.
+    Mantém a mesma lógica de aggregação e cores, sem o efeito de pulso.
+    """
+    import plotly.graph_objects as go
+
+    def _hex_rgba(h, a=0.15):
+        h = h.lstrip("#")
+        r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
+        return f"rgba({r},{g},{b},{a})"
+
+    score_max = agg["score_med"].max() or 1.0
+    qtd_max   = int(agg["qtd"].max()) or 1
+
+    fig = go.Figure()
+
+    # Trilhos
+    for y_val, cor, nome in [(Y_VP, COR_VP, "VP"), (Y_EE, COR_EE, "EE")]:
+        sub = agg[agg["y_pos"] == y_val].sort_values("x_pos")
+        if not sub.empty:
+            fig.add_trace(go.Scatter(
+                x=sub["x_pos"], y=[y_val]*len(sub), mode="lines",
+                line=dict(color=cor, width=3), name=f"Trilho {nome}", hoverinfo="skip",
+            ))
+
+    # Bolhas
+    for is_crit, marker_sym in [(False, "circle"), (True, "circle-open")]:
+        sub = agg[agg["critico"] == is_crit]
+        if sub.empty:
+            continue
+        cores = [_score_para_cor(s, score_max) for s in sub["score_med"]]
+        sizes = [_tamanho_bolha(int(q), qtd_max) for q in sub["qtd"]]
+        fig.add_trace(go.Scatter(
+            x=sub["x_pos"], y=sub["y_pos"], mode="markers+text",
+            marker=dict(size=sizes, color=cores, symbol=marker_sym,
+                        line=dict(color="white", width=2), opacity=0.9),
+            text=sub["label"].apply(lambda s: s[:18]+"…" if len(s)>18 else s),
+            textposition="bottom center", textfont=dict(size=9),
+            name="🔴 Crítico" if is_crit else "Normal", hoverinfo="text",
+            hovertext=[
+                f"<b>{r['label']}</b><br>📌 {int(r['qtd']):,} notas<br>"
+                f"⚡ Score: {r['score_med']:.1f}<br>⏱️ {r['lt_med']:.0f} dias"
+                for _, r in sub.iterrows()
+            ],
+        ))
+
+    fig.update_layout(
+        height=420, plot_bgcolor=COR_BG, paper_bgcolor="white",
+        xaxis=dict(visible=False), yaxis=dict(visible=False, range=[-2.2, 2.2]),
+        margin=dict(l=60, r=20, t=40, b=40),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("⚠️ streamlit-echarts não instalado — usando Plotly (sem animação)")
+
 
 def render_unifilar_dual(df: pd.DataFrame, gerencia: str = "SP"):
     """
-    Renderiza o unifilar dual VP+EE com nível de detalhe configurável.
+    Ponto de entrada do Unifilar Dual VP+EE.
 
-    Controles exibidos acima do gráfico:
-    - Nível de agrupamento: Ramal | Pátio | Trecho
-    - Multiselect de ramais (filtra quais ramais aparecem)
-    - Checkbox para mostrar apenas hot-spots críticos
+    Exibe ECharts com effectScatter (pulsante) para hot-spots críticos.
+    Fallback automático para Plotly se streamlit-echarts não estiver instalado.
+
+    Controles:
+        • Nível de detalhe — Ramal (padrão) | Pátio | Trecho
+        • Multiselect de ramais — nome completo (ANTT/MRS)
+        • Checkbox — Só críticos
 
     Args:
-        df: DataFrame já filtrado e com score calculado
+        df: DataFrame filtrado com score calculado
         gerencia: 'SP', 'VP' ou 'GERAL'
     """
     if df.empty:
-        st.info("ℹ️ Sem dados para o unifilar. Aplique um upload de dados primeiro.")
+        st.info("ℹ️ Sem dados para o unifilar. Faça upload de planilhas primeiro.")
         return
 
     # ── Controles acima do gráfico ───────────────────────────────────────────
-    col_nivel, col_ramais, col_crit = st.columns([1, 3, 1])
+    col_niv, col_ram, col_crit = st.columns([1, 3, 1])
 
-    with col_nivel:
+    with col_niv:
         nivel = st.selectbox(
-            "🔎 Nível de detalhe",
-            options=["Ramal", "Pátio", "Trecho"],
+            "🔎 Detalhe",
+            ["Ramal", "Pátio", "Trecho"],
             index=0,
-            help=(
-                "Ramal = visão ampla (1 bolha por ramal)\n"
-                "Pátio = detalha os pátios de origem\n"
-                "Trecho = máximo detalhe (par Origem→Destino)"
-            ),
             key=f"unif_nivel_{gerencia}",
+            help="Ramal = visão ampla · Pátio = por estação · Trecho = máximo detalhe",
         )
 
-    with col_ramais:
-        # Ramais disponíveis nos dados (normalizados)
+    with col_ram:
         if "ramal" in df.columns:
-            ramais_disp = sorted(df["ramal"].dropna().unique())
+            siglas_disp = sorted(df["ramal"].dropna().unique().tolist())
         else:
-            ramais_disp = []
+            siglas_disp = []
 
-        # Monta labels nome completo → sigla
-        opcoes_label = {
-            nome_ramal(s, "completo_sigla"): s
-            for s in ramais_disp
-        }
+        opcoes_label = {nome_ramal(s, "completo_sigla"): s for s in siglas_disp}
 
         selecionados_nome = st.multiselect(
             "🚂 Ramais visíveis",
             options=list(opcoes_label.keys()),
             default=list(opcoes_label.keys()),
-            help="Desmarque ramais para removê-los do unifilar",
             key=f"unif_ramais_{gerencia}",
+            help="Desmarque ramais para removê-los do unifilar",
         )
-
-        # Converte de volta para siglas (uso interno no DataFrame)
-        ramais_sel_sigla = [opcoes_label[n] for n in selecionados_nome]
+        ramais_sel = [opcoes_label[n] for n in selecionados_nome if n in opcoes_label]
 
     with col_crit:
         apenas_criticos = st.checkbox(
             "🔴 Só críticos",
             value=False,
-            help="Mostra apenas pontos com score acima de 75% do máximo",
             key=f"unif_crit_{gerencia}",
+            help="Mostra apenas hot-spots (score top 25%)",
         )
 
-    # ── Filtra pelos ramais selecionados ─────────────────────────────────────
+    # ── Filtra DataFrame ─────────────────────────────────────────────────────
     df_plot = df.copy()
-
-    if ramais_sel_sigla and "ramal" in df_plot.columns:
-        df_plot = df_plot[df_plot["ramal"].isin(ramais_sel_sigla)]
+    if ramais_sel and "ramal" in df_plot.columns:
+        df_plot = df_plot[df_plot["ramal"].isin(ramais_sel)]
 
     if df_plot.empty:
         st.warning("Nenhum dado com os ramais selecionados.")
         return
 
-    # ── Filtra hot-spots críticos se pedido ──────────────────────────────────
     if apenas_criticos and "score" in df_plot.columns:
-        limiar = df_plot["score"].quantile(0.75)
-        df_plot = df_plot[df_plot["score"] >= limiar]
+        lim = df_plot["score"].quantile(PERCENTIL_CRITICO)
+        df_plot = df_plot[df_plot["score"] >= lim]
         if df_plot.empty:
             st.info("Sem hot-spots críticos com os filtros aplicados.")
             return
 
-    # ── Agrega no nível escolhido ────────────────────────────────────────────
+    # ── Agrega e posiciona ───────────────────────────────────────────────────
     agg = _agregar(df_plot, nivel)
-
     if agg.empty:
         st.warning("Dados insuficientes para montar o unifilar.")
         return
 
-    # ── Atribui posições x ───────────────────────────────────────────────────
-    agg = _atribuir_posicoes_x(agg, nivel)
+    agg = _posicionar_x(agg, nivel)
 
-    # ── Constrói e exibe figura ──────────────────────────────────────────────
-    fig = _construir_figura(agg, gerencia, nivel)
-    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+    # ── Renderiza ─────────────────────────────────────────────────────────────
+    if ECHARTS_OK:
+        option = _construir_option(agg, gerencia, nivel)
+        st_echarts(
+            options=option,
+            height="450px",
+            key=f"unif_echarts_{gerencia}_{nivel}",
+        )
+    else:
+        _fallback_plotly(agg, gerencia, nivel)
 
-    # ── Resumo em texto abaixo do gráfico ────────────────────────────────────
-    n_pontos = len(agg)
-    n_ramais = agg["ramal_sigla"].nunique() if "ramal_sigla" in agg.columns else "?"
+    # ── Resumo + tabela detalhada ─────────────────────────────────────────────
+    n_crit = int(agg["critico"].sum())
+    n_tot  = len(agg)
     st.caption(
-        f"📍 {n_pontos} pontos exibidos · "
-        f"🚂 {n_ramais} ramal(is) · "
-        f"Nível: {nivel} · "
-        f"Use o scroll do mouse para zoom"
+        f"📍 {n_tot} pontos · 🔴 {n_crit} hot-spots críticos · "
+        f"🚂 {agg['ramal_sigla'].nunique()} ramal(is) · "
+        f"Nível: {nivel} · Scroll = zoom horizontal"
     )
 
-    # ── Tabela drill-down (expander) ─────────────────────────────────────────
-    with st.expander("📋 Ver tabela detalhada dos pontos"):
-        tab_exib = agg[["label", "disciplina", "qtd", "score_med", "lt_med", "top_defeitos"]].copy()
-        tab_exib.columns = ["Ponto", "Disciplina", "Qtd. Notas", "Score Médio", "Lead Time (dias)", "Top Defeitos"]
-        tab_exib["Score Médio"] = tab_exib["Score Médio"].round(1)
-        tab_exib["Lead Time (dias)"] = tab_exib["Lead Time (dias)"].round(0).astype(int)
-        tab_exib = tab_exib.sort_values("Score Médio", ascending=False)
-        # Remove HTML das células de defeitos para exibição limpa
-        tab_exib["Top Defeitos"] = tab_exib["Top Defeitos"].str.replace("<br>", " | ", regex=False).str.replace("•", "→", regex=False)
-        st.dataframe(tab_exib, use_container_width=True, hide_index=True)
+    with st.expander("📋 Tabela detalhada dos pontos"):
+        tab = agg[["label", "disciplina", "qtd", "score_med", "lt_med", "critico"]].copy()
+        tab.columns = ["Ponto", "Disciplina", "Qtd. Notas", "Score Médio", "Lead Time (dias)", "Crítico?"]
+        tab["Score Médio"]       = tab["Score Médio"].round(1)
+        tab["Lead Time (dias)"]  = tab["Lead Time (dias)"].round(0).astype(int)
+        tab["Crítico?"]          = tab["Crítico?"].map({True: "🔴 Sim", False: "🟢 Não"})
+        tab = tab.sort_values("Score Médio", ascending=False)
+        st.dataframe(tab, use_container_width=True, hide_index=True)
 
 # endregion
