@@ -359,8 +359,8 @@ def _aplicar_km_formato_d(df: pd.DataFrame, df_raw: pd.DataFrame) -> pd.DataFram
     s_fim     = _col("Km Fim")
     s_fim_off = _col("Maker_Dist_End_1")
 
-    df["km_real"] = [_extrair_km_formato_d(a, b) for a, b in zip(s_inicio, s_offset)]
-    df["km_fim"]  = [_extrair_km_formato_d(a, b) for a, b in zip(s_fim, s_fim_off)]
+    df["km_real"]     = [_extrair_km_formato_d(a, b) for a, b in zip(s_inicio, s_offset)]
+    df["km_fim_real"] = [_extrair_km_formato_d(a, b) for a, b in zip(s_fim, s_fim_off)]
     return df
 
 # endregion
@@ -539,10 +539,9 @@ def processar_planilha(
         df["familia_defeito"] = "Outros"
         df.setdefault("defeito_legivel", pd.Series("—", index=df.index))
 
-    # Passo 10: Status amigável + alias status_nota
+    # Passo 10: Status amigável
     if "status_usuario" in df.columns:
         df["status_amigavel"] = df["status_usuario"].apply(_mapear_status_amigavel)
-        df["status_nota"]     = df["status_usuario"]  # alias para compatibilidade
 
     # Passo 11: Peso prioridade
     if "prioridade" in df.columns:
@@ -573,12 +572,11 @@ def df_para_registros_supabase(df: pd.DataFrame, upload_id: str) -> list[dict]:
     colunas_notas = [
         "numero_nota", "ordem", "data_nota", "data_encerramento", "data_planejada",
         "local_instalacao", "ramal", "trecho", "origem", "destino", "linha",
-        "ativo", "km_real", "km_fim", "subsistema",
+        "ativo", "km_real", "km_fim_real", "subsistema",
         "prioridade", "peso_prio", "score",
         "code_codificacao", "defeito_legivel", "familia_cod", "familia_defeito",
         "tipo_nota", "tipo_atividade",
-        "status_usuario", "status_nota", "status_amigavel", "status_final",
-        "status_sistema",
+        "status_usuario", "status_amigavel", "status_final",
         "centro_trab", "centro_planejamento", "gerencia_origem", "modificado_por",
         "lead_time_dias", "descricao", "texto_longo",
         "gerencia", "disciplina",
