@@ -16,7 +16,7 @@ import streamlit as st
 # region ====================== SESSÃO 1: Configuração da Página ======================
 # ⚠️ st.set_page_config DEVE ser a PRIMEIRA chamada Streamlit — antes de qualquer import
 st.set_page_config(
-    page_title="MRS Nexus",
+    page_title="MRS Sentinel",
     page_icon="🚂",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -24,7 +24,7 @@ st.set_page_config(
         "Get Help":     None,
         "Report a bug": None,
         "About": (
-            "**MRS Nexus** — Plataforma de Inteligência de Manutenção da Malha\n\n"
+            "**MRS Sentinel** — Plataforma de Inteligência de Manutenção da Malha\n\n"
             "MRS Logística · Gerência de Via Permanente e Obras\n\n"
             "v1.0.0 · Sprint 1 — Fundação"
         ),
