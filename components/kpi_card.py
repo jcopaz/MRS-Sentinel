@@ -32,6 +32,18 @@ COR_WARN     = "#f59e0b"
 COR_OK       = "#16a34a"
 COR_NA       = "#94a3b8"
 
+
+def _hex_para_rgba(hex_cor: str, opacidade: float = 0.13) -> str:
+    """
+    Converte cor hex (#rrggbb) para rgba() aceito pelo Plotly.
+    Plotly NÃO aceita hex com canal alpha (#rrggbbaa).
+    """
+    hex_cor = hex_cor.lstrip("#")
+    r = int(hex_cor[0:2], 16)
+    g = int(hex_cor[2:4], 16)
+    b = int(hex_cor[4:6], 16)
+    return f"rgba({r},{g},{b},{opacidade})"
+
 # endregion
 
 
@@ -134,14 +146,14 @@ def _sparkline(df: pd.DataFrame, col: str, agg: str = "mean",
     if grp.empty:
         return fig
 
-    # Área preenchida suave
+    # Área preenchida suave — usa rgba() pois Plotly não aceita hex+alpha
     fig.add_trace(go.Scatter(
         x=grp.index,
         y=grp.values,
         mode="lines",
         line=dict(color=cor, width=2),
         fill="tozeroy",
-        fillcolor=cor + "22",   # 13% opacidade
+        fillcolor=_hex_para_rgba(cor, 0.13),
         hoverinfo="skip",
     ))
 
