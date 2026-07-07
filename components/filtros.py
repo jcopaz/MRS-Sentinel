@@ -119,14 +119,16 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
     """
     uid = gerencia  # prefixo de key único por gerência
 
-    # ── Datas mín/máx (calculadas fora do form, pois dependem do df bruto) ───
-    data_min = date(2018, 1, 1)
+    # ── Datas mín/máx ─────────────────────────────────────────────────────────
+    # data_max = SEMPRE hoje (não deriva dos dados — evita corte de notas 2026
+    # quando há datas mal parseadas que ficam como NaT e puxam o max() p/ 2025)
     data_max = date.today()
+    data_min = date(2018, 1, 1)
     if "data_nota" in df.columns:
         datas_validas = pd.to_datetime(df["data_nota"], errors="coerce").dropna()
         if not datas_validas.empty:
             data_min = datas_validas.min().date()
-            data_max = datas_validas.max().date()
+            # ⚠️ NÃO sobrescreve data_max — mantém date.today()
 
     # ── Botão Limpar (fora do form — limpa session_state e rerun imediato) ───
     if st.button(
@@ -209,29 +211,61 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
         else:
             patios_sel = []
 
-        # 5. Período
-        st.markdown("**📅 Período**")
-        col_ini, col_fim = st.columns(2)
-        with col_ini:
-            data_ini = st.date_input(
-                "De",
+        # 5. Período — Abertura da Nota
+        st.markdown("**📅 Abertura da Nota**")
+        col_ab1, col_ab2 = st.columns(2)
+        with col_ab1:
+            data_abertura_ini = st.date_input(
+                "Início",
                 value=data_min,
-                min_value=data_min,
+                min_value=date(2018, 1, 1),
                 max_value=data_max,
-                key=f"filtro_data_ini_{uid}",
+                key=f"filtro_ab_ini_{uid}",
+                format="DD/MM/YYYY",
             )
-        with col_fim:
-            data_fim = st.date_input(
-                "Até",
+        with col_ab2:
+            data_abertura_fim = st.date_input(
+                "Fim",
                 value=data_max,
-                min_value=data_min,
+                min_value=date(2018, 1, 1),
                 max_value=data_max,
-                key=f"filtro_data_fim_{uid}",
+                key=f"filtro_ab_fim_{uid}",
+                format="DD/MM/YYYY",
             )
+        if data_abertura_ini > data_abertura_fim:
+            st.warning("⚠️ Início de abertura maior que o fim.")
+            data_abertura_ini, data_abertura_fim = data_abertura_fim, data_abertura_ini
 
-        if data_ini > data_fim:
-            st.warning("⚠️ Data inicial maior que a final.")
-            data_ini, data_fim = data_fim, data_ini
+        # 6. Período — Encerramento da Nota (opcional)
+        tem_enc = "data_encerramento" in df.columns
+        st.markdown("**📅 Encerramento da Nota**")
+        if not tem_enc:
+            st.caption("_(coluna data_encerramento não disponível nos dados)_")
+            data_enc_ini = None
+            data_enc_fim = None
+        else:
+            col_en1, col_en2 = st.columns(2)
+            with col_en1:
+                data_enc_ini = st.date_input(
+                    "Início",
+                    value=date(2018, 1, 1),
+                    min_value=date(2018, 1, 1),
+                    max_value=data_max,
+                    key=f"filtro_enc_ini_{uid}",
+                    format="DD/MM/YYYY",
+                )
+            with col_en2:
+                data_enc_fim = st.date_input(
+                    "Fim",
+                    value=data_max,
+                    min_value=date(2018, 1, 1),
+                    max_value=data_max,
+                    key=f"filtro_enc_fim_{uid}",
+                    format="DD/MM/YYYY",
+                )
+            if data_enc_ini > data_enc_fim:
+                st.warning("⚠️ Início de encerramento maior que o fim.")
+                data_enc_ini, data_enc_fim = data_enc_fim, data_enc_ini
 
         # Botão Aplicar (dentro do form — dispara o rerun com novos valores)
         st.form_submit_button(
@@ -240,13 +274,18 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
             type="primary",
         )
 
+    # Mantém data_ini/data_fim como aliases de abertura (backward compat)
     return {
-        "centros":  centros_sel,
-        "ramais":   ramais_sel,
-        "trechos":  trechos_sel,
-        "patios":   patios_sel,
-        "data_ini": data_ini,
-        "data_fim": data_fim,
+        "centros":          centros_sel,
+        "ramais":           ramais_sel,
+        "trechos":          trechos_sel,
+        "patios":           patios_sel,
+        "data_ini":         data_abertura_ini,   # alias backward compat
+        "data_fim":         data_abertura_fim,   # alias backward compat
+        "data_abertura_ini": data_abertura_ini,
+        "data_abertura_fim": data_abertura_fim,
+        "data_enc_ini":     data_enc_ini,
+        "data_enc_fim":     data_enc_fim,
     }
 
 # endregion

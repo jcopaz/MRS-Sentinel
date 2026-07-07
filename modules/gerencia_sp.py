@@ -116,13 +116,26 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     if patios and "origem" in df.columns:
         df = df[df["origem"].isin(patios)]
 
-    # Filtro de período
-    data_ini = filtros.get("data_ini")
-    data_fim = filtros.get("data_fim")
-    if data_ini and "data_nota" in df.columns:
-        df = df[df["data_nota"] >= pd.Timestamp(data_ini)]
-    if data_fim and "data_nota" in df.columns:
-        df = df[df["data_nota"] <= pd.Timestamp(data_fim)]
+    # Filtro de Abertura da Nota
+    # Usa dt.date() para evitar bug de meia-noite (pd.Timestamp corta notas do dia)
+    data_ab_ini = filtros.get("data_abertura_ini") or filtros.get("data_ini")
+    data_ab_fim = filtros.get("data_abertura_fim") or filtros.get("data_fim")
+    if "data_nota" in df.columns:
+        col = pd.to_datetime(df["data_nota"], errors="coerce")
+        if data_ab_ini:
+            df = df[col.dt.date >= data_ab_ini]
+        if data_ab_fim:
+            df = df[col.dt.date <= data_ab_fim]
+
+    # Filtro de Encerramento da Nota (opcional — coluna pode não existir)
+    data_enc_ini = filtros.get("data_enc_ini")
+    data_enc_fim = filtros.get("data_enc_fim")
+    if "data_encerramento" in df.columns and (data_enc_ini or data_enc_fim):
+        col_enc = pd.to_datetime(df["data_encerramento"], errors="coerce")
+        if data_enc_ini:
+            df = df[col_enc.dt.date >= data_enc_ini]
+        if data_enc_fim:
+            df = df[col_enc.dt.date <= data_enc_fim]
 
     return df.copy()
 
