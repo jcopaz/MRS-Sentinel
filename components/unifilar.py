@@ -215,7 +215,7 @@ def _criar_km_sequencial(df: pd.DataFrame, col_ramal: str,
     return df
 
 
-def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
+def render_unifilar(df: pd.DataFrame, bin_km: float = None,
                     gerencia: str = "SP"):
     """
     Renderiza o Unifilar ECharts — fiel ao app1.py.
@@ -228,12 +228,23 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
 
     Args:
         df:      DataFrame filtrado (todas as notas da gerência)
-        bin_km:  janela de agrupamento (km) — vem do slider na sidebar
+        bin_km:  janela de agrupamento (km) — se None, mostra slider interno
         gerencia: 'SP', 'VP' ou 'GERAL'
     """
     if df.empty:
         st.info("Sem dados para o unifilar.")
         return
+
+    # ── Slider de resolução (idêntico ao app1: 100–2000 m) ───────────────────
+    col_res, _ = st.columns([1, 2])
+    with col_res:
+        bin_km_m = st.slider(
+            "🔬 Janela de agrupamento (m):",
+            min_value=100, max_value=2000, value=500, step=100,
+            key=f"bin_km_{gerencia}",
+            help="Menor = mais detalhe por KM | Maior = visão macro do ramal.",
+        )
+    bin_km = bin_km_m / 1000  # converte para km
 
     df_u = df.copy()
 
@@ -372,7 +383,39 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
     else:
         df_t_completo = df_unifilar.copy()
 
-    label_ramal_final = nome_ramal(ramal_view, "completo")                         if col_matriz == "ramal" else str(ramal_view)
+    label_ramal_final = nome_ramal(ramal_view, "completo") \
+                        if col_matriz == "ramal" else str(ramal_view)
+
+    # ── Multi-trecho (idêntico ao app1: Sessão 6) ─────────────────────────────
+    # Permite selecionar múltiplos trechos (par Origem-Destino) para fechar
+    # o KM completo do ramal ou focar em um trecho específico.
+    col_sub = "sub_trecho" if "sub_trecho" in df_t_completo.columns else (
+              "trecho"     if "trecho"     in df_t_completo.columns else None)
+
+    if col_sub:
+        trechos_disp = sorted(
+            [t for t in df_t_completo[col_sub].dropna().unique() if str(t).strip()]
+        )
+        if len(trechos_disp) > 1:
+            trechos_sel = st.multiselect(
+                "🚂 Trecho (Origem-Destino):",
+                trechos_disp,
+                default=trechos_disp,
+                key=f"trecho_unif_{gerencia}",
+                help=(
+                    f"{len(trechos_disp)} trechos disponíveis. "
+                    "Selecione múltiplos para fechar o KM completo do ramal "
+                    "ou foque em um trecho específico."
+                ),
+            )
+            if trechos_sel:
+                df_t_completo = df_t_completo[
+                    df_t_completo[col_sub].isin(trechos_sel)
+                ].copy()
+
+    if df_t_completo.empty:
+        st.warning("⚠️ Nenhuma nota com os filtros de trecho aplicados.")
+        return
 
     st.caption(
         f"Cada bolha = agrupamento de notas em **{bin_km*1000:.0f} m**. "
