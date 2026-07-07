@@ -5,7 +5,7 @@
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
 from auth.permissions import can_see_gerencia, can_admin_panel, can_upload
-from database.queries import get_ultima_atualizacao, log_acesso
+from database.queries import log_acesso
 
 
 # region ====================== SESSÃO 1: CSS da Sidebar ======================

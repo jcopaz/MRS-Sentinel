@@ -1,4 +1,4 @@
-# 🚂 MRS Nexus — Plataforma de Inteligência de Manutenção da Malha
+# 🚂 MRS Sentinel — Plataforma de Inteligência de Manutenção da Malha
 
 > Sistema multi-gerencial unificando Via Permanente (VP) e Eletroeletrônica (EE)
 > das Gerências SP e VP da MRS Logística.
@@ -104,12 +104,21 @@ mrs-painel-malha/
 │   └── permissions.py           # RBAC (Admin/Assistente/Usuário)
 ├── database/
 │   ├── client.py                # Cliente Supabase singleton
-│   ├── queries.py               # Queries reutilizáveis
+│   ├── queries.py               # Queries reutilizáveis (leitura anti-duplicação)
 │   └── schema.sql               # Schema completo do banco
 ├── core/
-│   └── glossarios.py            # Ramais, defeitos VP/EE
+│   ├── glossarios.py            # Ramais, defeitos VP/EE
+│   ├── parser.py                # Parser universal SAP (formatos A/B/C/D)
+│   ├── score_engine.py          # Score composto configurável
+│   └── indicadores.py           # IMT, DI, Aderência, Lead Time
+├── components/
+│   ├── filtros.py               # Filtros em cascata
+│   ├── kpi_card.py              # KPI Cards com sparkline
+│   ├── unifilar.py              # Unifilar Dual (ECharts)
+│   └── heatmap.py               # Heatmap, Ranking, Série Temporal
 ├── modules/
 │   ├── home.py                  # Sidebar de navegação
+│   ├── data_uploader.py         # Upload + persistência de planilhas
 │   ├── gerencia_sp.py           # Tela Gerência SP
 │   ├── gerencia_vp.py           # Tela Gerência VP
 │   ├── gerencia_geral.py        # Visão Geral multi-gerencial
@@ -135,10 +144,11 @@ mrs-painel-malha/
 | Sprint | Foco | Status |
 |---|---|---|
 | **Sprint 1** | Login + RBAC + Roteamento | ✅ Concluído |
-| **Sprint 2** | Upload de planilhas + Persistência | ⬜ Próxima |
-| **Sprint 3** | Visualizações SP e VP (9 elementos) | ⬜ Planejado |
-| **Sprint 4** | Visão Geral + Admin completo | ⬜ Planejado |
-| **Sprint 5+** | Alertas, Mapas, PDF, SAP | 🔮 Futuro |
+| **Sprint 2** | Upload de planilhas + Persistência | ✅ Concluído |
+| **Sprint 3** | Visualizações SP e VP (9 elementos) | ✅ Concluído |
+| **Sprint 4** | Visão Geral + Admin completo | ✅ Concluído |
+| **Sprint 5** | Alertas automáticos + hot-spots crônicos | ⬜ Próxima |
+| **Sprint 6+** | KM real, Mapas, PDF, SAP | 🔮 Futuro |
 
 ---
 
@@ -154,8 +164,7 @@ mrs-painel-malha/
 
 ## 📞 Contato
 
-**Julio Cesar de Oliveira Paz** — Especialista Ferroviário I  
+**Julio Cesar de Oliveira Paz** — Especialista Ferroviário  
 MRS Logística · Juiz de Fora, MG  
 `30028203@mrs.com.br`
 
-*Para hospedagem corporativa MRS: contatar Bruno Capobiango (TI)*
