@@ -41,6 +41,7 @@ RAMAIS_MRS = {
 
 RAMAIS_ALIASES = {
     "ASP": "VSU",   # ASP = alias legado → canônico VSU
+    "RIP": "JIT",   # RIP faz parte do mesmo trecho Jundiaí - Itirapina
 }
 
 RAMAIS_REVERSO = {v: k for k, v in RAMAIS_MRS.items()}

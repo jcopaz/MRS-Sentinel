@@ -106,135 +106,35 @@ def _opcoes_patios(
 
 def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
     """
-    Renderiza filtros em cascata na sidebar e retorna dict com seleções.
+    Renderiza filtros em cascata na sidebar com botões Aplicar / Limpar.
+
+    Usa st.form para que o app só recarregue os dados quando o usuário
+    clicar em "✅ Aplicar Filtros" — evita reruns a cada seleção.
 
     Hierarquia:
         Centro de Trabalho → Ramal → Trecho → Pátio → Período
 
-    Args:
-        df: DataFrame bruto da gerência (antes de filtrar)
-        gerencia: 'SP', 'VP' ou 'GERAL'
-
     Returns:
-        dict com chaves:
-            centros   — list[str]: centros selecionados
-            ramais    — list[str]: siglas de ramais selecionados
-            trechos   — list[str]: trechos selecionados
-            patios    — list[str]: pátios selecionados
-            data_ini  — date | None
-            data_fim  — date | None
+        dict com chaves: centros, ramais, trechos, patios, data_ini, data_fim
     """
-    uid = gerencia  # prefixo de key para evitar conflito entre gerências
+    uid = gerencia  # prefixo de key único por gerência
 
-    # ── 1. Centro de Trabalho ─────────────────────────────────────────────────
-    opcoes_centros = _opcoes_centros(df, gerencia)
-    centros_sel = st.multiselect(
-        "🏢 Centro de Trabalho",
-        options=opcoes_centros,
-        default=opcoes_centros,
-        key=f"filtro_centros_{uid}",
-        help="Filtre por centro de coordenação regional",
-    )
-    if not centros_sel:
-        centros_sel = opcoes_centros  # segurança: nunca vazio
-
-    # ── 2. Ramal ──────────────────────────────────────────────────────────────
-    siglas_disp = _opcoes_ramais(df, centros_sel)
-
-    # Monta labels nome completo para exibição
-    opcoes_ramal_label = {
-        nome_ramal(s, "completo_sigla"): s
-        for s in siglas_disp
-    }
-
-    ramais_nome_sel = st.multiselect(
-        "🚂 Ramal",
-        options=list(opcoes_ramal_label.keys()),
-        default=list(opcoes_ramal_label.keys()),
-        key=f"filtro_ramais_{uid}",
-        help="Nome completo do ramal conforme nomenclatura ANTT/MRS",
-    )
-
-    # Converte de volta para siglas (uso interno no DataFrame)
-    ramais_sel = [
-        opcoes_ramal_label[n]
-        for n in ramais_nome_sel
-        if n in opcoes_ramal_label
-    ]
-    if not ramais_sel and siglas_disp:
-        ramais_sel = siglas_disp  # segurança
-
-    # ── 3. Trecho ─────────────────────────────────────────────────────────────
-    opcoes_trechos = _opcoes_trechos(df, centros_sel, ramais_sel)
-
-    if opcoes_trechos:
-        trechos_sel = st.multiselect(
-            "📍 Trecho (Origem → Destino)",
-            options=opcoes_trechos,
-            default=opcoes_trechos,
-            key=f"filtro_trechos_{uid}",
-            help="Par Origem-Destino dentro do ramal",
-        )
-        if not trechos_sel:
-            trechos_sel = opcoes_trechos
-    else:
-        trechos_sel = []
-
-    # ── 4. Pátio ──────────────────────────────────────────────────────────────
-    opcoes_patios = _opcoes_patios(df, centros_sel, ramais_sel, trechos_sel)
-
-    if opcoes_patios:
-        patios_sel = st.multiselect(
-            "🚉 Pátio (Origem)",
-            options=opcoes_patios,
-            default=opcoes_patios,
-            key=f"filtro_patios_{uid}",
-            help="Estação/ponto de origem da nota de manutenção",
-        )
-        if not patios_sel:
-            patios_sel = opcoes_patios
-    else:
-        patios_sel = []
-
-    # ── 5. Período ────────────────────────────────────────────────────────────
-    st.markdown("**📅 Período**")
-
-    # Determina datas mín/máx dos dados para limitar os date_inputs
+    # ── Datas mín/máx (calculadas fora do form, pois dependem do df bruto) ───
     data_min = date(2018, 1, 1)
     data_max = date.today()
-
     if "data_nota" in df.columns:
         datas_validas = pd.to_datetime(df["data_nota"], errors="coerce").dropna()
         if not datas_validas.empty:
             data_min = datas_validas.min().date()
             data_max = datas_validas.max().date()
 
-    col_ini, col_fim = st.columns(2)
-    with col_ini:
-        data_ini = st.date_input(
-            "De",
-            value=data_min,
-            min_value=data_min,
-            max_value=data_max,
-            key=f"filtro_data_ini_{uid}",
-        )
-    with col_fim:
-        data_fim = st.date_input(
-            "Até",
-            value=data_max,
-            min_value=data_min,
-            max_value=data_max,
-            key=f"filtro_data_fim_{uid}",
-        )
-
-    # Garante que data_ini <= data_fim
-    if data_ini > data_fim:
-        st.sidebar.warning("⚠️ Data inicial maior que a final — ajuste o período.")
-        data_ini, data_fim = data_fim, data_ini
-
-    # ── Botão de reset ────────────────────────────────────────────────────────
-    if st.button("🔄 Limpar filtros", key=f"filtro_reset_{uid}", use_container_width=True):
-        # Limpa as keys de session_state dos filtros para resetar
+    # ── Botão Limpar (fora do form — limpa session_state e rerun imediato) ───
+    if st.button(
+        "🗑️ Limpar filtros",
+        key=f"filtro_reset_{uid}",
+        use_container_width=True,
+        type="secondary",
+    ):
         for key in [
             f"filtro_centros_{uid}", f"filtro_ramais_{uid}",
             f"filtro_trechos_{uid}", f"filtro_patios_{uid}",
@@ -243,6 +143,102 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
+
+    # ── Formulário: todos os filtros + botão Aplicar ──────────────────────────
+    with st.form(key=f"form_filtros_{uid}"):
+
+        # 1. Centro de Trabalho
+        opcoes_centros = _opcoes_centros(df, gerencia)
+        centros_sel = st.multiselect(
+            "🏢 Centro de Trabalho",
+            options=opcoes_centros,
+            default=opcoes_centros,
+            key=f"filtro_centros_{uid}",
+            help="Filtre por centro de coordenação regional",
+        )
+        if not centros_sel:
+            centros_sel = opcoes_centros
+
+        # 2. Ramal (nome completo na exibição, sigla internamente)
+        siglas_disp = _opcoes_ramais(df, centros_sel)
+        opcoes_ramal_label = {
+            nome_ramal(s, "completo_sigla"): s for s in siglas_disp
+        }
+        ramais_nome_sel = st.multiselect(
+            "🚂 Ramal",
+            options=list(opcoes_ramal_label.keys()),
+            default=list(opcoes_ramal_label.keys()),
+            key=f"filtro_ramais_{uid}",
+            help="Nome completo do ramal conforme nomenclatura ANTT/MRS",
+        )
+        ramais_sel = [
+            opcoes_ramal_label[n]
+            for n in ramais_nome_sel
+            if n in opcoes_ramal_label
+        ]
+        if not ramais_sel and siglas_disp:
+            ramais_sel = siglas_disp
+
+        # 3. Trecho
+        opcoes_trechos = _opcoes_trechos(df, centros_sel, ramais_sel)
+        if opcoes_trechos:
+            trechos_sel = st.multiselect(
+                "📍 Trecho (Origem → Destino)",
+                options=opcoes_trechos,
+                default=opcoes_trechos,
+                key=f"filtro_trechos_{uid}",
+                help="Par Origem-Destino dentro do ramal",
+            )
+            if not trechos_sel:
+                trechos_sel = opcoes_trechos
+        else:
+            trechos_sel = []
+
+        # 4. Pátio
+        opcoes_patios = _opcoes_patios(df, centros_sel, ramais_sel, trechos_sel)
+        if opcoes_patios:
+            patios_sel = st.multiselect(
+                "🚉 Pátio (Origem)",
+                options=opcoes_patios,
+                default=opcoes_patios,
+                key=f"filtro_patios_{uid}",
+                help="Estação/ponto de origem da nota de manutenção",
+            )
+            if not patios_sel:
+                patios_sel = opcoes_patios
+        else:
+            patios_sel = []
+
+        # 5. Período
+        st.markdown("**📅 Período**")
+        col_ini, col_fim = st.columns(2)
+        with col_ini:
+            data_ini = st.date_input(
+                "De",
+                value=data_min,
+                min_value=data_min,
+                max_value=data_max,
+                key=f"filtro_data_ini_{uid}",
+            )
+        with col_fim:
+            data_fim = st.date_input(
+                "Até",
+                value=data_max,
+                min_value=data_min,
+                max_value=data_max,
+                key=f"filtro_data_fim_{uid}",
+            )
+
+        if data_ini > data_fim:
+            st.warning("⚠️ Data inicial maior que a final.")
+            data_ini, data_fim = data_fim, data_ini
+
+        # Botão Aplicar (dentro do form — dispara o rerun com novos valores)
+        st.form_submit_button(
+            "✅ Aplicar Filtros",
+            use_container_width=True,
+            type="primary",
+        )
 
     return {
         "centros":  centros_sel,
