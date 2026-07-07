@@ -1,448 +1,484 @@
-# modules/gerencia_geral.py
-# Tela de Visão Geral — Consolidação Multi-gerencial SP × VP
-# Sprint 4 — Visão Geral + Admin
+# =============================================================================
+# modules/gerencia_geral.py — Visão Geral Multi-Gerencial (SP + VP)
+# Sprint 4 — MRS Sentinel
+#
+# Cruza dados das duas gerências para visão consolidada.
+# Usa indicadores IMT, DI, Aderência e Lead Time do core/indicadores.py.
+#
+# Estrutura:
+#   Sessão 1: Imports & Config
+#   Sessão 2: Carregamento e preparação de dados unificados
+#   Sessão 3: Componentes visuais locais (semáforo, comparativo)
+#   Sessão 4: Função principal render_gerencia_geral()
+#   Sessão 5: Abas
+#     5.1 — Consolidado (KPIs + Indicadores IMT/DI)
+#     5.2 — Comparativo SP × VP
+#     5.3 — Unifilar Total (SP + VP)
+#     5.4 — Temporal Global
+#     5.5 — Top Hot-spots (ranking unificado)
+# =============================================================================
 
+# region ====================== SESSÃO 1: Imports & Config ======================
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+from datetime import datetime
 
-from components.unifilar  import render_unifilar
-from components.heatmap   import render_ranking_hotspots, render_serie_temporal
-from core.indicadores     import (
-    render_indicadores_geral,
+# Componentes visuais
+from components.kpi_card import render_kpi_cards
+from components.unifilar import render_unifilar_dual
+from components.heatmap import render_ranking, render_serie_temporal
+
+# Indicadores IMT/DI/Aderência/Lead Time
+from core.indicadores import (
     calcular_imt,
     calcular_di,
     calcular_aderencia,
     calcular_lead_time_medio,
-    _concat_safe,
+    render_indicadores_geral,
+    render_semaforo,
 )
-from database.queries     import get_notas_cached, get_ultima_atualizacao
-from core.score_engine    import render_score_sidebar, calcular_score
-from core.glossarios      import nome_ramal
 
-# region ====================== SESSÃO 1: Constantes ==========================
+# Motor de score
+from core.score_engine import calcular_score_dataframe, render_score_sidebar
 
-LABEL_TELA = "Visao Geral — MRS Sentinel"
+# Normalização de ramais
+from core.glossarios import normalizar_coluna_ramal, nome_ramal, RAMAIS_MRS
 
-# cfg padrão para o unifilar (bin_km)
-_cfg_score: dict = {"bin_km": 0.5}
+# Queries
+from database.queries import get_notas_gerencia
+
+# Paleta MRS
+COR_SP   = "#1e3a5f"   # azul-marinho SP
+COR_VP   = "#0f4c35"   # verde-escuro VP
+COR_GOLD = "#ffb000"   # dourado MRS
+COR_CRIT = "#dc2626"   # vermelho crítico
+COR_WARN = "#f59e0b"   # amarelo atenção
+COR_OK   = "#16a34a"   # verde normal
 
 # endregion
 
 
-# region ====================== SESSÃO 2: Tela principal ======================
+# region ====================== SESSÃO 2: Carregamento de dados ================
 
-def render_gerencia_geral() -> None:
+@st.cache_data(ttl=300, show_spinner=False)
+def _carregar_tudo() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Carrega VP+EE das duas gerências em paralelo (cache 5 min).
+    Retorna (df_sp, df_vp) já normalizados.
+
+    Usa cache para evitar recargas desnecessárias ao navegar entre abas.
+    """
+    def _load(gerencia: str) -> pd.DataFrame:
+        frames = []
+        for disc in ("VP", "EE"):
+            df_d = get_notas_gerencia(gerencia, disc)
+            if not df_d.empty:
+                df_d["disciplina_label"] = disc
+                df_d["gerencia_label"] = gerencia
+                frames.append(df_d)
+        if not frames:
+            return pd.DataFrame()
+        df = pd.concat(frames, ignore_index=True)
+        df = normalizar_coluna_ramal(df, "ramal")
+        if "data_nota" in df.columns:
+            df["data_nota"] = pd.to_datetime(df["data_nota"], errors="coerce")
+        if "lead_time_dias" in df.columns:
+            df["lead_time_dias"] = pd.to_numeric(df["lead_time_dias"], errors="coerce")
+        return df
+
+    return _load("SP"), _load("VP")
+
+
+def _combinar(df_sp: pd.DataFrame, df_vp: pd.DataFrame) -> pd.DataFrame:
+    """Une as duas gerências em um único DataFrame, se ambas tiverem dados."""
+    frames = [df for df in (df_sp, df_vp) if not df.empty]
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+# endregion
+
+
+# region ====================== SESSÃO 3: Componentes locais ===================
+
+def _card_metrica(label: str, valor: str, delta: str = "", cor: str = COR_SP):
+    """
+    Renderiza um card de métrica estilizado com borda colorida.
+    Usado no comparativo SP × VP para manter consistência visual.
+    """
     st.markdown(
         f"""
         <div style='
-            background: linear-gradient(135deg, #1e3a5f 0%, #7c3aed 100%);
-            padding: 16px 24px;
-            border-radius: 12px;
-            margin-bottom: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #e5e7eb;
+            border-left: 4px solid {cor};
+            padding: 14px 16px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            text-align: center;
         '>
-            <div>
-                <h2 style='color:#ffffff; margin:0; font-size:22px;'>
-                    {LABEL_TELA}
-                </h2>
-                <p style='color:rgba(255,255,255,0.7); margin:4px 0 0 0; font-size:13px;'>
-                    Consolidacao integrada · Gerencias SP + VP · Disciplinas VP + EE
-                </p>
+            <div style='font-size: 0.75rem; color: #6b7280; font-weight: 600;
+                        text-transform: uppercase; letter-spacing: 0.05em;'>
+                {label}
             </div>
-            <div style='text-align:right;'>
-                <span style='
-                    background: #ffb000;
-                    color: #1e3a5f;
-                    font-weight: 700;
-                    padding: 4px 12px;
-                    border-radius: 20px;
-                    font-size: 12px;
-                '>SP + VP</span>
+            <div style='font-size: 1.8rem; font-weight: 700; color: {cor}; margin: 4px 0;'>
+                {valor}
             </div>
+            <div style='font-size: 0.75rem; color: #9ca3af;'>{delta}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    with st.spinner("Carregando dados de SP e VP..."):
-        df_sp_vp = _load("SP", "VP")
-        df_sp_ee = _load("SP", "EE")
-        df_vp_vp = _load("VP", "VP")
-        df_vp_ee = _load("VP", "EE")
 
-    total_notas = sum(
-        len(d) for d in [df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee]
-        if d is not None
+def _grafico_barras_comparativo(
+    df_sp: pd.DataFrame,
+    df_vp: pd.DataFrame,
+    coluna: str,
+    titulo: str,
+    unidade: str = "",
+) -> go.Figure:
+    """
+    Gera gráfico de barras horizontais comparando SP × VP por ramal.
+    Normaliza siglas para nomes completos no eixo Y.
+
+    Args:
+        df_sp, df_vp: DataFrames já filtrados e com score calculado
+        coluna: coluna a agregar (ex: 'score', 'lead_time_dias')
+        titulo: título do gráfico
+        unidade: sufixo da unidade (ex: ' dias', ' pts')
+    """
+    def _agg(df: pd.DataFrame, label: str) -> pd.DataFrame:
+        if df.empty or coluna not in df.columns:
+            return pd.DataFrame()
+        grp = (
+            df.groupby("ramal")[coluna]
+            .mean()
+            .reset_index()
+            .rename(columns={coluna: "valor"})
+        )
+        grp["gerencia"] = label
+        grp["ramal_nome"] = grp["ramal"].apply(lambda s: nome_ramal(s, "completo_sigla"))
+        return grp
+
+    df_plot = pd.concat([_agg(df_sp, "SP"), _agg(df_vp, "VP")], ignore_index=True)
+
+    if df_plot.empty:
+        return go.Figure()
+
+    fig = px.bar(
+        df_plot,
+        x="valor",
+        y="ramal_nome",
+        color="gerencia",
+        orientation="h",
+        barmode="group",
+        color_discrete_map={"SP": COR_SP, "VP": COR_VP},
+        labels={"valor": f"{titulo}{unidade}", "ramal_nome": "Ramal", "gerencia": "Gerência"},
+        title=titulo,
     )
-
-    if total_notas == 0:
-        _render_estado_vazio()
-        return
-
-    st.sidebar.markdown("---")
-    config = render_score_sidebar("VP+EE")
-
-    df_sp_vp = calcular_score(df_sp_vp, config) if df_sp_vp is not None else None
-    df_sp_ee = calcular_score(df_sp_ee, config) if df_sp_ee is not None else None
-    df_vp_vp = calcular_score(df_vp_vp, config) if df_vp_vp is not None else None
-    df_vp_ee = calcular_score(df_vp_ee, config) if df_vp_ee is not None else None
-
-    _render_card_atualizacao()
-
-    tab_cons, tab_comp, tab_uni, tab_temp, tab_rank = st.tabs([
-        "Consolidado",
-        "Comparativo SP x VP",
-        "Unifilar Total",
-        "Temporal Global",
-        "Top Hot-spots",
-    ])
-
-    with tab_cons:
-        _render_aba_consolidado(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
-
-    with tab_comp:
-        _render_aba_comparativo(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
-
-    with tab_uni:
-        _render_aba_unifilar(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
-
-    with tab_temp:
-        _render_aba_temporal(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
-
-    with tab_rank:
-        _render_aba_ranking(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
-
-# endregion
-
-
-# region ====================== SESSÃO 3: Helpers de carregamento =============
-
-def _load(gerencia: str, disciplina: str) -> pd.DataFrame | None:
-    df = get_notas_cached(gerencia, disciplina)
-    return df if df is not None and not df.empty else None
-
-
-def _render_card_atualizacao() -> None:
-    cols = st.columns([3, 1])
-    with cols[1]:
-        for ger, disc in [("SP", "VP"), ("SP", "EE"), ("VP", "VP"), ("VP", "EE")]:
-            ult = get_ultima_atualizacao(ger, disc)
-            st.markdown(
-                f"<div style='text-align:right; font-size:10px; color:#9ca3af;'>"
-                f"{ger}/{disc}: <b>{ult}</b></div>",
-                unsafe_allow_html=True,
-            )
-
-# endregion
-
-
-# region ====================== SESSÃO 4: Aba Consolidado =====================
-
-def _render_aba_consolidado(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
-    df_total = _concat_safe(
-        _concat_safe(df_sp_vp, df_sp_ee),
-        _concat_safe(df_vp_vp, df_vp_ee),
-    )
-    st.markdown("#### KPIs — Toda a Malha MRS")
-    _render_kpis_consolidados(df_total)
-    st.markdown("---")
-    render_indicadores_geral(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee)
-
-
-def _render_kpis_consolidados(df: pd.DataFrame) -> None:
-    if df is None or df.empty:
-        st.info("Sem dados.")
-        return
-
-    total = len(df)
-
-    col_status = (
-        "status_nota" if "status_nota" in df.columns
-        else ("status_usuario" if "status_usuario" in df.columns else None)
-    )
-    aber = int(df[col_status].dropna().str.upper().str.startswith("AB").sum()) if col_status else 0
-
-    score_m = round(df["score"].dropna().mean(), 1) if "score" in df.columns else 0.0
-    lt_raw  = df["lead_time_dias"].dropna().mean() if "lead_time_dias" in df.columns else None
-    lt_m    = int(round(lt_raw, 0)) if lt_raw is not None and pd.notna(lt_raw) else 0
-    crit    = int(df["prioridade"].str.contains("1-Muito alta", na=False, case=False).sum()) if "prioridade" in df.columns else 0
-
-    ramal_top = "—"
-    if "ramal" in df.columns and "score" in df.columns:
-        por_r = df.groupby("ramal")["score"].sum().dropna()
-        if not por_r.empty:
-            try:
-                ramal_top = nome_ramal(por_r.idxmax())
-            except Exception:
-                ramal_top = str(por_r.idxmax())
-
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    _kpi(c1, "Total Notas",     f"{total:,}",       "#1e3a5f")
-    _kpi(c2, "Notas Abertas",   f"{aber:,}",        "#f59e0b")
-    _kpi(c3, "Prioridade Max.", f"{crit:,}",        "#dc2626")
-    _kpi(c4, "Score Medio",     f"{score_m:.1f}",   "#ffb000")
-    _kpi(c5, "Lead Time Medio", f"{lt_m} dias",     "#7c3aed")
-    _kpi(c6, "Ramal Top",       ramal_top[:18],     "#0891b2")
-
-
-def _kpi(col, titulo: str, valor: str, cor: str) -> None:
-    col.markdown(
-        f"""
-        <div style='
-            background:#f8fafc;
-            border-left:3px solid {cor};
-            border-radius:10px;
-            padding:12px 10px;
-            text-align:center;
-        '>
-            <div style='font-size:10px; color:#6b7280;'>{titulo}</div>
-            <div style='font-size:20px; font-weight:700; color:{cor};'>{valor}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# endregion
-
-
-# region ====================== SESSÃO 5: Aba Comparativo SP × VP =============
-
-def _render_aba_comparativo(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
-    df_sp = _concat_safe(df_sp_vp, df_sp_ee)
-    df_vp = _concat_safe(df_vp_vp, df_vp_ee)
-
-    st.markdown("#### Volume de Notas por Prioridade — SP x VP")
-    col_sp, col_vp = st.columns(2)
-    _grafico_criticidade(col_sp, df_sp, "SP")
-    _grafico_criticidade(col_vp, df_vp, "VP")
-
-    st.markdown("---")
-    st.markdown("#### Score Total por Ramal")
-    col_sp2, col_vp2 = st.columns(2)
-    _grafico_score_ramal(col_sp2, df_sp, "SP")
-    _grafico_score_ramal(col_vp2, df_vp, "VP")
-
-    st.markdown("---")
-    st.markdown("#### Lead Time Medio por Familia de Defeito")
-    col_sp3, col_vp3 = st.columns(2)
-    _grafico_lead_familia(col_sp3, df_sp, "SP")
-    _grafico_lead_familia(col_vp3, df_vp, "VP")
-
-
-def _grafico_criticidade(col, df, ger: str) -> None:
-    col.markdown(f"**Gerencia {ger}**")
-    if df is None or df.empty or "prioridade" not in df.columns:
-        col.caption("_(sem dados)_")
-        return
-    ordem  = ["1-Muito alta", "2-Alta", "3-Media", "4-Baixa"]
-    cores  = ["#dc2626", "#f59e0b", "#0891b2", "#16a34a"]
-    cnt    = df["prioridade"].value_counts()
-    labels = [p for p in ordem if p in cnt.index]
-    values = [cnt.get(p, 0) for p in labels]
-    bares  = [cores[i] for i, p in enumerate(ordem) if p in cnt.index]
-    fig = go.Figure(go.Bar(x=labels, y=values, marker_color=bares, text=values, textposition="outside"))
     fig.update_layout(
-        plot_bgcolor="#fff", paper_bgcolor="#fff",
-        margin=dict(l=5, r=5, t=10, b=30), height=220,
-        showlegend=False,
-        yaxis=dict(showgrid=True, gridcolor="#f3f4f6"),
-        xaxis=dict(tickfont=dict(size=9)),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        font_color="#1f2937",
+        title_font_size=14,
+        height=max(350, len(df_plot["ramal_nome"].unique()) * 28),
+        margin=dict(l=10, r=10, t=40, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
-    col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
-
-
-def _grafico_score_ramal(col, df, ger: str) -> None:
-    col.markdown(f"**Gerencia {ger}**")
-    if df is None or df.empty or "ramal" not in df.columns or "score" not in df.columns:
-        col.caption("_(sem dados)_")
-        return
-    por_ramal = (
-        df.groupby("ramal")["score"].sum()
-        .sort_values(ascending=True)
-        .tail(10)
-    )
-    try:
-        nomes = [nome_ramal(s) for s in por_ramal.index]
-    except Exception:
-        nomes = [str(s) for s in por_ramal.index]
-    fig = go.Figure(go.Bar(
-        y=nomes, x=por_ramal.values, orientation="h",
-        marker_color="#1e3a5f" if ger == "SP" else "#16a34a",
-        text=[f"{v:.0f}" for v in por_ramal.values], textposition="outside",
-    ))
-    fig.update_layout(
-        plot_bgcolor="#fff", paper_bgcolor="#fff",
-        margin=dict(l=5, r=5, t=10, b=10), height=280,
-        showlegend=False,
-        xaxis=dict(showgrid=True, gridcolor="#f3f4f6"),
-        yaxis=dict(tickfont=dict(size=9)),
-    )
-    col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
-
-
-def _grafico_lead_familia(col, df, ger: str) -> None:
-    col.markdown(f"**Gerencia {ger}**")
-    col_fam = next((c for c in ["familia_defeito", "familia_cod"] if df is not None and c in df.columns), None)
-    if df is None or df.empty or not col_fam or "lead_time_dias" not in df.columns:
-        col.caption("_(sem dados)_")
-        return
-    lt_fam = (
-        df.groupby(col_fam)["lead_time_dias"]
-        .mean().dropna()
-        .sort_values(ascending=False)
-        .head(8)
-    )
-    fig = go.Figure(go.Bar(
-        y=lt_fam.index.tolist(), x=lt_fam.values.tolist(),
-        orientation="h", marker_color="#7c3aed",
-        text=[f"{v:.0f}d" for v in lt_fam.values], textposition="outside",
-    ))
-    fig.update_layout(
-        plot_bgcolor="#fff", paper_bgcolor="#fff",
-        margin=dict(l=5, r=5, t=10, b=10), height=260,
-        showlegend=False,
-        xaxis=dict(showgrid=True, gridcolor="#f3f4f6", title="dias"),
-        yaxis=dict(tickfont=dict(size=9)),
-    )
-    col.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+    return fig
 
 # endregion
 
 
-# region ====================== SESSÃO 6: Aba Unifilar Total ==================
+# region ====================== SESSÃO 4: Função principal =====================
 
-def _render_aba_unifilar(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
-    st.markdown("#### Unifilar Tridisciplinar — SP + VP")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**Gerencia SP**")
-        df_sp = _concat_safe(df_sp_vp, df_sp_ee)
-        if df_sp is not None and not df_sp.empty:
-            render_unifilar(df_sp, _cfg_score)
-        else:
-            st.info("📭 Sem dados de SP.")
-    with c2:
-        st.markdown("**Gerencia VP**")
-        df_vp = _concat_safe(df_vp_vp, df_vp_ee)
-        if df_vp is not None and not df_vp.empty:
-            render_unifilar(df_vp, _cfg_score)
-        else:
-            st.info("📭 Sem dados de VP.")
+def render_gerencia_geral():
+    """
+    Ponto de entrada da Visão Geral multi-gerencial.
+    Chamado pelo app.py quando o usuário navega para 'Geral'.
+    """
 
-# endregion
-
-
-# region ====================== SESSÃO 7: Aba Temporal Global =================
-
-def _render_aba_temporal(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
-    st.markdown("#### Serie Temporal — Malha MRS (SP + VP)")
-    df_total = _concat_safe(
-        _concat_safe(df_sp_vp, df_sp_ee),
-        _concat_safe(df_vp_vp, df_vp_ee),
-    )
-    if df_total is None or df_total.empty:
-        st.info("Sem dados para a serie temporal.")
-        return
-    render_serie_temporal(df_total, "SP+VP")
-
-# endregion
-
-
-# region ====================== SESSÃO 8: Aba Top Hot-spots ===================
-
-def _render_aba_ranking(df_sp_vp, df_sp_ee, df_vp_vp, df_vp_ee) -> None:
-    st.markdown("#### Top Hot-spots — Malha MRS (Cross-Gerencial)")
-
-    dfs = []
-    for df, ger, disc in [
-        (df_sp_vp, "SP", "VP"), (df_sp_ee, "SP", "EE"),
-        (df_vp_vp, "VP", "VP"), (df_vp_ee, "VP", "EE"),
-    ]:
-        if df is not None and not df.empty:
-            d = df.copy()
-            d["_gerencia"]   = ger
-            d["_disciplina"] = disc
-            dfs.append(d)
-
-    if not dfs:
-        st.info("Sem dados para o ranking.")
-        return
-
-    df_all = pd.concat(dfs, ignore_index=True)
-    top_n  = st.slider("Top N trechos", min_value=10, max_value=50, value=20, step=5, key="topn_geral")
-
-    group_cols = [c for c in ["_gerencia", "_disciplina", "ramal", "origem"] if c in df_all.columns]
-    agg = {}
-    if "score" in df_all.columns:
-        agg["score"] = "sum"
-    if "lead_time_dias" in df_all.columns:
-        agg["lead_time_dias"] = "mean"
-    agg["numero_nota"] = "count"
-
-    ranking = (
-        df_all.groupby(group_cols).agg(agg)
-        .reset_index()
-        .sort_values("score" if "score" in agg else "numero_nota", ascending=False)
-        .head(top_n)
-        .reset_index(drop=True)
-    )
-    ranking.index += 1
-
-    rename = {
-        "_gerencia": "Gerencia", "_disciplina": "Disciplina",
-        "ramal": "Ramal", "origem": "Patio",
-        "score": "Score Total", "lead_time_dias": "Lead Time Medio (d)",
-        "numero_nota": "N Notas",
-    }
-    ranking.rename(columns={k: v for k, v in rename.items() if k in ranking.columns}, inplace=True)
-
-    if "Ramal" in ranking.columns:
-        try:
-            ranking["Ramal"] = ranking["Ramal"].apply(lambda s: nome_ramal(str(s), "completo_sigla"))
-        except Exception:
-            pass  # mantém a sigla original se glossário não suportar a assinatura
-    if "Score Total" in ranking.columns:
-        ranking["Score Total"] = ranking["Score Total"].round(1)
-    if "Lead Time Medio (d)" in ranking.columns:
-        ranking["Lead Time Medio (d)"] = ranking["Lead Time Medio (d)"].round(0).astype("Int64")
-
-    st.dataframe(ranking, use_container_width=True, height=min(700, 45 * len(ranking) + 80))
-
-    csv = ranking.to_csv(index_label="Posicao").encode("utf-8-sig")
-    st.download_button(
-        "Exportar Ranking CSV", csv,
-        file_name="ranking_hotspots_malha_mrs.csv",
-        mime="text/csv", key="dl_ranking_geral",
-    )
-
-# endregion
-
-
-# region ====================== SESSÃO 9: Estado Vazio ========================
-
-def _render_estado_vazio() -> None:
+    # ── Cabeçalho ──────────────────────────────────────────────────────────────
     st.markdown(
         """
         <div style='
-            text-align: center; padding: 40px;
-            background: #f8fafc; border-radius: 16px;
-            border: 2px dashed #d1d5db; margin: 20px 0;
+            background: linear-gradient(135deg, #312e81 0%, #4c1d95 100%);
+            padding: 20px 24px;
+            border-radius: 12px;
+            margin-bottom: 20px;
         '>
-            <div style='font-size: 48px; margin-bottom: 12px;'>&#127758;</div>
-            <h3 style='color: #1e3a5f; margin: 0 0 8px 0;'>
-                Nenhum dado carregado na plataforma
-            </h3>
-            <p style='color: #6b7280; font-size: 14px; margin: 0 0 16px 0;'>
-                A Visao Geral requer dados das Gerencias SP e/ou VP.<br/>
-                Solicite ao Admin o upload das planilhas SAP.
+            <h2 style='color: #ffb000; margin: 0; font-size: 1.6rem;'>
+                🌐 Visão Geral — SP + VP Consolidado
+            </h2>
+            <p style='color: #c4b5fd; margin: 4px 0 0 0; font-size: 0.9rem;'>
+                Cruza dados de ambas as gerências · Indicadores IMT e DI integrados
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-# endregion
+    # ── Sidebar ───────────────────────────────────────────────────────────────
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 🌐 Visão Geral")
+
+        # Filtro de disciplina para o consolidado
+        disciplina_geral = st.radio(
+            "📊 Disciplina",
+            ["VP+EE", "VP", "EE"],
+            index=0,
+            horizontal=False,
+        )
+
+        # Filtro de gerência (permite ver só uma)
+        gerencias_vis = st.multiselect(
+            "🏭 Gerências visíveis",
+            options=["SP", "VP"],
+            default=["SP", "VP"],
+            help="Desmarque uma gerência para excluí-la da visualização",
+        )
+        if not gerencias_vis:
+            gerencias_vis = ["SP", "VP"]  # segurança: nunca vazio
+
+        st.markdown("---")
+
+        # Score unificado (mesmos pesos para as duas gerências na visão geral)
+        score_cfg = render_score_sidebar(gerencia="GERAL")
+
+        st.markdown("---")
+
+    # ── Carrega dados (cached) ────────────────────────────────────────────────
+    with st.spinner("⏳ Carregando dados consolidados..."):
+        df_sp_raw, df_vp_raw = _carregar_tudo()
+
+    # Filtra disciplinas
+    def _filtrar_disc(df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty or "disciplina_label" not in df.columns:
+            return df
+        if disciplina_geral == "VP":
+            return df[df["disciplina_label"] == "VP"].copy()
+        elif disciplina_geral == "EE":
+            return df[df["disciplina_label"] == "EE"].copy()
+        return df.copy()
+
+    df_sp = _filtrar_disc(df_sp_raw) if "SP" in gerencias_vis else pd.DataFrame()
+    df_vp = _filtrar_disc(df_vp_raw) if "VP" in gerencias_vis else pd.DataFrame()
+
+    df_total = _combinar(df_sp, df_vp)
+
+    # Calcula score
+    if not df_sp.empty:
+        df_sp = calcular_score_dataframe(df_sp, score_cfg)
+    if not df_vp.empty:
+        df_vp = calcular_score_dataframe(df_vp, score_cfg)
+    if not df_total.empty:
+        df_total = calcular_score_dataframe(df_total, score_cfg)
+
+    # Avisa se não há nenhum dado
+    if df_total.empty:
+        st.warning(
+            "⚠️ Nenhum dado encontrado para as gerências selecionadas. "
+            "Solicite upload das planilhas."
+        )
+        return
+
+    # Contador resumido
+    with st.sidebar:
+        total = len(df_total)
+        n_sp = len(df_sp) if not df_sp.empty else 0
+        n_vp = len(df_vp) if not df_vp.empty else 0
+        st.markdown(
+            f"<div style='background:rgba(255,176,0,0.1); padding:10px; "
+            f"border-radius:8px; border-left:3px solid #ffb000;'>"
+            f"<b style='color:#ffb000;'>📌 {total:,}</b> notas totais<br>"
+            f"<small style='color:#6b7280;'>SP: {n_sp:,} · VP: {n_vp:,}</small>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── 5 Abas ────────────────────────────────────────────────────────────────
+    aba_cons, aba_comp, aba_unif, aba_temp, aba_rank = st.tabs([
+        "📊 Consolidado",
+        "⚖️ SP × VP",
+        "🗺️ Unifilar Total",
+        "📈 Temporal Global",
+        "🏆 Top Hot-spots",
+    ])
+
+    # endregion
+
+    # region =================== SESSÃO 5.1: Aba — Consolidado =================
+    with aba_cons:
+        st.markdown("#### 📊 Painel Consolidado SP + VP")
+
+        # Indicadores IMT / DI / Aderência / Lead Time (core/indicadores.py)
+        render_indicadores_geral(df_total)
+
+        st.markdown("---")
+        st.markdown("#### 🚦 Semáforo de Saúde da Malha")
+        render_semaforo(df_sp=df_sp, df_vp=df_vp)
+
+        st.markdown("---")
+        st.markdown("#### 📊 KPIs Unificados")
+        render_kpi_cards(df_total, gerencia="GERAL", disciplina=disciplina_geral)
+
+    # endregion
+
+    # region =================== SESSÃO 5.2: Aba — Comparativo SP × VP =========
+    with aba_comp:
+        st.markdown("#### ⚖️ Comparativo Gerência SP × VP")
+
+        # Linha de métricas rápidas SP vs VP
+        col_sp, col_sep, col_vp = st.columns([5, 1, 5])
+
+        with col_sp:
+            st.markdown(f"<h5 style='color:{COR_SP}; text-align:center;'>🏭 SP — São Paulo</h5>", unsafe_allow_html=True)
+            if not df_sp.empty:
+                _card_metrica("Total de Notas", f"{len(df_sp):,}", cor=COR_SP)
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                score_med_sp = df_sp["score"].mean() if "score" in df_sp.columns else 0
+                _card_metrica("Score Médio", f"{score_med_sp:.1f}", cor=COR_SP)
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                lt_sp = df_sp["lead_time_dias"].mean() if "lead_time_dias" in df_sp.columns else 0
+                _card_metrica("Lead Time Médio", f"{lt_sp:.0f} dias", cor=COR_SP)
+            else:
+                st.info("Sem dados para SP")
+
+        with col_sep:
+            st.markdown(
+                "<div style='width:2px; background:#e5e7eb; height:200px; margin:20px auto;'></div>",
+                unsafe_allow_html=True,
+            )
+
+        with col_vp:
+            st.markdown(f"<h5 style='color:{COR_VP}; text-align:center;'>🏭 VP — Vale do Paraíba</h5>", unsafe_allow_html=True)
+            if not df_vp.empty:
+                _card_metrica("Total de Notas", f"{len(df_vp):,}", cor=COR_VP)
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                score_med_vp = df_vp["score"].mean() if "score" in df_vp.columns else 0
+                _card_metrica("Score Médio", f"{score_med_vp:.1f}", cor=COR_VP)
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                lt_vp = df_vp["lead_time_dias"].mean() if "lead_time_dias" in df_vp.columns else 0
+                _card_metrica("Lead Time Médio", f"{lt_vp:.0f} dias", cor=COR_VP)
+            else:
+                st.info("Sem dados para VP")
+
+        st.markdown("---")
+        st.markdown("#### 📊 Score Médio por Ramal — SP × VP")
+
+        # Gráfico de barras comparativo por ramal
+        fig_score = _grafico_barras_comparativo(
+            df_sp, df_vp, coluna="score",
+            titulo="Score Médio por Ramal", unidade=" pts"
+        )
+        if fig_score.data:
+            st.plotly_chart(fig_score, use_container_width=True)
+        else:
+            st.caption("Dados insuficientes para o gráfico.")
+
+        st.markdown("#### ⏱️ Lead Time Médio por Ramal — SP × VP")
+        fig_lt = _grafico_barras_comparativo(
+            df_sp, df_vp, coluna="lead_time_dias",
+            titulo="Lead Time Médio por Ramal", unidade=" dias"
+        )
+        if fig_lt.data:
+            st.plotly_chart(fig_lt, use_container_width=True)
+        else:
+            st.caption("Dados insuficientes para o gráfico.")
+
+    # endregion
+
+    # region =================== SESSÃO 5.3: Aba — Unifilar Total ==============
+    with aba_unif:
+        st.markdown("#### 🗺️ Unifilar Total — SP + VP Integradas")
+        st.caption(
+            "Visualização unificada das duas gerências. "
+            "Bolhas SP em azul-marinho · Bolhas VP em verde · "
+            "Pulso = hot-spot crítico"
+        )
+
+        # O componente unifilar suporta gerencia='GERAL' para mostrar ambas
+        render_unifilar_dual(df_total, gerencia="GERAL")
+
+    # endregion
+
+    # region =================== SESSÃO 5.4: Aba — Temporal Global ============
+    with aba_temp:
+        st.markdown("#### 📈 Evolução Temporal — SP + VP")
+
+        col_gran, col_met, col_split = st.columns(3)
+        with col_gran:
+            granularidade = st.selectbox(
+                "Granularidade",
+                ["Mensal", "Semanal", "Trimestral"],
+                index=0,
+                key="gran_geral",
+            )
+        with col_met:
+            metrica = st.selectbox(
+                "Métrica",
+                ["Volume de Notas", "Score Médio", "Lead Time Médio"],
+                index=0,
+                key="met_geral",
+            )
+        with col_split:
+            separar = st.checkbox(
+                "Separar por gerência",
+                value=True,
+                help="Exibe SP e VP em séries distintas",
+            )
+
+        if separar:
+            # Duas séries no mesmo gráfico
+            col_s, col_v = st.columns(2)
+            with col_s:
+                st.markdown(f"<b style='color:{COR_SP};'>SP</b>", unsafe_allow_html=True)
+                render_serie_temporal(df_sp, granularidade=granularidade, metrica=metrica, gerencia="SP")
+            with col_v:
+                st.markdown(f"<b style='color:{COR_VP};'>VP</b>", unsafe_allow_html=True)
+                render_serie_temporal(df_vp, granularidade=granularidade, metrica=metrica, gerencia="VP")
+        else:
+            # Série unificada
+            render_serie_temporal(df_total, granularidade=granularidade, metrica=metrica, gerencia="GERAL")
+
+    # endregion
+
+    # region =================== SESSÃO 5.5: Aba — Top Hot-spots ==============
+    with aba_rank:
+        st.markdown("#### 🏆 Top Hot-spots — SP + VP Unificados")
+
+        col_n, col_ord, col_ger = st.columns(3)
+        with col_n:
+            top_n = st.selectbox("Top N", [5, 10, 15, 20], index=1, key="topn_geral")
+        with col_ord:
+            ordem = st.selectbox(
+                "Ordenar por",
+                ["Score Total", "Qtd. Notas", "Lead Time Médio (dias)"],
+                index=0,
+                key="ord_geral",
+            )
+        with col_ger:
+            ger_rank = st.selectbox(
+                "Gerência",
+                ["Todas", "SP", "VP"],
+                index=0,
+                key="ger_rank",
+            )
+
+        # Aplica filtro de gerência para o ranking
+        df_rank = df_total.copy()
+        if ger_rank != "Todas" and "gerencia_label" in df_rank.columns:
+            df_rank = df_rank[df_rank["gerencia_label"] == ger_rank]
+
+        render_ranking(df_rank, top_n=top_n, ordem=ordem, gerencia="GERAL")
+
+    # endregion
