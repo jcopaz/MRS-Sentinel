@@ -1,340 +1,355 @@
-# core/indicadores.py
-# Indicadores integrados VP + EE: IMT, DI e derivados
-# Sprint 4 — Visão Geral + Admin
+# =============================================================================
+# core/indicadores.py — Indicadores IMT, DI, Aderência e Lead Time
+# Sprint 4 — MRS Sentinel
 #
-# IMT = Índice de Manutenção Total
-#       Mede a pressão de manutenção em função do volume e criticidade das notas
-#       IMT = (Σ score) / km_malha × fator_disciplina
+# Exporta:
+#   calcular_imt()             — Índice de Manutenção Técnica
+#   calcular_di()              — Desempenho de Intervenção
+#   calcular_aderencia()       — Aderência ao Planejamento
+#   calcular_lead_time_medio() — Lead Time Médio (dias)
+#   render_indicadores_geral() — painel visual na aba Consolidado
+#   render_semaforo()          — semáforo SP × VP de saúde da malha
 #
-# DI  = Densidade de Intervenção
-#       DI  = n_notas / km_malha
-#
-# USO:
-#   from core.indicadores import calcular_imt, calcular_di, render_indicadores_geral
+# Sessão 1: Imports & constantes
+# Sessão 2: Funções de cálculo
+# Sessão 3: render_indicadores_geral()
+# Sessão 4: render_semaforo()
+# =============================================================================
 
+# region ====================== SESSÃO 1: Imports & Constantes =================
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
-from core.glossarios import nome_ramal
 
-# region ====================== SESSÃO 1: Constantes ==========================
+# Limites de referência (podem ser sobrescritos via configuracoes no Supabase)
+LIMITE_IMT_CRITICO  = 70.0   # IMT abaixo disso = crítico
+LIMITE_IMT_ATENCAO  = 85.0   # IMT entre 70–85 = atenção
+LIMITE_DI_CRITICO   = 60.0   # DI abaixo disso = crítico
+LIMITE_DI_ATENCAO   = 80.0
+LIMITE_ADH_CRITICO  = 70.0   # Aderência abaixo = crítico
+LIMITE_ADH_ATENCAO  = 85.0
+LIMITE_LT_CRITICO   = 60     # Lead Time acima = crítico (dias)
+LIMITE_LT_ATENCAO   = 30     # Lead Time entre 30–60 = atenção
 
-# Extensão aproximada de malha por gerência (km) — atualizar conforme dado real
-KM_MALHA = {
-    "SP": 320.0,   # Gerência SP
-    "VP": 410.0,   # Gerência VP
-    "total": 730.0,
-}
-
-# Fator de peso disciplina para IMT
-FATOR_DISCIPLINA = {
-    "VP": 1.0,
-    "EE": 0.8,   # EE tem impacto operacional diferente — ajustável
-}
-
-# Referências para semáforo de IMT (calibrar com a equipe MRS)
-IMT_CRITICO  = 5.0   # acima → vermelho
-IMT_ATENCAO  = 2.5   # acima → amarelo
-# abaixo de IMT_ATENCAO → verde
+COR_CRIT = "#dc2626"
+COR_WARN = "#f59e0b"
+COR_OK   = "#16a34a"
+COR_NA   = "#94a3b8"
 
 # endregion
 
 
-# region ====================== SESSÃO 2: Cálculo dos indicadores =============
+# region ====================== SESSÃO 2: Funções de cálculo ===================
 
-def calcular_imt(
-    df: pd.DataFrame,
-    gerencia: str,
-    disciplina: str = "VP",
-) -> float:
+def calcular_imt(df: pd.DataFrame) -> float:
     """
-    Calcula o IMT — Índice de Manutenção Total.
+    Índice de Manutenção Técnica (IMT).
 
-    Fórmula:
-        IMT = (Σ score_notas_abertas) / km_malha × fator_disciplina
+    Lógica simplificada:
+        IMT = (notas encerradas / notas totais) × 100
 
-    Protege contra divisão por zero e dados ausentes.
-
-    Args:
-        df:         DataFrame com notas (já filtradas)
-        gerencia:   'SP' ou 'VP' — determina km_malha
-        disciplina: 'VP' ou 'EE' — aplica fator de peso
-
-    Returns:
-        float: IMT arredondado a 2 casas, ou 0.0 em caso de erro
+    Retorna 0.0 se DataFrame vazio ou sem coluna de status.
     """
-    if df is None or df.empty:
+    if df.empty or "status_usuario" not in df.columns:
         return 0.0
 
-    km = KM_MALHA.get(gerencia, 1.0) or 1.0
-    fator = FATOR_DISCIPLINA.get(disciplina, 1.0)
-
-    # Soma apenas notas abertas
-    df_aber = df.copy()
-    if "status_usuario" in df_aber.columns:
-        df_aber = df_aber[df_aber["status_usuario"].str.upper() == "ABER"]
-
-    if "score" not in df_aber.columns or df_aber["score"].isna().all():
-        # Fallback: conta notas abertas como proxy de score
-        soma_score = len(df_aber) * 1.0
-    else:
-        soma_score = df_aber["score"].dropna().sum()
-
-    imt = (soma_score / km) * fator
-    return round(float(imt), 2)
-
-
-def calcular_di(df: pd.DataFrame, gerencia: str) -> float:
-    """
-    Calcula DI — Densidade de Intervenção.
-
-    Fórmula:
-        DI = n_notas_abertas / km_malha
-
-    Args:
-        df:       DataFrame com notas
-        gerencia: 'SP' ou 'VP'
-
-    Returns:
-        float: DI arredondado a 2 casas
-    """
-    if df is None or df.empty:
+    total = len(df)
+    if total == 0:
         return 0.0
 
-    km = KM_MALHA.get(gerencia, 1.0) or 1.0
+    # Considera encerradas as notas com status diferente de ABER
+    encerradas = df[~df["status_usuario"].str.upper().str.startswith("AB", na=False)]
+    return round((len(encerradas) / total) * 100, 1)
 
-    df_aber = df.copy()
-    if "status_usuario" in df_aber.columns:
-        df_aber = df_aber[df_aber["status_usuario"].str.upper() == "ABER"]
 
-    di = len(df_aber) / km
-    return round(float(di), 2)
+def calcular_di(df: pd.DataFrame) -> float:
+    """
+    Desempenho de Intervenção (DI).
+
+    Lógica:
+        DI = (notas encerradas dentro do prazo / notas encerradas) × 100
+
+    Considera "dentro do prazo": encerradas antes da data_planejada.
+    Retorna 0.0 se não houver notas encerradas com data_planejada.
+    """
+    if df.empty:
+        return 0.0
+
+    cols_ok = (
+        "status_usuario" in df.columns
+        and "data_encerramento" in df.columns
+        and "data_planejada" in df.columns
+    )
+    if not cols_ok:
+        return 0.0
+
+    encerradas = df[
+        ~df["status_usuario"].str.upper().str.startswith("AB", na=False)
+    ].copy()
+
+    if encerradas.empty:
+        return 0.0
+
+    enc = encerradas.dropna(subset=["data_encerramento", "data_planejada"]).copy()
+    enc["data_encerramento"] = pd.to_datetime(enc["data_encerramento"], errors="coerce")
+    enc["data_planejada"]    = pd.to_datetime(enc["data_planejada"],    errors="coerce")
+    enc = enc.dropna(subset=["data_encerramento", "data_planejada"])
+
+    if enc.empty:
+        return 0.0
+
+    no_prazo = enc[enc["data_encerramento"] <= enc["data_planejada"]]
+    return round((len(no_prazo) / len(enc)) * 100, 1)
 
 
 def calcular_aderencia(df: pd.DataFrame) -> float:
     """
-    Calcula a Aderência ao Planejamento (%).
+    Aderência ao Planejamento.
 
-    Aderência = (notas encerradas dentro do prazo planejado) / total planejadas × 100
+    Lógica:
+        Aderência = (notas com data_planejada definida / notas totais abertas) × 100
 
-    Args:
-        df: DataFrame com colunas data_planejada e data_encerramento
-
-    Returns:
-        float: percentual de aderência (0–100)
+    Mede se as notas abertas têm planejamento registrado.
     """
-    if df is None or df.empty:
-        return 0.0
-    if "data_planejada" not in df.columns or "data_encerramento" not in df.columns:
+    if df.empty:
         return 0.0
 
-    df_c = df.copy()
-    df_c["data_planejada"]    = pd.to_datetime(df_c["data_planejada"],    errors="coerce")
-    df_c["data_encerramento"] = pd.to_datetime(df_c["data_encerramento"], errors="coerce")
+    abertas = df[
+        df.get("status_usuario", pd.Series(dtype=str))
+        .str.upper().str.startswith("AB", na=False)
+    ] if "status_usuario" in df.columns else df
 
-    df_plan = df_c.dropna(subset=["data_planejada"])
-    if df_plan.empty:
+    total_abertas = len(abertas)
+    if total_abertas == 0:
+        return 100.0  # nenhuma nota aberta = 100% de aderência
+
+    if "data_planejada" not in abertas.columns:
         return 0.0
 
-    # Considera "dentro do prazo" se encerrado antes ou na data planejada
-    df_enc = df_plan.dropna(subset=["data_encerramento"])
-    n_no_prazo = (df_enc["data_encerramento"] <= df_enc["data_planejada"]).sum()
-
-    aderencia = (n_no_prazo / len(df_plan)) * 100
-    return round(float(aderencia), 1)
+    com_plano = abertas["data_planejada"].notna().sum()
+    return round((com_plano / total_abertas) * 100, 1)
 
 
 def calcular_lead_time_medio(df: pd.DataFrame) -> float:
-    """Lead time médio (dias) das notas com data_nota e data_encerramento."""
-    if df is None or df.empty:
+    """
+    Lead Time Médio (dias).
+    Usa coluna 'lead_time_dias' se disponível; senão calcula pela diferença
+    entre data_encerramento e data_nota.
+    """
+    if df.empty:
         return 0.0
+
     if "lead_time_dias" in df.columns:
-        val = df["lead_time_dias"].dropna().mean()
-        return round(float(val), 1) if not np.isnan(val) else 0.0
+        vals = pd.to_numeric(df["lead_time_dias"], errors="coerce").dropna()
+        return round(vals.mean(), 1) if len(vals) > 0 else 0.0
+
+    # Fallback: calcula pela diferença de datas
+    if "data_encerramento" in df.columns and "data_nota" in df.columns:
+        df_c = df.copy()
+        df_c["data_encerramento"] = pd.to_datetime(df_c["data_encerramento"], errors="coerce")
+        df_c["data_nota"]         = pd.to_datetime(df_c["data_nota"], errors="coerce")
+        df_c = df_c.dropna(subset=["data_encerramento", "data_nota"])
+        if not df_c.empty:
+            lt = (df_c["data_encerramento"] - df_c["data_nota"]).dt.days
+            return round(lt[lt >= 0].mean(), 1)
+
     return 0.0
 
 # endregion
 
 
-# region ====================== SESSÃO 3: Render dos indicadores ==============
+# region ====================== SESSÃO 3: render_indicadores_geral() ===========
 
-def _semaforo_imt(imt: float) -> tuple[str, str]:
-    """Retorna (emoji_cor, texto_status) baseado no valor do IMT."""
-    if imt >= IMT_CRITICO:
-        return "🔴", "Crítico"
-    if imt >= IMT_ATENCAO:
-        return "🟡", "Atenção"
-    return "🟢", "Normal"
-
-
-def render_indicadores_geral(
-    df_sp_vp: pd.DataFrame | None,
-    df_sp_ee: pd.DataFrame | None,
-    df_vp_vp: pd.DataFrame | None,
-    df_vp_ee: pd.DataFrame | None,
-) -> None:
+def _cor_indicador(valor: float, lim_crit: float, lim_aten: float,
+                   inverso: bool = False) -> str:
     """
-    Renderiza o painel de indicadores integrados na Visão Geral.
-
-    Exibe IMT e DI para cada combinação Gerência × Disciplina,
-    mais indicadores consolidados (SP+VP).
-
-    Args:
-        df_sp_vp: notas SP - Via Permanente
-        df_sp_ee: notas SP - Eletroeletrônica
-        df_vp_vp: notas VP - Via Permanente
-        df_vp_ee: notas VP - Eletroeletrônica
+    Retorna cor CSS baseada no valor vs limites.
+    inverso=True: quanto maior o valor, pior (ex: lead time).
     """
+    if valor == 0.0:
+        return COR_NA
+    if inverso:
+        if valor >= lim_crit:   return COR_CRIT
+        elif valor >= lim_aten: return COR_WARN
+        else:                   return COR_OK
+    else:
+        if valor < lim_crit:    return COR_CRIT
+        elif valor < lim_aten:  return COR_WARN
+        else:                   return COR_OK
+
+
+def _card_indicador(label: str, valor: str, descricao: str, cor: str):
+    """Card visual para um indicador."""
     st.markdown(
-        """
-        <div style='
-            background: rgba(30,58,95,0.05);
-            border-left: 4px solid #1e3a5f;
-            border-radius: 8px;
-            padding: 10px 16px;
-            margin-bottom: 12px;
-        '>
-        <b>📡 Indicadores Integrados MRS Sentinel</b>
-        <span style='font-size:11px; color:#6b7280; margin-left:8px;'>
-        IMT = Índice de Manutenção Total &nbsp;|&nbsp; DI = Densidade de Intervenção
-        </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # ── 3.1: Calcula todos os indicadores ────────────────────────────────────
-    imt_sp_vp = calcular_imt(df_sp_vp, "SP", "VP")
-    imt_sp_ee = calcular_imt(df_sp_ee, "SP", "EE")
-    imt_vp_vp = calcular_imt(df_vp_vp, "VP", "VP")
-    imt_vp_ee = calcular_imt(df_vp_ee, "VP", "EE")
-
-    di_sp = calcular_di(_concat_safe(df_sp_vp, df_sp_ee), "SP")
-    di_vp = calcular_di(_concat_safe(df_vp_vp, df_vp_ee), "VP")
-
-    ader_sp = calcular_aderencia(_concat_safe(df_sp_vp, df_sp_ee))
-    ader_vp = calcular_aderencia(_concat_safe(df_vp_vp, df_vp_ee))
-
-    lt_sp = calcular_lead_time_medio(_concat_safe(df_sp_vp, df_sp_ee))
-    lt_vp = calcular_lead_time_medio(_concat_safe(df_vp_vp, df_vp_ee))
-
-    # ── 3.2: Tabela de IMT por gerência × disciplina ──────────────────────────
-    st.markdown("#### 📊 IMT por Gerência × Disciplina")
-
-    dados_imt = {
-        "Gerência": ["SP", "SP", "VP", "VP"],
-        "Disciplina": ["VP (Via Permanente)", "EE (Eletroeletrônica)", "VP (Via Permanente)", "EE (Eletroeletrônica)"],
-        "IMT": [imt_sp_vp, imt_sp_ee, imt_vp_vp, imt_vp_ee],
-    }
-    df_imt = pd.DataFrame(dados_imt)
-
-    # Gráfico de barras agrupadas IMT
-    fig_imt = go.Figure()
-    for ger in ["SP", "VP"]:
-        sub = df_imt[df_imt["Gerência"] == ger]
-        fig_imt.add_trace(go.Bar(
-            name=f"Gerência {ger}",
-            x=sub["Disciplina"],
-            y=sub["IMT"],
-            text=[f"{v:.2f}" for v in sub["IMT"]],
-            textposition="outside",
-            marker_color="#1e3a5f" if ger == "SP" else "#16a34a",
-        ))
-
-    fig_imt.add_hline(
-        y=IMT_CRITICO, line_dash="dot", line_color="#dc2626",
-        annotation_text=f"  Crítico ({IMT_CRITICO})",
-        annotation_font_color="#dc2626",
-    )
-    fig_imt.add_hline(
-        y=IMT_ATENCAO, line_dash="dash", line_color="#f59e0b",
-        annotation_text=f"  Atenção ({IMT_ATENCAO})",
-        annotation_font_color="#f59e0b",
-    )
-    fig_imt.update_layout(
-        barmode="group",
-        plot_bgcolor="#fff", paper_bgcolor="#fff",
-        margin=dict(l=10, r=10, t=20, b=40),
-        height=280,
-        legend=dict(orientation="h", y=1.08),
-        yaxis=dict(title="IMT", showgrid=True, gridcolor="#f3f4f6"),
-        font_color="#1f2937",
-    )
-    st.plotly_chart(fig_imt, use_container_width=True, config={"displaylogo": False})
-
-    # ── 3.3: Cards de DI, Aderência e Lead time ────────────────────────────────
-    st.markdown("#### 🏷️ Indicadores Operacionais")
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-
-    _mini_card(c1, "DI — SP", f"{di_sp:.1f}", "notas/km", "#1e3a5f")
-    _mini_card(c2, "DI — VP", f"{di_vp:.1f}", "notas/km", "#16a34a")
-    _mini_card(c3, "Aderência SP", f"{ader_sp:.0f}%", "ao planejado",
-               "#16a34a" if ader_sp >= 80 else "#f59e0b" if ader_sp >= 60 else "#dc2626")
-    _mini_card(c4, "Aderência VP", f"{ader_vp:.0f}%", "ao planejado",
-               "#16a34a" if ader_vp >= 80 else "#f59e0b" if ader_vp >= 60 else "#dc2626")
-    _mini_card(c5, "Lead Time SP", f"{lt_sp:.0f} d", "média geral", "#7c3aed")
-    _mini_card(c6, "Lead Time VP", f"{lt_vp:.0f} d", "média geral", "#7c3aed")
-
-    # ── 3.4: Semáforo de IMT ──────────────────────────────────────────────────
-    st.markdown("#### 🚦 Semáforo de IMT")
-    s1, s2, s3, s4 = st.columns(4)
-
-    for col, imt, label in [
-        (s1, imt_sp_vp, "SP — Via Permanente"),
-        (s2, imt_sp_ee, "SP — Eletroeletrônica"),
-        (s3, imt_vp_vp, "VP — Via Permanente"),
-        (s4, imt_vp_ee, "VP — Eletroeletrônica"),
-    ]:
-        emoji, status = _semaforo_imt(imt)
-        col.markdown(
-            f"""
-            <div style='
-                background: #f8fafc;
-                border-radius: 10px;
-                border: 1px solid #e5e7eb;
-                padding: 12px;
-                text-align: center;
-            '>
-                <div style='font-size:28px;'>{emoji}</div>
-                <div style='font-size:20px; font-weight:700; color:#1f2937;'>{imt:.2f}</div>
-                <div style='font-size:10px; color:#6b7280;'>{label}</div>
-                <div style='font-size:11px; font-weight:600; color:#4b5563;'>{status}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-def _concat_safe(
-    df_a: pd.DataFrame | None,
-    df_b: pd.DataFrame | None,
-) -> pd.DataFrame:
-    """Concatena dois DataFrames de forma segura, ignorando Nones vazios."""
-    dfs = [d for d in [df_a, df_b] if d is not None and not d.empty]
-    if not dfs:
-        return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True)
-
-
-def _mini_card(col, titulo: str, valor: str, subtitulo: str, cor: str) -> None:
-    """Card compacto para indicadores operacionais."""
-    col.markdown(
         f"""
         <div style='
-            background: #f8fafc;
-            border-left: 3px solid {cor};
-            border-radius: 8px;
-            padding: 10px;
+            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #e5e7eb;
+            border-left: 5px solid {cor};
+            padding: 16px 18px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
             text-align: center;
+            margin-bottom: 8px;
         '>
-            <div style='font-size:9px; color:#6b7280;'>{titulo}</div>
-            <div style='font-size:20px; font-weight:700; color:{cor};'>{valor}</div>
-            <div style='font-size:9px; color:#9ca3af;'>{subtitulo}</div>
+            <div style='font-size:0.7rem; color:#6b7280; font-weight:600;
+                        text-transform:uppercase; letter-spacing:0.06em;'>
+                {label}
+            </div>
+            <div style='font-size:2rem; font-weight:800; color:{cor}; margin:6px 0;'>
+                {valor}
+            </div>
+            <div style='font-size:0.72rem; color:#9ca3af;'>{descricao}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_indicadores_geral(df: pd.DataFrame):
+    """
+    Renderiza o painel de 4 indicadores principais na aba Consolidado.
+
+    Exibe IMT, DI, Aderência e Lead Time em cards coloridos (semáforo).
+
+    Args:
+        df: DataFrame unificado SP + VP com score calculado
+    """
+    imt  = calcular_imt(df)
+    di   = calcular_di(df)
+    adh  = calcular_aderencia(df)
+    lt   = calcular_lead_time_medio(df)
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        cor = _cor_indicador(imt, LIMITE_IMT_CRITICO, LIMITE_IMT_ATENCAO)
+        _card_indicador(
+            "IMT — Índice Manutenção Técnica",
+            f"{imt:.1f}%",
+            f"Meta ≥ {LIMITE_IMT_ATENCAO:.0f}%",
+            cor,
+        )
+
+    with col2:
+        cor = _cor_indicador(di, LIMITE_DI_CRITICO, LIMITE_DI_ATENCAO)
+        _card_indicador(
+            "DI — Desempenho de Intervenção",
+            f"{di:.1f}%",
+            f"Meta ≥ {LIMITE_DI_ATENCAO:.0f}%",
+            cor,
+        )
+
+    with col3:
+        cor = _cor_indicador(adh, LIMITE_ADH_CRITICO, LIMITE_ADH_ATENCAO)
+        _card_indicador(
+            "Aderência ao Planejamento",
+            f"{adh:.1f}%",
+            f"Meta ≥ {LIMITE_ADH_ATENCAO:.0f}%",
+            cor,
+        )
+
+    with col4:
+        cor = _cor_indicador(
+            lt, LIMITE_LT_CRITICO, LIMITE_LT_ATENCAO, inverso=True
+        )
+        _card_indicador(
+            "Lead Time Médio",
+            f"{lt:.0f} dias",
+            f"Meta ≤ {LIMITE_LT_ATENCAO} dias",
+            cor,
+        )
+
+    # Barra de contexto
+    total = len(df)
+    abertas = (
+        df["status_usuario"].str.upper().str.startswith("AB", na=False).sum()
+        if "status_usuario" in df.columns else 0
+    )
+    st.caption(
+        f"Base: **{total:,}** notas totais · "
+        f"**{abertas:,}** abertas · "
+        f"**{total - abertas:,}** encerradas"
+    )
+
+# endregion
+
+
+# region ====================== SESSÃO 4: render_semaforo() ====================
+
+def render_semaforo(df_sp: pd.DataFrame, df_vp: pd.DataFrame):
+    """
+    Exibe um semáforo comparativo de saúde da malha SP × VP.
+
+    Para cada gerência exibe: IMT, DI, Aderência, Lead Time
+    com ícones coloridos de semáforo.
+
+    Args:
+        df_sp: DataFrame da Gerência SP (pode ser vazio)
+        df_vp: DataFrame da Gerência VP (pode ser vazio)
+    """
+    def _semaforo_icon(valor: float, lim_crit: float, lim_aten: float,
+                       inverso: bool = False) -> str:
+        """Retorna emoji de semáforo baseado no valor."""
+        if valor == 0.0:
+            return "⚫"
+        cor = _cor_indicador(valor, lim_crit, lim_aten, inverso)
+        return {"#16a34a": "🟢", "#f59e0b": "🟡", "#dc2626": "🔴"}.get(cor, "⚫")
+
+    indicadores = [
+        ("IMT (%)",         "imt",  False, LIMITE_IMT_CRITICO,  LIMITE_IMT_ATENCAO),
+        ("DI (%)",          "di",   False, LIMITE_DI_CRITICO,   LIMITE_DI_ATENCAO),
+        ("Aderência (%)",   "adh",  False, LIMITE_ADH_CRITICO,  LIMITE_ADH_ATENCAO),
+        ("Lead Time (dias)","lt",   True,  LIMITE_LT_CRITICO,   LIMITE_LT_ATENCAO),
+    ]
+
+    # Calcula para SP e VP
+    vals_sp = {
+        "imt": calcular_imt(df_sp),
+        "di":  calcular_di(df_sp),
+        "adh": calcular_aderencia(df_sp),
+        "lt":  calcular_lead_time_medio(df_sp),
+    } if not df_sp.empty else {}
+
+    vals_vp = {
+        "imt": calcular_imt(df_vp),
+        "di":  calcular_di(df_vp),
+        "adh": calcular_aderencia(df_vp),
+        "lt":  calcular_lead_time_medio(df_vp),
+    } if not df_vp.empty else {}
+
+    # Cabeçalho
+    col_ind, col_sp, col_vp = st.columns([2, 1, 1])
+    with col_ind:
+        st.markdown("**Indicador**")
+    with col_sp:
+        st.markdown("**🏭 SP**")
+    with col_vp:
+        st.markdown("**🏭 VP**")
+
+    st.markdown("<hr style='margin:4px 0;'>", unsafe_allow_html=True)
+
+    for label, key, inverso, lim_c, lim_a in indicadores:
+        col_ind, col_sp, col_vp = st.columns([2, 1, 1])
+
+        val_sp = vals_sp.get(key, 0.0)
+        val_vp = vals_vp.get(key, 0.0)
+
+        icon_sp = _semaforo_icon(val_sp, lim_c, lim_a, inverso)
+        icon_vp = _semaforo_icon(val_vp, lim_c, lim_a, inverso)
+
+        fmt = "{:.0f} dias" if key == "lt" else "{:.1f}%"
+
+        with col_ind:
+            st.markdown(f"<small>{label}</small>", unsafe_allow_html=True)
+        with col_sp:
+            txt = fmt.format(val_sp) if vals_sp else "—"
+            st.markdown(f"{icon_sp} **{txt}**")
+        with col_vp:
+            txt = fmt.format(val_vp) if vals_vp else "—"
+            st.markdown(f"{icon_vp} **{txt}**")
+
+    st.caption("🟢 Meta atingida · 🟡 Atenção · 🔴 Crítico · ⚫ Sem dados")
 
 # endregion

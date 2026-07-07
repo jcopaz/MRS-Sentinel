@@ -1,27 +1,33 @@
-# core/score_engine.py
-# Motor de Score Composto configurável + Painel de Transparência
-# Sprint 3 — Visualizações por Gerência
+# =============================================================================
+# core/score_engine.py — Motor de Score Composto
+# Sprint 3 — MRS Sentinel
 #
 # Fórmula:
-#   Score = peso_prio × mult_status × mult_familia × mult_tipo × (1 + α × anos_aberta)
+#   Score = peso_prio × mult_status × mult_familia × mult_tipo × (1 + α × anos)
 #
-# USO:
-#   from core.score_engine import render_score_sidebar, calcular_score, render_painel_transparencia
+# Exporta:
+#   ScoreConfig              — dataclass com pesos configuráveis
+#   render_score_sidebar()   — painel sidebar com sliders
+#   calcular_score_dataframe() — aplica score a todo o DataFrame
+#   render_painel_transparencia() — exibe pesos ativos ao usuário
 #
-#   config = render_score_sidebar(disciplina="VP")
-#   df     = calcular_score(df, config)
-#   render_painel_transparencia(df, config)
+# Sessão 1: Imports & constantes de peso
+# Sessão 2: ScoreConfig (dataclass)
+# Sessão 3: calcular_score_linha() — cálculo por linha
+# Sessão 4: calcular_score_dataframe() — vetorizado
+# Sessão 5: render_score_sidebar() — controles na sidebar
+# Sessão 6: render_painel_transparencia() — explicação dos pesos
+# =============================================================================
 
+# region ====================== SESSÃO 1: Imports & Constantes =================
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-from datetime import datetime, date
 from dataclasses import dataclass, field
+from datetime import date
+from typing import Optional
 
-# region ====================== SESSÃO 1: Pesos padrão ========================
-
-# Fonte: 05_PADROES_TECNICOS.md
+# Pesos base (conforme 05_PADROES_TECNICOS.md)
 PESO_PRIORIDADE_PADRAO = {
     "1-Muito alta": 4,
     "2-Alta":       3,
@@ -30,396 +36,311 @@ PESO_PRIORIDADE_PADRAO = {
 }
 
 MULT_STATUS_PADRAO = {
-    "ABER": 1.0,
-    "DIFE": 0.5,
-}
-
-MULT_TIPO_PADRAO = {
-    "CT": 1.5,
-    "PV": 1.0,
+    "ABER": 1.0,   # nota aberta = peso total
+    "DIFE": 0.5,   # diferida = metade do peso
 }
 
 MULT_FAMILIA_VP_PADRAO = {
-    "Trilho":            1.5,
-    "Geometria":         1.5,
-    "AMV":               1.5,
-    "Dormente":          1.2,
-    "Lastro":            1.2,
-    "Junta":             1.0,
-    "Solda":             1.0,
-    "Cota Salvaguarda":  1.0,
-    "Geral Manutenção":  0.8,
-    "Outros":            1.0,
+    "Trilho":           1.5,
+    "Geometria":        1.5,
+    "AMV":              1.5,
+    "Dormente":         1.2,
+    "Lastro":           1.2,
+    "Junta":            1.0,
+    "Solda":            1.0,
+    "Cota Salvaguarda": 1.0,
+    "Geral Manutenção": 0.8,
+    "Outros":           1.0,
 }
 
 MULT_FAMILIA_EE_PADRAO = {
     "Wayside":               1.5,
     "Sinalização":           1.3,
     "Energia":               1.2,
-    "Sinalização Específica":1.1,
     "Telecomunicações":      1.0,
+    "Sinalização Específica":1.1,
     "Outros":                1.0,
 }
 
-ALPHA_PADRAO = 0.10  # 10% por ano em aberto
+MULT_TIPO_PADRAO = {
+    "CT": 1.5,   # corretiva = mais urgente
+    "PV": 1.0,   # preventiva
+}
+
+ALPHA_PADRAO = 0.10  # 10% de acréscimo por ano aberto
 
 # endregion
 
 
-# region ====================== SESSÃO 2: Dataclass de Configuração ============
+# region ====================== SESSÃO 2: ScoreConfig ==========================
 
 @dataclass
 class ScoreConfig:
     """
-    Configuração imutável do motor de score — criada pelo render_score_sidebar()
-    e passada para calcular_score() e render_painel_transparencia().
-
-    Atributos:
-        disciplina:      'VP', 'EE' ou 'VP+EE'
-        alpha_idade:     peso do fator de envelhecimento (0–1)
-        usar_status:     ativa o multiplicador ABER/DIFE
-        usar_tipo:       ativa o multiplicador CT/PV
-        usar_familia:    ativa o multiplicador por família de defeito
-        mult_familia:    dict {familia: multiplicador} ajustado pelo usuário
-        peso_prio:       dict {prioridade: peso base}
+    Configuração completa dos pesos do score composto.
+    Todos os campos têm valores padrão — basta instanciar sem argumentos
+    para obter o comportamento canônico.
     """
-    disciplina:   str
-    alpha_idade:  float = ALPHA_PADRAO
-    usar_status:  bool  = True
-    usar_tipo:    bool  = True
-    usar_familia: bool  = True
-    mult_familia: dict  = field(default_factory=dict)
-    peso_prio:    dict  = field(default_factory=lambda: PESO_PRIORIDADE_PADRAO.copy())
+    # Multiplicador de idade (% por ano em aberto)
+    alpha: float = ALPHA_PADRAO
+
+    # Pesos configuráveis via sidebar
+    peso_prioridade: dict = field(default_factory=lambda: dict(PESO_PRIORIDADE_PADRAO))
+    mult_status:     dict = field(default_factory=lambda: dict(MULT_STATUS_PADRAO))
+    mult_familia_vp: dict = field(default_factory=lambda: dict(MULT_FAMILIA_VP_PADRAO))
+    mult_familia_ee: dict = field(default_factory=lambda: dict(MULT_FAMILIA_EE_PADRAO))
+    mult_tipo:       dict = field(default_factory=lambda: dict(MULT_TIPO_PADRAO))
+
+    # Flags de ativação (permite desligar componentes do score)
+    usar_familia:    bool = True
+    usar_tipo:       bool = True
+    usar_idade:      bool = True
 
 # endregion
 
 
-# region ====================== SESSÃO 3: Sidebar de configuração ==============
+# region ====================== SESSÃO 3: Cálculo por linha ====================
 
-def render_score_sidebar(disciplina: str) -> ScoreConfig:
+def _anos_abertos(data_nota) -> float:
     """
-    Renderiza controles do score na sidebar e retorna ScoreConfig.
-
-    A renderização usa um expander para não poluir a sidebar.
-
-    Args:
-        disciplina: 'VP', 'EE' ou 'VP+EE'
-
-    Returns:
-        ScoreConfig populado com as escolhas do usuário
+    Calcula quantos anos a nota está aberta até hoje.
+    Defensivo: retorna 0 se data for inválida.
     """
-    mult_familia_base = (
-        MULT_FAMILIA_EE_PADRAO
-        if disciplina == "EE"
-        else MULT_FAMILIA_VP_PADRAO
-    )
-
-    with st.sidebar.expander("⚖️ Configurar Score", expanded=False):
-        st.caption("Ajuste os fatores do score composto:")
-
-        # ── α idade ─────────────────────────────────────────────────────────
-        alpha = st.slider(
-            "🕰️ Fator Idade (α)",
-            min_value=0.0,
-            max_value=0.5,
-            value=ALPHA_PADRAO,
-            step=0.01,
-            format="%.2f",
-            help="Incremento de score por ano que a nota permanece aberta. "
-                 "α=0.10 → nota com 2 anos = +20% de score.",
-            key=f"alpha_{disciplina}",
-        )
-
-        # ── Status (ABER/DIFE) ────────────────────────────────────────────────
-        usar_status = st.checkbox(
-            "📍 Penalizar DIFE (×0.5)",
-            value=True,
-            help="Notas com status DIFE (diferido) recebem peso 0.5 — indicam "
-                 "pendência reconhecida mas ainda não atacada.",
-            key=f"status_{disciplina}",
-        )
-
-        # ── Tipo de atividade (CT/PV) ─────────────────────────────────────────
-        usar_tipo = st.checkbox(
-            "🛠️ Ampliar CT (×1.5)",
-            value=True,
-            help="Notas do tipo CT (corretiva) pesam 50% a mais que PV "
-                 "(preventiva) — indicam falha já ocorrida.",
-            key=f"tipo_{disciplina}",
-        )
-
-        # ── Multiplicadores por família ────────────────────────────────────────
-        usar_familia = st.checkbox(
-            "🏷️ Multiplicador por Família",
-            value=True,
-            help="Aplica pesos diferenciados por família de defeito "
-                 "(ex.: Trilho e AMV pesam mais em VP).",
-            key=f"familia_ativo_{disciplina}",
-        )
-
-        mult_familia_config = {}
-        if usar_familia:
-            with st.expander("🔧 Ajustar pesos de família", expanded=False):
-                for familia, mult_default in mult_familia_base.items():
-                    mult_familia_config[familia] = st.slider(
-                        familia,
-                        min_value=0.5,
-                        max_value=3.0,
-                        value=float(mult_default),
-                        step=0.1,
-                        key=f"fam_{disciplina}_{familia}",
-                    )
-        else:
-            mult_familia_config = {k: 1.0 for k in mult_familia_base}
-
-    return ScoreConfig(
-        disciplina=disciplina,
-        alpha_idade=alpha,
-        usar_status=usar_status,
-        usar_tipo=usar_tipo,
-        usar_familia=usar_familia,
-        mult_familia=mult_familia_config or {k: 1.0 for k in mult_familia_base},
-        peso_prio=PESO_PRIORIDADE_PADRAO.copy(),
-    )
-
-# endregion
+    try:
+        if pd.isna(data_nota):
+            return 0.0
+        dt = pd.Timestamp(data_nota)
+        delta = (pd.Timestamp(date.today()) - dt).days
+        return max(delta / 365.25, 0.0)
+    except Exception:
+        return 0.0
 
 
-# region ====================== SESSÃO 4: Cálculo do Score ====================
-
-def calcular_score(df: pd.DataFrame, config: ScoreConfig) -> pd.DataFrame:
+def calcular_score_linha(row: pd.Series, cfg: ScoreConfig) -> float:
     """
-    Aplica o score composto ao DataFrame e retorna df com coluna 'score' atualizada.
+    Calcula o score composto de uma linha do DataFrame.
 
     Fórmula:
-        score = peso_prio
-              × mult_status       (se config.usar_status)
-              × mult_familia      (se config.usar_familia)
-              × mult_tipo         (se config.usar_tipo)
-              × (1 + α × anos_aberta)
-
-    Proteções:
-      - Prioridade ausente → peso 1
-      - Status ausente → mult 1.0
-      - Família ausente → mult 1.0
-      - Tipo ausente → mult 1.0
-      - Data ausente ou futura → anos_aberta = 0
+        score = peso_prio × mult_status × mult_familia × mult_tipo × (1 + α × anos)
 
     Args:
-        df:     DataFrame com as notas
-        config: ScoreConfig gerado pelo render_score_sidebar
+        row: Series com campos peso_prio, status_usuario, familia_defeito,
+             tipo_nota, data_nota, disciplina_label
+        cfg: ScoreConfig com pesos configuráveis
 
     Returns:
-        DataFrame com coluna 'score' recalculada
+        float: score arredondado a 2 casas decimais
     """
-    if df is None or df.empty:
+    # Base: peso de prioridade
+    prio_raw = str(row.get("prioridade", "4-Baixa")).strip()
+    score = float(cfg.peso_prioridade.get(prio_raw, 1))
+
+    # Usa peso_prio direto se disponível (mais preciso)
+    peso_prio_col = row.get("peso_prio")
+    if peso_prio_col and not pd.isna(peso_prio_col):
+        score = float(peso_prio_col)
+
+    # Multiplicador de status
+    status_raw = str(row.get("status_usuario", "ABER")).strip().upper()[:4]
+    score *= cfg.mult_status.get(status_raw, 1.0)
+
+    # Multiplicador de família (VP ou EE)
+    if cfg.usar_familia:
+        disc = str(row.get("disciplina_label", row.get("disciplina", "VP"))).upper()
+        familia = str(row.get("familia_defeito", row.get("familia_cod", "Outros"))).strip()
+        if "EE" in disc:
+            score *= cfg.mult_familia_ee.get(familia, 1.0)
+        else:
+            score *= cfg.mult_familia_vp.get(familia, 1.0)
+
+    # Multiplicador de tipo de nota
+    if cfg.usar_tipo:
+        tipo = str(row.get("tipo_nota", "PV")).strip().upper()[:2]
+        score *= cfg.mult_tipo.get(tipo, 1.0)
+
+    # Fator de envelhecimento
+    if cfg.usar_idade:
+        anos = _anos_abertos(row.get("data_nota"))
+        score *= (1 + cfg.alpha * anos)
+
+    return round(score, 2)
+
+# endregion
+
+
+# region ====================== SESSÃO 4: Vetorizado ===========================
+
+def calcular_score_dataframe(df: pd.DataFrame, cfg: Optional[ScoreConfig] = None) -> pd.DataFrame:
+    """
+    Aplica o score composto a todo o DataFrame de forma eficiente.
+
+    Cria (ou sobrescreve) a coluna 'score' em cada linha.
+    Defensivo: se o DataFrame estiver vazio, retorna sem modificar.
+
+    Args:
+        df: DataFrame com notas
+        cfg: ScoreConfig; se None, usa configuração padrão
+
+    Returns:
+        DataFrame com coluna 'score' adicionada/atualizada
+    """
+    if df.empty:
         return df
 
+    if cfg is None:
+        cfg = ScoreConfig()
+
     df = df.copy()
-    hoje = pd.Timestamp.now().normalize()
 
-    # ── 4.1: Peso de prioridade ───────────────────────────────────────────────
-    if "prioridade" in df.columns:
-        df["_peso_prio"] = df["prioridade"].map(config.peso_prio).fillna(1)
-    else:
-        df["_peso_prio"] = 1.0
-
-    # ── 4.2: Multiplicador de status ─────────────────────────────────────────
-    if config.usar_status and "status_usuario" in df.columns:
-        df["_mult_status"] = (
-            df["status_usuario"]
-            .str.upper()
-            .map(MULT_STATUS_PADRAO)
-            .fillna(1.0)
-        )
-    else:
-        df["_mult_status"] = 1.0
-
-    # ── 4.3: Multiplicador de família ─────────────────────────────────────────
-    if config.usar_familia:
-        col_fam = "familia_defeito" if "familia_defeito" in df.columns else (
-                  "familia_cod"   if "familia_cod"   in df.columns else None)
-        if col_fam:
-            df["_mult_familia"] = df[col_fam].map(config.mult_familia).fillna(1.0)
-        else:
-            df["_mult_familia"] = 1.0
-    else:
-        df["_mult_familia"] = 1.0
-
-    # ── 4.4: Multiplicador de tipo de atividade ───────────────────────────────
-    if config.usar_tipo and "tipo_atividade" in df.columns:
-        df["_mult_tipo"] = (
-            df["tipo_atividade"]
-            .str.upper()
-            .map(MULT_TIPO_PADRAO)
-            .fillna(1.0)
-        )
-    else:
-        df["_mult_tipo"] = 1.0
-
-    # ── 4.5: Fator de idade ───────────────────────────────────────────────────
-    # anos_aberta = (hoje - data_nota) / 365  — clampado em [0, inf]
-    if "data_nota" in df.columns:
-        df["_data_nota_ts"] = pd.to_datetime(df["data_nota"], errors="coerce")
-        df["_anos_aberta"] = (
-            (hoje - df["_data_nota_ts"]).dt.days / 365
-        ).clip(lower=0).fillna(0)
-    else:
-        df["_anos_aberta"] = 0.0
-
-    # ── 4.6: Score final ──────────────────────────────────────────────────────
-    df["score"] = (
-        df["_peso_prio"]
-        * df["_mult_status"]
-        * df["_mult_familia"]
-        * df["_mult_tipo"]
-        * (1 + config.alpha_idade * df["_anos_aberta"])
-    ).round(2)
-
-    # Remove colunas auxiliares (prefixo _)
-    df.drop(columns=[c for c in df.columns if c.startswith("_")], inplace=True)
+    # Aplica por linha (axis=1)
+    # Nota: para datasets muito grandes (>100k), considerar vetorização numpy
+    df["score"] = df.apply(lambda row: calcular_score_linha(row, cfg), axis=1)
 
     return df
 
 # endregion
 
 
-# region ====================== SESSÃO 5: Painel de Transparência ==============
+# region ====================== SESSÃO 5: Sidebar de configuração ==============
 
-def render_painel_transparencia(df: pd.DataFrame, config: ScoreConfig) -> None:
+def render_score_sidebar(gerencia: str = "SP") -> ScoreConfig:
     """
-    Exibe painel explicativo mostrando como o score foi calculado e o impacto
-    de cada fator na distribuição final.
-
-    Conteúdo:
-      - Tabela de pesos ativos
-      - Histograma de distribuição de scores
-      - Indicadores de impacto por fator
+    Renderiza o painel de configuração de score na sidebar.
+    Usa st.expander para não poluir a sidebar com muitos controles.
 
     Args:
-        df:     DataFrame com coluna 'score' calculada
-        config: ScoreConfig usado no cálculo
+        gerencia: 'SP', 'VP' ou 'GERAL' — usado no título do expander
+
+    Returns:
+        ScoreConfig com os pesos escolhidos pelo usuário
     """
-    if df is None or df.empty or "score" not in df.columns:
-        st.info("📭 Score não calculado ainda.")
-        return
+    cfg = ScoreConfig()
 
-    st.markdown("---")
-    st.markdown(
-        """
-        <div style='
-            background:rgba(30,58,95,0.05);
-            border-left:4px solid #1e3a5f;
-            border-radius:8px;
-            padding:10px 16px;
-            margin-bottom:12px;
-        '>
-        <b>🔍 Painel de Transparência do Score</b><br/>
-        <span style='font-size:12px;color:#6b7280;'>
-        Entenda como cada fator contribui para o score composto.
-        </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.expander(f"⚙️ Score — {gerencia}", expanded=False):
 
-    c1, c2 = st.columns([1.2, 2])
-
-    with c1:
-        st.markdown("**⚙️ Fatores ativos**")
-
-        fatores = [
-            ("🕰️ Fator Idade (α)",       f"{config.alpha_idade:.2f}",  True),
-            ("📍 Penalizar DIFE",         "×0.5",  config.usar_status),
-            ("🛠️ Ampliar CT",            "×1.5",  config.usar_tipo),
-            ("🏷️ Mult. por Família",     "variável", config.usar_familia),
-        ]
-
-        for nome, valor, ativo in fatores:
-            cor = "#16a34a" if ativo else "#9ca3af"
-            icone = "✅" if ativo else "⬜"
-            st.markdown(
-                f"<div style='font-size:13px; color:{cor}; margin-bottom:4px;'>"
-                f"{icone} {nome}: <b>{valor}</b></div>",
-                unsafe_allow_html=True,
+        # ── Alpha (envelhecimento) ────────────────────────────────────────────
+        cfg.usar_idade = st.checkbox(
+            "📅 Penalizar notas antigas",
+            value=True,
+            key=f"sc_usar_idade_{gerencia}",
+            help="Acrescenta peso para notas abertas há mais tempo",
+        )
+        if cfg.usar_idade:
+            cfg.alpha = st.slider(
+                "α — Acréscimo por ano em aberto",
+                min_value=0.0, max_value=0.5,
+                value=ALPHA_PADRAO, step=0.01,
+                format="%.2f",
+                key=f"sc_alpha_{gerencia}",
+                help="0.10 = +10% por ano. Nota com 2 anos → ×1.20",
             )
 
-        # Resumo estatístico
         st.markdown("---")
-        st.markdown("**📊 Distribuição**")
-        scores = df["score"].dropna()
-        st.metric("Score Mínimo",  f"{scores.min():.1f}")
-        st.metric("Score Médio",   f"{scores.mean():.1f}")
-        st.metric("Score Máximo",  f"{scores.max():.1f}")
-        st.metric("Desvio Padrão", f"{scores.std():.1f}")
 
-    with c2:
-        # Histograma de distribuição de scores
-        fig = go.Figure()
-        fig.add_trace(
-            go.Histogram(
-                x=df["score"].dropna(),
-                nbinsx=30,
-                marker=dict(
-                    color="#1e3a5f",
-                    line=dict(color="#ffffff", width=0.5),
-                ),
-                opacity=0.85,
-                name="Notas",
+        # ── Família de defeito ────────────────────────────────────────────────
+        cfg.usar_familia = st.checkbox(
+            "🔩 Multiplicar por família de defeito",
+            value=True,
+            key=f"sc_usar_familia_{gerencia}",
+        )
+
+        st.markdown("---")
+
+        # ── Tipo de nota ──────────────────────────────────────────────────────
+        cfg.usar_tipo = st.checkbox(
+            "📋 Multiplicar por tipo (CT/PV)",
+            value=True,
+            key=f"sc_usar_tipo_{gerencia}",
+            help="CT (Corretiva) = ×1.5 · PV (Preventiva) = ×1.0",
+        )
+
+        st.markdown("---")
+
+        # ── Pesos de prioridade ───────────────────────────────────────────────
+        st.markdown("**🎯 Pesos de prioridade**")
+        col1, col2 = st.columns(2)
+        with col1:
+            cfg.peso_prioridade["1-Muito alta"] = st.number_input(
+                "Muito Alta", min_value=1, max_value=10,
+                value=4, step=1, key=f"sc_p1_{gerencia}",
             )
-        )
+            cfg.peso_prioridade["3-Média"] = st.number_input(
+                "Média", min_value=1, max_value=10,
+                value=2, step=1, key=f"sc_p3_{gerencia}",
+            )
+        with col2:
+            cfg.peso_prioridade["2-Alta"] = st.number_input(
+                "Alta", min_value=1, max_value=10,
+                value=3, step=1, key=f"sc_p2_{gerencia}",
+            )
+            cfg.peso_prioridade["4-Baixa"] = st.number_input(
+                "Baixa", min_value=1, max_value=10,
+                value=1, step=1, key=f"sc_p4_{gerencia}",
+            )
 
-        # Linha de score médio
-        media = df["score"].mean()
-        fig.add_vline(
-            x=media,
-            line_dash="dash",
-            line_color="#ffb000",
-            annotation_text=f"  Média: {media:.1f}",
-            annotation_font_color="#ffb000",
-        )
+    return cfg
 
-        # Linha de threshold top 10%
-        p90 = df["score"].quantile(0.90)
-        fig.add_vline(
-            x=p90,
-            line_dash="dot",
-            line_color="#dc2626",
-            annotation_text=f"  Top 10%: {p90:.1f}",
-            annotation_font_color="#dc2626",
-        )
+# endregion
 
-        fig.update_layout(
-            title=f"Distribuição de Scores — {config.disciplina}",
-            xaxis_title="Score",
-            yaxis_title="Nº de Notas",
-            plot_bgcolor="#ffffff",
-            paper_bgcolor="#ffffff",
-            font_color="#1f2937",
-            title_font=dict(color="#1e3a5f", size=13),
-            margin=dict(l=10, r=10, t=40, b=30),
-            height=300,
-            showlegend=False,
-        )
 
-        st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+# region ====================== SESSÃO 6: Painel de transparência ==============
 
-# Wrapper de compatibilidade com Sprint 1
-# parser.py chama aplicar_score_dataframe(df, disciplina="VP")
-def aplicar_score_dataframe(df: pd.DataFrame, disciplina: str = "VP") -> pd.DataFrame:
+def render_painel_transparencia(cfg: ScoreConfig):
     """
-    Cria um ScoreConfig padrão e aplica o score.
-    Mantém compatibilidade com a assinatura do Sprint 1.
+    Exibe um painel explicando os pesos ativos do score.
+    Fundamental para que gestores entendam como o ranking é calculado.
+
+    Args:
+        cfg: ScoreConfig com os pesos configurados pelo usuário
     """
-    mult_familia = (
-        MULT_FAMILIA_EE_PADRAO
-        if disciplina == "EE"
-        else MULT_FAMILIA_VP_PADRAO
-    )
-    config = ScoreConfig(
-        disciplina=disciplina,
-        mult_familia=mult_familia,
-    )
-    return calcular_score(df, config)
+    with st.expander("🔍 Como o score é calculado?", expanded=False):
+        st.markdown(
+            """
+            **Fórmula:**
+            ```
+            Score = Peso Prioridade
+                  × Multiplicador Status
+                  × Multiplicador Família
+                  × Multiplicador Tipo
+                  × (1 + α × Anos em aberto)
+            ```
+            """
+        )
+
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            st.markdown("**🎯 Pesos de prioridade ativos**")
+            df_prio = pd.DataFrame(
+                list(cfg.peso_prioridade.items()),
+                columns=["Prioridade", "Peso Base"]
+            )
+            st.dataframe(df_prio, hide_index=True, use_container_width=True)
+
+            st.markdown("**📋 Status**")
+            df_status = pd.DataFrame(
+                list(cfg.mult_status.items()),
+                columns=["Status", "Multiplicador"]
+            )
+            st.dataframe(df_status, hide_index=True, use_container_width=True)
+
+        with col_b:
+            st.markdown("**📅 Envelhecimento**")
+            if cfg.usar_idade:
+                st.success(f"✅ Ativo — α = {cfg.alpha:.2f} (+{cfg.alpha*100:.0f}% por ano)")
+                st.caption("Exemplo: nota com 3 anos → ×{:.2f}".format(1 + cfg.alpha * 3))
+            else:
+                st.info("⏸️ Desativado")
+
+            st.markdown("**🔩 Família**")
+            st.success("✅ Ativa") if cfg.usar_familia else st.info("⏸️ Desativada")
+
+            st.markdown("**📋 Tipo CT/PV**")
+            st.success("✅ Ativo") if cfg.usar_tipo else st.info("⏸️ Desativado")
+
+        st.caption(
+            "ℹ️ Scores altos = maior criticidade. Use os controles em "
+            "⚙️ Score na sidebar para ajustar os pesos."
+        )
 
 # endregion
