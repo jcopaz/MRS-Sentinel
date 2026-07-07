@@ -29,6 +29,16 @@ COR_CRIT     = "#dc2626"
 COR_WARN     = "#f59e0b"
 COR_OK       = "#16a34a"
 
+
+def _hex_rgba(hex_cor: str, opacidade: float = 0.10) -> str:
+    """
+    Converte hex (#rrggbb) para rgba() aceito pelo Plotly.
+    Plotly NÃO aceita notação hex+alpha (#rrggbbaa).
+    """
+    h = hex_cor.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{opacidade})"
+
 # endregion
 
 
@@ -385,13 +395,12 @@ def render_serie_temporal(
             ),
         ))
 
-        # Área preenchida suave
+        # Área preenchida suave — rgba() obrigatório no Plotly (hex+alpha não funciona)
         fig.add_trace(go.Scatter(
             x=sub["periodo"],
             y=sub["valor"],
             fill="tozeroy",
-            fillcolor=cor.replace(")", ", 0.08)").replace("rgb", "rgba")
-                       if cor.startswith("rgb") else cor + "14",
+            fillcolor=_hex_rgba(cor, 0.10),
             line=dict(width=0),
             showlegend=False,
             hoverinfo="skip",
