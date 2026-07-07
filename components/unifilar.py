@@ -590,3 +590,6 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = 0.5,
     )
 
 # endregion
+
+# Alias de compatibilidade — gerencia_sp/vp/geral importam render_unifilar_dual
+render_unifilar_dual = render_unifilar
