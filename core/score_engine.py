@@ -344,3 +344,11 @@ def render_painel_transparencia(cfg: ScoreConfig):
         )
 
 # endregion
+
+
+# =============================================================================
+# Aliases de compatibilidade
+# core/parser.py (Sprint 2) importa pelo nome antigo 'aplicar_score_dataframe'.
+# O alias garante retrocompatibilidade sem alterar o parser.
+# =============================================================================
+aplicar_score_dataframe = calcular_score_dataframe
