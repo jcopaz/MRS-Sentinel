@@ -49,17 +49,12 @@ def _construir_serie(
     y_offset: float = 0,
     label: str = "",
 ) -> tuple[list, list, pd.DataFrame, float | None, float | None]:
-    """
-    Agrupa notas por bin_km e retorna:
-        pontos_normais, pontos_pulsantes, agreg, km_min, km_max
-    """
     if df_base.empty:
         return [], [], pd.DataFrame(), None, None
 
     df_t = df_base.copy()
     df_t["bin_km"] = (df_t["km_real"] // bin_km) * bin_km
 
-    # Coluna de nota — tenta numero_nota, fallback index
     col_nota = "numero_nota" if "numero_nota" in df_t.columns else df_t.index.name or "index"
 
     agreg = df_t.groupby("bin_km").agg(
@@ -147,21 +142,8 @@ def _sanitize(obj):
 # ---------------------------------------------------------------------------
 
 def render_unifilar(df_filtrado: pd.DataFrame, cfg: dict) -> None:
-    """
-    Renderiza o Unifilar ECharts com:
-      - Seletor de Matriz (com contagem de notas)
-      - Modo Dual (Abertas × Concluídas) quando houver 2 origens
-      - Bolhas pulsantes nos top 10% de score
-      - dataZoom slider para zoom por KM
-      - Métricas abaixo (extensão, densidade, hot-spot, lead time)
+    bin_km = cfg.get("bin_km", 5.0)
 
-    Args:
-        df_filtrado: DataFrame já filtrado
-        cfg:         dict vindo de render_filtros_sidebar()
-    """
-    bin_km = cfg.get("bin_km", 0.5)
-
-    # Precisa de km_real e trecho
     df_uni = df_filtrado.dropna(subset=["km_real", "trecho"]).copy()
 
     if df_uni.empty:
@@ -174,16 +156,12 @@ def render_unifilar(df_filtrado: pd.DataFrame, cfg: dict) -> None:
 
     matrizes_com_dados = sorted(df_uni["trecho"].unique())
 
-    # ── Linha de controles ─────────────────────────────────────────────────
     col_modo, col_matriz = st.columns([1, 3])
 
-    # Detecta se há 2 "origens de base" (Abertas / Concluídas)
-    # Usa coluna origem_base se existir; senão usa status_amigavel para separar
     if "origem_base" in df_uni.columns:
         bases = sorted(df_uni["origem_base"].unique())
         modo_dual_possivel = len(bases) == 2
     else:
-        # Separa por status: abertas vs concluídas
         abertas    = df_uni["status_amigavel"].isin(["Aberta", "Diferida"]) if "status_amigavel" in df_uni.columns else pd.Series(False, index=df_uni.index)
         concluidas = df_uni["status_amigavel"].isin(["Concluída"]) if "status_amigavel" in df_uni.columns else pd.Series(False, index=df_uni.index)
         if abertas.any() and concluidas.any():
@@ -225,26 +203,36 @@ def render_unifilar(df_filtrado: pd.DataFrame, cfg: dict) -> None:
                 qtd = len(df_uni[df_uni["trecho"] == m])
                 opcoes.append(f"{m} ({qtd:,})")
 
-            escolha = st.radio(
-                "🚂 Matriz:",
-                opcoes,
-                horizontal=True,
-                key="uni_matriz",
-                help="Cada Matriz gera seu próprio unifilar. "
-                     "Número entre parênteses = notas após filtros.",
-            )
+            # Até 5 matrizes → radio horizontal; mais → selectbox para não quebrar layout
+            if len(opcoes) <= 5:
+                escolha = st.radio(
+                    "🚂 Matriz:",
+                    opcoes,
+                    horizontal=True,
+                    key="uni_matriz",
+                    help="Cada Matriz gera seu próprio unifilar. "
+                         "Número entre parênteses = notas após filtros.",
+                )
+            else:
+                escolha = st.selectbox(
+                    "🚂 Selecione a Matriz:",
+                    opcoes,
+                    key="uni_matriz",
+                    help="Cada Matriz gera seu próprio unifilar. "
+                         "Número entre parênteses = notas após filtros.",
+                )
             trecho_view = escolha.split(" (")[0]
 
     df_trecho = df_uni[df_uni["trecho"] == trecho_view].copy()
 
     st.caption(
-        f"Cada bolha = agrupamento de notas em janela de **{bin_km * 1000:.0f} m**. "
+        f"Cada bolha = agrupamento de notas em janela de **{bin_km:.0f} km**. "
         f"**Tamanho** = qtd de notas | **Cor** = score de criticidade | "
         f"**Bolhas pulsantes** = top 10% mais críticos. "
-        f"Use a **barra inferior** para dar zoom num intervalo de KM."
+        f"Use a **barra inferior** para dar zoom num intervalo de KM. "
+        f"Ajuste a granularidade em '🔬 Resolução do Mapa' na sidebar."
     )
 
-    # ── Construir séries ───────────────────────────────────────────────────
     series       = []
     km_min_g     = float("inf")
     km_max_g     = float("-inf")
@@ -269,7 +257,6 @@ def render_unifilar(df_filtrado: pd.DataFrame, cfg: dict) -> None:
         if len(ag_a): score_max_g = max(score_max_g, float(ag_a["score_total"].max()))
         if len(ag_c): score_max_g = max(score_max_g, float(ag_c["score_total"].max()))
 
-        # Linha da via
         series += [
             {"name": "Via (Abertas)",    "type": "line",
              "data": [[km_min_g, 1], [km_max_g, 1]],
@@ -298,7 +285,6 @@ def render_unifilar(df_filtrado: pd.DataFrame, cfg: dict) -> None:
                            "showEffectOn": "render",
                            "itemStyle": {"borderColor": "#fff", "borderWidth": 2}})
 
-        # Legenda dual
         c_l, c_r = st.columns(2)
         c_l.markdown(
             "<div style='text-align:center;padding:8px;background:#fef2f2;"
@@ -358,7 +344,6 @@ def render_unifilar(df_filtrado: pd.DataFrame, cfg: dict) -> None:
             unsafe_allow_html=True,
         )
 
-    # ── Opções ECharts ─────────────────────────────────────────────────────
     y_range = 2.5 if modo_dual else 1.2
 
     option = {
@@ -433,7 +418,6 @@ def render_unifilar(df_filtrado: pd.DataFrame, cfg: dict) -> None:
         key=f"unifilar_{trecho_view}_{str(modo_dual)}",
     )
 
-    # ── Métricas abaixo do gráfico ─────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
 

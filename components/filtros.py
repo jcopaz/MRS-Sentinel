@@ -202,11 +202,12 @@ def render_filtros_sidebar(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 🔬 Resolução do Mapa")
     bin_km = st.sidebar.slider(
-        "Janela de agrupamento (m):",
-        min_value=100, max_value=2000, value=500, step=100,
+        "Janela de agrupamento (km):",
+        min_value=1, max_value=20, value=5, step=1,
         key="fil_bin_km",
-        help="Menor = mais detalhe | Maior = visão macro.",
-    ) / 1000.0
+        help="Menor = mais detalhe (mais bolhas) | Maior = visão macro (menos bolhas). "
+             "Recomendado: 5 km para visão geral, 1-2 km para inspeção detalhada.",
+    ) * 1.0  # já em km
 
     # ── Seção: Configuração do Score ───────────────────────────────────────
     st.sidebar.markdown("---")
@@ -425,7 +426,7 @@ def render_filtros_geograficos(df: pd.DataFrame, df_filtrado: pd.DataFrame) -> p
 
 def _cfg_default() -> dict:
     return {
-        "bin_km": 0.5, "alpha_idade": 0.0,
+        "bin_km": 5.0, "alpha_idade": 0.0,
         "fator_idade": False, "fator_status": False,
         "fator_familia": False, "fator_tipo": False,
         "mult_status": _MULT_STATUS,
