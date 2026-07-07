@@ -157,7 +157,7 @@ def _autenticar(email: str, senha: str) -> tuple[bool, str]:
         set_pagina("gerencia_sp")  # Admin começa pela SP
 
     # Passo 4: auditoria (falha silenciosa)
-    atualizar_ultimo_login(email.strip().lower())
+    atualizar_ultimo_login(usuario["id"])
     log_acesso(usuario["id"], "login", {"email": email})
 
     return True, ""
