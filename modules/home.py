@@ -5,7 +5,7 @@
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
 from auth.permissions import can_see_gerencia, can_admin_panel, can_upload
-from database.queries import log_acesso
+from database.queries import log_acesso, contar_alertas_novos
 
 
 # region ====================== SESSÃO 1: CSS da Sidebar ======================
@@ -151,6 +151,15 @@ def _render_nav_buttons():
     # Visão Geral: todos podem ver
     ativo_geral = "🔵 " if pagina_atual == "gerencia_geral" else ""
     nav_items.append(("GERAL", f"{ativo_geral}🌐  Visão Geral", "gerencia_geral"))
+
+    # Alertas: todos podem ver — badge com contagem de novos
+    ativo_alertas = "🔵 " if pagina_atual == "alertas" else ""
+    try:
+        n_novos = contar_alertas_novos(get_gerencia())
+    except Exception:
+        n_novos = 0
+    badge = f"  ({n_novos})" if n_novos else ""
+    nav_items.append(("ALERTAS", f"{ativo_alertas}🚨  Alertas{badge}", "alertas"))
 
     # Upload: admin e assistente
     gerencia_usr = get_gerencia()

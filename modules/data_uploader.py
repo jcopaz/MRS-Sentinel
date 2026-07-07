@@ -315,6 +315,9 @@ def _executar_upload(
         from database.queries import invalidar_cache_notas
         invalidar_cache_notas()
 
+        # Recálculo automático de alertas (Sprint 5) — não bloqueia o upload
+        _recalcular_alertas_pos_upload(gerencia, disciplina)
+
         # Limpa o estado do uploader para permitir novo upload
         st.session_state.pop("upload_arquivo", None)
 
@@ -325,6 +328,36 @@ def _executar_upload(
             "Os dados anteriores **não foram removidos** pois o erro ocorreu antes da substituição.",
             icon="ℹ️"
         )
+
+
+def _recalcular_alertas_pos_upload(gerencia: str, disciplina: str) -> None:
+    """
+    Dispara o motor de alertas (Sprint 5) logo após um upload bem-sucedido.
+    Falha graciosamente: um erro aqui NÃO deve invalidar o upload já concluído.
+    """
+    try:
+        from core.alertas import gerar_alertas, persistir_alertas
+        from database.queries import get_alertas, contar_alertas_novos
+
+        with st.spinner("🚨 Recalculando alertas automáticos..."):
+            df_alertas = gerar_alertas(gerencia, disciplina)
+            n = persistir_alertas(df_alertas)
+
+        get_alertas.clear()
+        contar_alertas_novos.clear()
+
+        if n:
+            st.info(f"🚨 {n} alerta(s) atualizado(s). Veja em **🚨 Alertas** na barra lateral.")
+
+        # Previsão de e-mail: só envia se ativado nas configurações
+        try:
+            from core.notificacoes import enviar_email_alertas
+            if not df_alertas.empty:
+                enviar_email_alertas(df_alertas, gerencia)
+        except Exception:
+            pass
+    except Exception as e:
+        st.warning(f"⚠️ Upload concluído, mas o recálculo de alertas falhou: {e}")
 
 # endregion
 

@@ -1,4 +1,4 @@
-# app.py — Ponto de entrada principal do MRS Nexus
+# app.py — Ponto de entrada principal do MRS Sentinel
 # 🚂 Plataforma de Inteligência de Manutenção da Malha MRS
 # Sprint 1 — Fundação: login, RBAC, roteamento, sidebar
 #
@@ -42,6 +42,7 @@ from modules.gerencia_vp    import render_gerencia_vp
 from modules.gerencia_geral import render_gerencia_geral
 from modules.admin_panel    import render_admin_panel
 from modules.data_uploader  import render_upload
+from modules.alertas        import render_alertas
 # endregion
 
 
@@ -146,6 +147,7 @@ def _rotear():
         "gerencia_sp":    render_gerencia_sp,
         "gerencia_vp":    render_gerencia_vp,
         "gerencia_geral": render_gerencia_geral,
+        "alertas":        render_alertas,
         "upload":         render_upload,
         "admin":          render_admin_panel,
     }

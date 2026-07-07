@@ -488,7 +488,56 @@ def _render_aba_configuracoes() -> None:
             _salvar_config("VP", "alpha_idade", alpha_vp)
             st.success("✅ Fator α atualizado!")
 
-    # ── 4.4: Informações do sistema ───────────────────────────────────────────
+    # ── 4.4: Alertas Automáticos (Sprint 5) ──────────────────────────────────
+    with st.expander("🚨 Alertas Automáticos", expanded=False):
+        st.caption("Parâmetros do motor de detecção e canal de e-mail (previsão).")
+
+        d1, d2, d3 = st.columns(3)
+        n_min = d1.number_input(
+            "Nº mínimo de notas (crônico)", min_value=2, max_value=20,
+            value=int(float(_get_config(None, "alerta_n_min", 3))),
+            step=1, key="cfg_alerta_n")
+        janela = d2.number_input(
+            "Janela de análise (meses)", min_value=1, max_value=24,
+            value=int(float(_get_config(None, "alerta_janela_meses", 6))),
+            step=1, key="cfg_alerta_janela")
+        reincid = d3.number_input(
+            "Reincidência (dias)", min_value=15, max_value=365,
+            value=int(float(_get_config(None, "alerta_reincidencia_dias", 90))),
+            step=5, key="cfg_alerta_reincid")
+
+        if st.button("💾 Salvar Parâmetros de Alerta", key="btn_alerta_param"):
+            _salvar_config(None, "alerta_n_min", n_min)
+            _salvar_config(None, "alerta_janela_meses", janela)
+            _salvar_config(None, "alerta_reincidencia_dias", reincid)
+            st.success("✅ Parâmetros de alerta atualizados!")
+
+        st.markdown("---")
+        st.markdown("**📧 Notificação por e-mail (previsão)**")
+
+        email_ativo = st.toggle(
+            "Ativar envio de e-mail de alertas",
+            value=str(_get_config(None, "email_alertas_ativo", False)).lower() in ("true", "1", "sim"),
+            key="cfg_email_ativo",
+            help="Requer credenciais SMTP em st.secrets['smtp']. Desligado por padrão.")
+
+        dest_raw = _get_config(None, "email_destinatarios", [])
+        if isinstance(dest_raw, list):
+            dest_txt = ", ".join(dest_raw)
+        else:
+            dest_txt = str(dest_raw or "")
+        dest_input = st.text_input(
+            "Destinatários (separados por vírgula)", value=dest_txt,
+            placeholder="julio.paz@mrs.com.br, gestor@mrs.com.br",
+            key="cfg_email_dest")
+
+        if st.button("💾 Salvar Config de E-mail", key="btn_email_cfg"):
+            destinatarios = [e.strip() for e in dest_input.split(",") if e.strip()]
+            _salvar_config(None, "email_alertas_ativo", bool(email_ativo))
+            _salvar_config(None, "email_destinatarios", destinatarios)
+            st.success("✅ Configuração de e-mail salva!")
+
+    # ── 4.5: Informações do sistema ───────────────────────────────────────────
     with st.expander("ℹ️ Informações do Sistema", expanded=False):
         st.markdown(
             """

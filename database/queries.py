@@ -398,3 +398,67 @@ def get_ultima_atualizacao_info() -> dict:
     except Exception:
         return {}
 # endregion
+
+
+# region ====================== SESSÃO 5: Alertas (Sprint 5) ===================
+
+@st.cache_data(ttl=300)
+def get_alertas(gerencia: str, disciplina: str | None = None) -> pd.DataFrame:
+    """
+    Busca os alertas persistidos de uma gerência (opcionalmente por disciplina).
+    Retorna DataFrame ordenável (severidade + score) ou vazio em caso de erro.
+    """
+    try:
+        supabase = get_supabase()
+        query = supabase.table("alertas").select("*").eq("gerencia", gerencia)
+        if disciplina:
+            query = query.eq("disciplina", disciplina)
+        resp = query.order("criado_em", desc=True).execute()
+        return pd.DataFrame(resp.data or [])
+    except Exception as e:
+        st.error(f"❌ Erro ao buscar alertas ({gerencia}): {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=120)
+def contar_alertas_novos(gerencia: str | None = None) -> int:
+    """
+    Conta alertas com status='novo' (para o badge da sidebar).
+    Se gerencia=None, conta em todas. Falha graciosamente para 0.
+    """
+    try:
+        supabase = get_supabase()
+        query = (
+            supabase.table("alertas")
+            .select("id", count="exact")
+            .eq("status", "novo")
+        )
+        if gerencia:
+            query = query.eq("gerencia", gerencia)
+        resp = query.execute()
+        return int(resp.count or 0)
+    except Exception:
+        return 0
+
+
+def marcar_alerta_status(alerta_id, status: str, usuario_id: str | None = None) -> bool:
+    """
+    Atualiza o status de um alerta ('novo' | 'visto' | 'resolvido').
+    Registra quem/quando resolveu. Retorna True em sucesso.
+    """
+    if status not in ("novo", "visto", "resolvido"):
+        return False
+    try:
+        supabase = get_supabase()
+        dados = {"status": status, "atualizado_em": datetime.utcnow().isoformat()}
+        if status == "resolvido":
+            dados["resolvido_por"] = usuario_id
+            dados["resolvido_em"]  = datetime.utcnow().isoformat()
+        supabase.table("alertas").update(dados).eq("id", alerta_id).execute()
+        log_acesso(usuario_id, f"alerta_{status}", {"alerta_id": str(alerta_id)})
+        return True
+    except Exception as e:
+        st.error(f"❌ Erro ao atualizar alerta: {e}")
+        return False
+
+# endregion
