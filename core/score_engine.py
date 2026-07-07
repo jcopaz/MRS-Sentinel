@@ -131,6 +131,11 @@ def calcular_score_linha(row: pd.Series, cfg: ScoreConfig) -> float:
     Returns:
         float: score arredondado a 2 casas decimais
     """
+    # Guarda defensiva: se cfg não for ScoreConfig (ex: string passada por engano),
+    # usa configuração padrão em vez de explodir com AttributeError
+    if not isinstance(cfg, ScoreConfig):
+        cfg = ScoreConfig()
+
     # Base: peso de prioridade
     prio_raw = str(row.get("prioridade", "4-Baixa")).strip()
     score = float(cfg.peso_prioridade.get(prio_raw, 1))
@@ -187,7 +192,9 @@ def calcular_score_dataframe(df: pd.DataFrame, cfg: Optional[ScoreConfig] = None
     if df.empty:
         return df
 
-    if cfg is None:
+    # Guarda defensiva: se cfg não for ScoreConfig (ex: string passada por engano),
+    # usa configuração padrão em vez de explodir com AttributeError
+    if cfg is None or not isinstance(cfg, ScoreConfig):
         cfg = ScoreConfig()
 
     df = df.copy()
