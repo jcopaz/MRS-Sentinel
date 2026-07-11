@@ -129,9 +129,11 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
             df = df[col.dt.date <= data_ab_fim]
 
     # Filtro de Encerramento da Nota (opcional — coluna pode não existir)
+    # Só entra em ação se o usuário estreitou o período (filtro_enc_ativo),
+    # senão notas ainda em aberto (sem data_encerramento) seriam descartadas.
     data_enc_ini = filtros.get("data_enc_ini")
     data_enc_fim = filtros.get("data_enc_fim")
-    if "data_encerramento" in df.columns and (data_enc_ini or data_enc_fim):
+    if "data_encerramento" in df.columns and filtros.get("filtro_enc_ativo"):
         col_enc = pd.to_datetime(df["data_encerramento"], errors="coerce")
         if data_enc_ini:
             df = df[col_enc.dt.date >= data_enc_ini]

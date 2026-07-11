@@ -425,6 +425,15 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
                 st.warning("⚠️ Início de encerramento maior que o fim.")
                 data_enc_ini, data_enc_fim = data_enc_fim, data_enc_ini
 
+        # st.date_input nunca retorna None — detecta se o usuário realmente
+        # estreitou o período de encerramento em relação ao padrão "sem filtro"
+        # (intervalo completo). Evita que notas ainda em aberto (sem
+        # data_encerramento) sejam descartadas por engano quando o usuário só
+        # mexeu no filtro de Abertura.
+        filtro_enc_ativo = tem_enc and (
+            data_enc_ini != date(2018, 1, 1) or data_enc_fim != data_max
+        )
+
         # 7. Filtros de atributo — Prioridade, Família, Tipo de inspeção, Status Base
         # (Sprint 4.5 — recuperados do app1.py, ver components/filtros.py Sessão 2B)
         st.markdown("---")
@@ -450,6 +459,7 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
         "data_abertura_fim": data_abertura_fim,
         "data_enc_ini":     data_enc_ini,
         "data_enc_fim":     data_enc_fim,
+        "filtro_enc_ativo": filtro_enc_ativo,
         **filtros_attrs,   # prioridades, familias, tipos_inspecao, status_base
     }
 
