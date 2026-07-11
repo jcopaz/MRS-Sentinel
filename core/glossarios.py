@@ -278,11 +278,65 @@ PESO_PRIORIDADE = {
     "4-Baixa":      1,
 }
 
-MULT_STATUS = {"ABER": 1.0, "DIFE": 0.5}
+# ⚠️ Não é a fonte usada em runtime — o score real lê MULT_STATUS_PADRAO em
+# core/score_engine.py. Mantido aqui só como referência/documentação.
+# DIFE virou peso neutro em 10/07/2026 (decisão do Julio, Sprint 4.5).
+MULT_STATUS = {"ABER": 1.0, "DIFE": 1.0}
 
 MULT_TIPO = {"CT": 1.5, "PV": 1.0}
 
 ALPHA_IDADE_PADRAO = 0.10   # 10% por ano aberto
+
+# endregion
+
+
+# region ====================== SESSÃO 6B: Status Base ==========================
+# Dicionário oficial de status_usuario (SAP) → descrição amigável.
+# Fonte: tabela validada pelo Julio em 10/07/2026 (Sprint 4.5).
+#
+# ⚠️ Só cobre EXIBIÇÃO/FILTRO. O MULT_STATUS (score) continua tratando apenas
+# ABER/DIFE por decisão pendente — os outros 15 códigos entram na fórmula de
+# score só depois de validação com o Julio.
+
+STATUS_BASE = {
+    "ABER": "Aberta",
+    "PROG": "Programada",
+    "EXEC": "Em Execução",
+    "DIFE": "Diferida",
+    "PRLS": "Paralisada",
+    "ELAC": "Exceção Lacuna",
+    "NAPL": "Não se Aplica",
+    "NRAV": "Não realizada após vistoria",
+    "OPCM": "Ordens PCM",
+    "PEND": "Pendente",
+    "CONC": "Concluída",
+    "CANC": "Cancelada",
+    "AGFI": "Aguardando Fiscalização",
+    "RETR": "Retrabalho",
+    "REWM": "Reaberta em EWM",
+    "COMP": "Ordem Componetizada",
+    "DIAG": "Diagnosticada",
+}
+
+
+def status_base_label(status: str) -> str:
+    """
+    Traduz um código de status_usuario (ex: 'ABER') para a descrição
+    amigável oficial (ex: 'Aberta'), conforme STATUS_BASE.
+
+    Faz match exato primeiro; se não achar, tenta por substring (alguns
+    exports SAP trazem o código embutido em texto maior, ex: "ABER - Aberta").
+    Retorna o valor original se não reconhecer o código.
+    """
+    if not status or not isinstance(status, str):
+        return "—"
+    s = status.strip().upper()
+    if s in STATUS_BASE:
+        return STATUS_BASE[s]
+    for chave, val in STATUS_BASE.items():
+        if chave in s:
+            return val
+    return status
 
 # endregion
 

@@ -24,7 +24,7 @@ from datetime import datetime
 
 from core.glossarios import (
     FAMILIAS_VP, FAMILIAS_EE, GLOSSARIO_VP, GLOSSARIO_EE,
-    normalizar_coluna_ramal, RAMAIS_MRS,
+    normalizar_coluna_ramal, RAMAIS_MRS, status_base_label,
 )
 from core.score_engine import aplicar_score_dataframe
 
@@ -403,23 +403,9 @@ def _calcular_lead_time(row: pd.Series) -> int | None:
 
 
 def _mapear_status_amigavel(status: str) -> str:
-    mapa = {
-        "ABER": "Aberta",
-        "DIFE": "Diferida",
-        "CONC": "Concluída",
-        "CANC": "Cancelada",
-        "PLAN": "Planejada",
-        "EXEC": "Em Execução",
-        "REWM": "Em Revisão",
-        "PRLS": "Liberada",
-    }
-    if not status:
-        return "—"
-    s = str(status).upper().strip()
-    for chave, val in mapa.items():
-        if chave in s:
-            return val
-    return status
+    """Alias fino sobre STATUS_BASE (core/glossarios.py) — única fonte de verdade
+    dos 17 códigos oficiais de status_usuario (Sprint 4.5)."""
+    return status_base_label(status)
 
 _PESO_PRIORIDADE: dict[str, int] = {
     "1-Muito alta":  5,

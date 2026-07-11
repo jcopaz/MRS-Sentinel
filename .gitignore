@@ -40,3 +40,6 @@ build/
 # ── Logs ─────────────────────────────────────────────────
 *.log
 logs/
+
+# ── Contexto local do agente (não versionar) ─────────────
+agente/

@@ -26,7 +26,8 @@ from datetime import datetime, date
 from components.kpi_card import render_kpi_cards
 from components.unifilar import render_unifilar_dual
 from components.heatmap import render_heatmap, render_ranking, render_serie_temporal
-from components.filtros import render_filtros_cascata
+from components.filtros import render_filtros_cascata, aplicar_filtros_atributos
+from components.visao_gerencial import render_visao_gerencial
 
 # Motor de score
 from core.score_engine import (
@@ -133,6 +134,10 @@ def _aplicar_filtros_vp(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         if data_enc_fim:
             df = df[col_enc.dt.date <= data_enc_fim]
 
+    # Filtros de atributo: Prioridade, Família, Tipo de inspeção, Status Base
+    # (Sprint 4.5 — recuperados do app1.py)
+    df = aplicar_filtros_atributos(df, filtros)
+
     return df.copy()
 
 # endregion
@@ -224,9 +229,10 @@ def render_gerencia_vp():
             unsafe_allow_html=True,
         )
 
-    # ── 5 Abas ────────────────────────────────────────────────────────────────
-    aba_kpi, aba_unif, aba_heat, aba_rank, aba_temp = st.tabs([
+    # ── 6 Abas ────────────────────────────────────────────────────────────────
+    aba_kpi, aba_ger, aba_unif, aba_heat, aba_rank, aba_temp = st.tabs([
         "📊 Visão Geral",
+        "🎯 Visão Gerencial",
         "🗺️ Unifilar",
         "🌡️ Heatmap",
         "🏆 Ranking",
@@ -245,6 +251,12 @@ def render_gerencia_vp():
 
         # Painel de transparência: mostra pesos do score configurados
         render_painel_transparencia(score_cfg)
+
+    # endregion
+
+    # region =================== SESSÃO 4.1B: Aba — Visão Gerencial ============
+    with aba_ger:
+        render_visao_gerencial(df, gerencia="VP")
 
     # endregion
 

@@ -30,6 +30,8 @@ from datetime import datetime
 from components.kpi_card import render_kpi_cards
 from components.unifilar import render_unifilar_dual
 from components.heatmap import render_ranking, render_serie_temporal
+from components.filtros import render_filtros_atributos, aplicar_filtros_atributos
+from components.visao_gerencial import render_visao_gerencial
 
 # Indicadores IMT/DI/Aderência/Lead Time
 from core.indicadores import (
@@ -271,6 +273,16 @@ def render_gerencia_geral():
 
     df_total = _combinar(df_sp, df_vp)
 
+    # ── Filtros de atributo: Prioridade, Família, Tipo de inspeção, Status Base
+    # (Sprint 4.5 — sem cascata geográfica aqui, a Geral não tem essa hierarquia)
+    with st.sidebar:
+        st.markdown("### 🎛️ Filtros de Atributo")
+        filtros_attrs = render_filtros_atributos(df_total, gerencia="GERAL")
+
+    df_sp = aplicar_filtros_atributos(df_sp, filtros_attrs)
+    df_vp = aplicar_filtros_atributos(df_vp, filtros_attrs)
+    df_total = aplicar_filtros_atributos(df_total, filtros_attrs)
+
     # Calcula score
     if not df_sp.empty:
         df_sp = calcular_score_dataframe(df_sp, score_cfg)
@@ -301,9 +313,10 @@ def render_gerencia_geral():
             unsafe_allow_html=True,
         )
 
-    # ── 5 Abas ────────────────────────────────────────────────────────────────
-    aba_cons, aba_comp, aba_unif, aba_temp, aba_rank = st.tabs([
+    # ── 6 Abas ────────────────────────────────────────────────────────────────
+    aba_cons, aba_ger, aba_comp, aba_unif, aba_temp, aba_rank = st.tabs([
         "📊 Consolidado",
+        "🎯 Visão Gerencial",
         "⚖️ SP × VP",
         "🗺️ Unifilar Total",
         "📈 Temporal Global",
@@ -326,6 +339,12 @@ def render_gerencia_geral():
         st.markdown("---")
         st.markdown("#### 📊 KPIs Unificados")
         render_kpi_cards(df_total, gerencia="GERAL", disciplina=disciplina_geral)
+
+    # endregion
+
+    # region =================== SESSÃO 5.1B: Aba — Visão Gerencial ============
+    with aba_ger:
+        render_visao_gerencial(df_total, gerencia="GERAL")
 
     # endregion
 

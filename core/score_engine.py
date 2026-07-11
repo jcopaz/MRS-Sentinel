@@ -1,9 +1,18 @@
 # =============================================================================
 # core/score_engine.py — Motor de Score Composto
-# Sprint 3 — MRS Sentinel
+# Sprint 3 — MRS Sentinel (fórmula estendida na Sprint 4.5)
 #
 # Fórmula:
-#   Score = peso_prio × mult_status × mult_familia × mult_tipo × (1 + α × anos)
+#   Score = peso_prio × mult_status × mult_familia × mult_tipo
+#         × (1 + α × anos_aberta)
+#         × (1 + β × (n_ocorrencias_local - 1))
+#
+# mult_status: neutro (1.0) para todos os códigos desde 10/07/2026 — decisão
+#   do Julio de não penalizar/bonificar por status, só por tempo aberto e
+#   criticidade do local/família.
+# n_ocorrencias_local: reincidência do mesmo defeito no mesmo local — conta
+#   quantas notas do DataFrame atual compartilham ramal+origem+familia_defeito
+#   (mesma granularidade do motor de alertas, core/alertas.py).
 #
 # Exporta:
 #   ScoreConfig              — dataclass com pesos configuráveis
@@ -37,7 +46,7 @@ PESO_PRIORIDADE_PADRAO = {
 
 MULT_STATUS_PADRAO = {
     "ABER": 1.0,   # nota aberta = peso total
-    "DIFE": 0.5,   # diferida = metade do peso
+    "DIFE": 1.0,   # diferida = peso neutro (decisão do Julio, 10/07/2026 — Sprint 4.5)
 }
 
 MULT_FAMILIA_VP_PADRAO = {
@@ -69,6 +78,11 @@ MULT_TIPO_PADRAO = {
 
 ALPHA_PADRAO = 0.10  # 10% de acréscimo por ano aberto
 
+# Reincidência: mesmo ramal+origem+familia_defeito repetido no DataFrame atual.
+# Mesma granularidade de "local" usada em core/alertas.py (hot-spots crônicos).
+BETA_REINCIDENCIA_PADRAO = 0.15       # +15% de score por ocorrência repetida no local
+REINCIDENCIA_MULT_MAX_PADRAO = 3.0    # trava o multiplicador (evita disparo com clusters gigantes)
+
 # endregion
 
 
@@ -91,10 +105,15 @@ class ScoreConfig:
     mult_familia_ee: dict = field(default_factory=lambda: dict(MULT_FAMILIA_EE_PADRAO))
     mult_tipo:       dict = field(default_factory=lambda: dict(MULT_TIPO_PADRAO))
 
+    # Reincidência: peso extra por nota repetida no mesmo ramal+origem+família
+    beta_reincidencia:      float = BETA_REINCIDENCIA_PADRAO
+    reincidencia_mult_max:  float = REINCIDENCIA_MULT_MAX_PADRAO
+
     # Flags de ativação (permite desligar componentes do score)
-    usar_familia:    bool = True
-    usar_tipo:       bool = True
-    usar_idade:      bool = True
+    usar_familia:      bool = True
+    usar_tipo:         bool = True
+    usar_idade:        bool = True
+    usar_reincidencia: bool = True
 
 # endregion
 
@@ -121,11 +140,14 @@ def calcular_score_linha(row: pd.Series, cfg: ScoreConfig) -> float:
     Calcula o score composto de uma linha do DataFrame.
 
     Fórmula:
-        score = peso_prio × mult_status × mult_familia × mult_tipo × (1 + α × anos)
+        score = peso_prio × mult_status × mult_familia × mult_tipo
+              × (1 + α × anos_aberta) × (1 + β × (n_ocorrencias_local - 1))
 
     Args:
         row: Series com campos peso_prio, status_usuario, familia_defeito,
-             tipo_nota, data_nota, disciplina_label
+             tipo_nota, data_nota, disciplina_label, n_ocorrencias_local
+             (esta última pré-calculada por calcular_score_dataframe — ver
+             Sessão 4; ausente aqui = trata como ocorrência única)
         cfg: ScoreConfig com pesos configuráveis
 
     Returns:
@@ -168,6 +190,19 @@ def calcular_score_linha(row: pd.Series, cfg: ScoreConfig) -> float:
         anos = _anos_abertos(row.get("data_nota"))
         score *= (1 + cfg.alpha * anos)
 
+    # Fator de reincidência: mesmo defeito repetido no mesmo local
+    # (ramal + origem + familia_defeito). n_ocorrencias_local vem pré-calculado
+    # por calcular_score_dataframe; se ausente, assume ocorrência única (sem efeito).
+    if cfg.usar_reincidencia:
+        n_local = row.get("n_ocorrencias_local", 1)
+        try:
+            n_local = int(n_local) if pd.notna(n_local) else 1
+        except (TypeError, ValueError):
+            n_local = 1
+        mult_reinc = 1 + cfg.beta_reincidencia * max(0, n_local - 1)
+        mult_reinc = min(mult_reinc, cfg.reincidencia_mult_max)
+        score *= mult_reinc
+
     return round(score, 2)
 
 # endregion
@@ -198,6 +233,17 @@ def calcular_score_dataframe(df: pd.DataFrame, cfg: Optional[ScoreConfig] = None
         cfg = ScoreConfig()
 
     df = df.copy()
+
+    # Pré-calcula reincidência local (ramal+origem+familia_defeito) ANTES do
+    # apply por linha — precisa ver o DataFrame inteiro para contar ocorrências.
+    # Mesma granularidade de "local" do motor de alertas (core/alertas.py).
+    grupo_cols = ["ramal", "origem", "familia_defeito"]
+    if cfg.usar_reincidencia and all(c in df.columns for c in grupo_cols):
+        df["n_ocorrencias_local"] = (
+            df.groupby(grupo_cols, dropna=False)[grupo_cols[0]].transform("size")
+        )
+    else:
+        df["n_ocorrencias_local"] = 1
 
     # Aplica por linha (axis=1)
     # Nota: para datasets muito grandes (>100k), considerar vetorização numpy
@@ -263,6 +309,26 @@ def render_score_sidebar(gerencia: str = "SP") -> ScoreConfig:
 
         st.markdown("---")
 
+        # ── Reincidência no local ────────────────────────────────────────────
+        cfg.usar_reincidencia = st.checkbox(
+            "🔁 Penalizar reincidência no mesmo local",
+            value=True,
+            key=f"sc_usar_reincidencia_{gerencia}",
+            help="Mesmo ramal+pátio+família com múltiplas notas pesa mais — "
+                 "mesma lógica dos hot-spots crônicos (aba Alertas).",
+        )
+        if cfg.usar_reincidencia:
+            cfg.beta_reincidencia = st.slider(
+                "β — Acréscimo por ocorrência repetida",
+                min_value=0.0, max_value=0.5,
+                value=BETA_REINCIDENCIA_PADRAO, step=0.01,
+                format="%.2f",
+                key=f"sc_beta_reinc_{gerencia}",
+                help="0.15 = +15% por repetição. 4ª nota no mesmo local → ×1.45",
+            )
+
+        st.markdown("---")
+
         # ── Pesos de prioridade ───────────────────────────────────────────────
         st.markdown("**🎯 Pesos de prioridade**")
         col1, col2 = st.columns(2)
@@ -306,12 +372,18 @@ def render_painel_transparencia(cfg: ScoreConfig):
             **Fórmula:**
             ```
             Score = Peso Prioridade
-                  × Multiplicador Status
+                  × Multiplicador Status (neutro — ver nota abaixo)
                   × Multiplicador Família
                   × Multiplicador Tipo
                   × (1 + α × Anos em aberto)
+                  × (1 + β × Ocorrências repetidas no mesmo local - 1)
             ```
             """
+        )
+        st.caption(
+            "ℹ️ Status (ABER/DIFE/etc.) não pondera mais o score — decisão de "
+            "10/07/2026. A criticidade agora vem de: tempo aberto, família do "
+            "defeito e reincidência no mesmo local (ramal+pátio+família)."
         )
 
         col_a, col_b = st.columns(2)
@@ -344,6 +416,15 @@ def render_painel_transparencia(cfg: ScoreConfig):
 
             st.markdown("**📋 Tipo CT/PV**")
             st.success("✅ Ativo") if cfg.usar_tipo else st.info("⏸️ Desativado")
+
+            st.markdown("**🔁 Reincidência no local**")
+            if cfg.usar_reincidencia:
+                st.success(f"✅ Ativa — β = {cfg.beta_reincidencia:.2f} (+{cfg.beta_reincidencia*100:.0f}% por repetição, teto ×{cfg.reincidencia_mult_max:.1f})")
+                st.caption("Exemplo: 4ª nota no mesmo ramal+pátio+família → ×{:.2f}".format(
+                    min(1 + cfg.beta_reincidencia * 3, cfg.reincidencia_mult_max)
+                ))
+            else:
+                st.info("⏸️ Desativada")
 
         st.caption(
             "ℹ️ Scores altos = maior criticidade. Use os controles em "

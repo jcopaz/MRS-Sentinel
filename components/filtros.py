@@ -20,7 +20,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 
-from core.glossarios import nome_ramal, RAMAIS_MRS
+from core.glossarios import nome_ramal, RAMAIS_MRS, STATUS_BASE, PESO_PRIORIDADE
 
 # Centros de trabalho por gerência (fonte: 08_GLOSSARIOS.md)
 CENTROS_POR_GERENCIA = {
@@ -28,6 +28,9 @@ CENTROS_POR_GERENCIA = {
     "VP":    ["CFAN", "CFTA", "CFPI"],
     "GERAL": ["CIPA", "CIPG", "CIJN", "CFAN", "CFTA", "CFPI"],
 }
+
+# Ordem oficial de exibição da prioridade (mais crítica primeiro)
+ORDEM_PRIORIDADE = list(PESO_PRIORIDADE.keys())
 
 # endregion
 
@@ -99,6 +102,157 @@ def _opcoes_patios(
 
     return sorted(df_f["origem"].dropna().unique().tolist())
 
+
+def _opcoes_prioridade(df: pd.DataFrame) -> list[str]:
+    """Prioridades presentes nos dados, na ordem oficial (mais crítica primeiro)."""
+    if "prioridade" not in df.columns:
+        return []
+    presentes = set(df["prioridade"].dropna().unique().tolist())
+    ordenadas = [p for p in ORDEM_PRIORIDADE if p in presentes]
+    extras = sorted(presentes - set(ordenadas))
+    return ordenadas + extras
+
+
+def _opcoes_familias(df: pd.DataFrame) -> list[str]:
+    """Famílias de defeito presentes nos dados (VP + EE combinadas)."""
+    if "familia_defeito" not in df.columns:
+        return []
+    return sorted([f for f in df["familia_defeito"].dropna().unique().tolist() if f])
+
+
+def _opcoes_tipos_inspecao(df: pd.DataFrame) -> list[str]:
+    """Tipos de inspeção/atividade presentes nos dados."""
+    if "tipo_atividade" not in df.columns:
+        return []
+    return sorted([
+        t for t in df["tipo_atividade"].dropna().unique().tolist()
+        if t and str(t).strip()
+    ])
+
+
+def _opcoes_status_base(df: pd.DataFrame) -> list[str]:
+    """
+    Códigos de status_usuario presentes nos dados, na ordem oficial de
+    STATUS_BASE (core/glossarios.py). Inclui códigos não catalogados no fim.
+    """
+    if "status_usuario" not in df.columns:
+        return []
+    presentes = set(
+        str(s).strip().upper() for s in df["status_usuario"].dropna().unique().tolist()
+    )
+    ordenados = [c for c in STATUS_BASE if c in presentes]
+    extras = sorted(presentes - set(ordenados))
+    return ordenados + extras
+
+# endregion
+
+
+# region ====================== SESSÃO 2B: Filtros de atributo ==================
+# Prioridade, Família de defeito, Tipo de inspeção e Status Base.
+# Sprint 4.5 — recuperação de filtros que existiam no app1.py e não foram
+# migrados para a plataforma multi-gerencial.
+#
+# Renderiza SEM abrir seu próprio st.form — o chamador decide se envolve
+# num form (Gerência SP/VP, dentro de render_filtros_cascata) ou usa direto
+# na sidebar (Gerência Geral, que não tem cascata geográfica).
+
+def render_filtros_atributos(df: pd.DataFrame, gerencia: str = "SP") -> dict:
+    """
+    Renderiza os 4 filtros de atributo: Prioridade, Família de defeito,
+    Tipo de inspeção, Status Base.
+
+    Returns:
+        dict com chaves: prioridades, familias, tipos_inspecao, status_base
+        (listas de valores — vazio/tudo selecionado = sem filtro)
+    """
+    uid = gerencia
+
+    st.markdown("**🎯 Prioridade**")
+    opcoes_prio = _opcoes_prioridade(df)
+    prioridades_sel = st.multiselect(
+        "Prioridade",
+        options=opcoes_prio,
+        default=opcoes_prio,
+        key=f"filtro_prioridade_{uid}",
+        label_visibility="collapsed",
+    )
+    if not prioridades_sel:
+        prioridades_sel = opcoes_prio
+
+    st.markdown("**🔩 Família de defeito**")
+    opcoes_fam = _opcoes_familias(df)
+    familias_sel = st.multiselect(
+        "Família de defeito",
+        options=opcoes_fam,
+        default=opcoes_fam,
+        key=f"filtro_familia_{uid}",
+        label_visibility="collapsed",
+    )
+    if not familias_sel:
+        familias_sel = opcoes_fam
+
+    st.markdown("**🔍 Tipo de inspeção**")
+    opcoes_tipo = _opcoes_tipos_inspecao(df)
+    tipos_sel = st.multiselect(
+        "Tipo de inspeção",
+        options=opcoes_tipo,
+        default=opcoes_tipo,
+        key=f"filtro_tipo_insp_{uid}",
+        label_visibility="collapsed",
+        help="Origem da nota: Ronda, Drone, Trackstar, Inspeção técnica de AMV, etc.",
+    )
+    if not tipos_sel:
+        tipos_sel = opcoes_tipo
+
+    st.markdown("**📋 Status Base**")
+    opcoes_status = _opcoes_status_base(df)
+    opcoes_status_label = {f"{c} — {STATUS_BASE.get(c, c)}": c for c in opcoes_status}
+    status_nome_sel = st.multiselect(
+        "Status Base",
+        options=list(opcoes_status_label.keys()),
+        default=list(opcoes_status_label.keys()),
+        key=f"filtro_status_base_{uid}",
+        label_visibility="collapsed",
+        help="Classificação oficial de status_usuario (SAP) — ver 08_GLOSSARIOS.",
+    )
+    status_sel = [opcoes_status_label[n] for n in status_nome_sel if n in opcoes_status_label]
+    if not status_sel:
+        status_sel = opcoes_status
+
+    return {
+        "prioridades":     prioridades_sel,
+        "familias":        familias_sel,
+        "tipos_inspecao":  tipos_sel,
+        "status_base":     status_sel,
+    }
+
+
+def aplicar_filtros_atributos(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
+    """
+    Aplica os 4 filtros de atributo retornados por render_filtros_atributos().
+    Defensivo: ignora filtros cujas colunas não existem ou vieram vazias.
+    """
+    if df.empty:
+        return df
+
+    prioridades = filtros.get("prioridades") or []
+    if prioridades and "prioridade" in df.columns:
+        df = df[df["prioridade"].isin(prioridades)]
+
+    familias = filtros.get("familias") or []
+    if familias and "familia_defeito" in df.columns:
+        df = df[df["familia_defeito"].isin(familias)]
+
+    tipos = filtros.get("tipos_inspecao") or []
+    if tipos and "tipo_atividade" in df.columns:
+        df = df[df["tipo_atividade"].isin(tipos)]
+
+    status_base = filtros.get("status_base") or []
+    if status_base and "status_usuario" in df.columns:
+        df = df[df["status_usuario"].str.strip().str.upper().isin(status_base)]
+
+    return df
+
 # endregion
 
 
@@ -112,10 +266,12 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
     clicar em "✅ Aplicar Filtros" — evita reruns a cada seleção.
 
     Hierarquia:
-        Centro de Trabalho → Ramal → Trecho → Pátio → Período
+        Centro de Trabalho → Ramal → Trecho → Pátio → Período → Atributos
 
     Returns:
-        dict com chaves: centros, ramais, trechos, patios, data_ini, data_fim
+        dict com chaves: centros, ramais, trechos, patios, data_ini, data_fim,
+        data_abertura_ini/fim, data_enc_ini/fim, prioridades, familias,
+        tipos_inspecao, status_base (os 4 últimos via render_filtros_atributos)
     """
     uid = gerencia  # prefixo de key único por gerência
 
@@ -141,6 +297,8 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
             f"filtro_centros_{uid}", f"filtro_ramais_{uid}",
             f"filtro_trechos_{uid}", f"filtro_patios_{uid}",
             f"filtro_data_ini_{uid}", f"filtro_data_fim_{uid}",
+            f"filtro_prioridade_{uid}", f"filtro_familia_{uid}",
+            f"filtro_tipo_insp_{uid}", f"filtro_status_base_{uid}",
         ]:
             if key in st.session_state:
                 del st.session_state[key]
@@ -267,6 +425,12 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
                 st.warning("⚠️ Início de encerramento maior que o fim.")
                 data_enc_ini, data_enc_fim = data_enc_fim, data_enc_ini
 
+        # 7. Filtros de atributo — Prioridade, Família, Tipo de inspeção, Status Base
+        # (Sprint 4.5 — recuperados do app1.py, ver components/filtros.py Sessão 2B)
+        st.markdown("---")
+        st.markdown("**🎛️ Atributos**")
+        filtros_attrs = render_filtros_atributos(df, gerencia)
+
         # Botão Aplicar (dentro do form — dispara o rerun com novos valores)
         st.form_submit_button(
             "✅ Aplicar Filtros",
@@ -286,6 +450,7 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
         "data_abertura_fim": data_abertura_fim,
         "data_enc_ini":     data_enc_ini,
         "data_enc_fim":     data_enc_fim,
+        **filtros_attrs,   # prioridades, familias, tipos_inspecao, status_base
     }
 
 # endregion
