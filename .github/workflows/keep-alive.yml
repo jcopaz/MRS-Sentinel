@@ -28,5 +28,8 @@ jobs:
 
       - name: Visitar o app para mantê-lo acordado
         run: |
-          pip install --quiet playwright
+          # Fixado na mesma versão da imagem — os navegadores já vêm
+          # instalados nela para v1.45.0; uma versão diferente do pacote
+          # playwright procura binários que não existem na imagem.
+          pip install --quiet playwright==1.45.0
           python scripts/keep_alive.py
