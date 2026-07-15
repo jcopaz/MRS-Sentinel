@@ -289,7 +289,11 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
                       "status_nota", "situacao_nota"]
         for col in candidatas:
             if col in row_df.columns:
-                return row_df[col].astype(str).str.lower().map(
+                # fillna ANTES do astype(str): em colunas com dtype nullable
+                # (string[pyarrow], comum no pandas atual), valores ausentes
+                # viram pd.NA mesmo depois de astype(str) — e "x in pd.NA"
+                # explode com TypeError dentro do map abaixo.
+                return row_df[col].fillna("").astype(str).str.lower().map(
                     lambda v: (
                         "Concluídas" if any(p in v for p in
                             ["encerr", "conclui", "fecha", "resolv", "conclu"])
@@ -303,7 +307,8 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
         df_u["origem_base"] = _detectar_origem_base(df_u)
     else:
         # Normaliza valores já existentes (pode vir como "Aberto" ou "Abertas")
-        df_u["origem_base"] = df_u["origem_base"].astype(str).str.lower().map(
+        # fillna antes do astype(str) pelo mesmo motivo do bloco acima.
+        df_u["origem_base"] = df_u["origem_base"].fillna("").astype(str).str.lower().map(
             lambda v: (
                 "Concluídas" if any(p in v for p in
                     ["encerr", "conclui", "fecha", "resolv", "conclu"])
