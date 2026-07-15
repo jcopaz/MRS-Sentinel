@@ -58,21 +58,36 @@ def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataF
         if not upload_ids:
             return pd.DataFrame()
 
-        query = (
-            supabase.table("notas")
-            .select("*, uploads_historico(enviado_em, usuario_id, nome_arquivo)")
-            .eq("gerencia", gerencia)
-            .in_("upload_id", upload_ids)
-        )
-        if disciplina:
-            query = query.eq("disciplina", disciplina)
+        # ⭐ PAGINAÇÃO: o PostgREST limita cada select a um máximo de linhas
+        # por página (padrão 1000). Sem isso, gerências com >1000 notas tinham
+        # o restante truncado silenciosamente (ex.: só 2 de 13 tipo_atividade
+        # apareciam nos filtros porque as demais notas nunca chegavam ao app).
+        PAGE_SIZE = 1000
+        registros: list[dict] = []
+        offset = 0
+        while True:
+            query = (
+                supabase.table("notas")
+                .select("*, uploads_historico(enviado_em, usuario_id, nome_arquivo)")
+                .eq("gerencia", gerencia)
+                .in_("upload_id", upload_ids)
+                .range(offset, offset + PAGE_SIZE - 1)
+            )
+            if disciplina:
+                query = query.eq("disciplina", disciplina)
 
-        response = query.execute()
+            response = query.execute()
+            pagina = response.data or []
+            registros.extend(pagina)
 
-        if not response.data:
+            if len(pagina) < PAGE_SIZE:
+                break
+            offset += PAGE_SIZE
+
+        if not registros:
             return pd.DataFrame()
 
-        df = pd.DataFrame(response.data)
+        df = pd.DataFrame(registros)
 
         # ⭐ ESSENCIAL: normaliza siglas de ramal logo após o load
         df = normalizar_coluna_ramal(df, "ramal")
