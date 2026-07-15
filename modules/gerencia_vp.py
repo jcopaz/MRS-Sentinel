@@ -47,10 +47,15 @@ from database.queries import get_notas_cached
 
 # region ====================== SESSÃO 2: Funções auxiliares ====================
 
+@st.cache_data(ttl=300, show_spinner=False)
 def _carregar_dados_vp(disciplina_sel: str) -> pd.DataFrame:
     """
     Carrega notas da Gerência VP do Supabase.
     Aplica normalização de aliases (ASP→VSU) antes de retornar.
+
+    Cacheado por disciplina_sel (5 min) — sem isso, trocar o toggle
+    VP/EE/VP+EE refazia a concatenação + normalização do zero a cada
+    clique, mesmo quando get_notas_cached já tinha os dados em cache.
 
     Args:
         disciplina_sel: 'VP', 'EE' ou 'VP+EE'
@@ -211,7 +216,7 @@ def render_gerencia_vp():
     # ── Filtros em cascata ────────────────────────────────────────────────────
     with st.sidebar:
         st.markdown("### 🔍 Filtros")
-        filtros = render_filtros_cascata(df_raw, gerencia="VP")
+        filtros = render_filtros_cascata(df_raw, gerencia="VP", disciplina_sel=disciplina_sel)
 
     df = _aplicar_filtros_vp(df_raw, filtros)
 

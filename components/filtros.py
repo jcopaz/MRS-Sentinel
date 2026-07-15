@@ -166,14 +166,24 @@ def _opcoes_status_base(df: pd.DataFrame) -> list[str]:
 # num form (Gerência SP/VP, dentro de render_filtros_cascata) ou usa direto
 # na sidebar (Gerência Geral, que não tem cascata geográfica).
 
-def render_filtros_atributos(df: pd.DataFrame, gerencia: str = "SP") -> dict:
+def render_filtros_atributos(
+    df: pd.DataFrame, gerencia: str = "SP", disciplina_sel: str = "VP+EE",
+) -> dict:
     """
-    Renderiza os 4 filtros de atributo: Prioridade, Família de defeito,
-    Tipo de inspeção, Status Base.
+    Renderiza os filtros de atributo: Prioridade, Família de defeito,
+    Tipo de inspeção, Status Base VP e Status Base EE.
+
+    Status Base VP e EE são filtros separados porque usam colunas/esquemas
+    diferentes (VP: 17 códigos de status_usuario; EE: Aberto/Encerrado de
+    status_final — ver status_base_efetivo em core/glossarios.py). Cada um
+    só enxerga as opções da sua própria disciplina (via 'disciplina_label')
+    e fica desabilitado quando a disciplina correspondente não está
+    carregada (disciplina_sel = "VP" ou "EE" isolado).
 
     Returns:
-        dict com chaves: prioridades, familias, tipos_inspecao, status_base
-        (listas de valores — vazio/tudo selecionado = sem filtro)
+        dict com chaves: prioridades, familias, tipos_inspecao,
+        status_base_vp, status_base_ee (listas — vazio/tudo selecionado =
+        sem filtro)
     """
     uid = gerencia
 
@@ -214,26 +224,50 @@ def render_filtros_atributos(df: pd.DataFrame, gerencia: str = "SP") -> dict:
     if not tipos_sel:
         tipos_sel = opcoes_tipo
 
-    st.markdown("**📋 Status Base**")
-    opcoes_status = _opcoes_status_base(df)
-    opcoes_status_label = {f"{c} — {STATUS_BASE.get(c, c)}": c for c in opcoes_status}
-    status_nome_sel = st.multiselect(
-        "Status Base",
-        options=list(opcoes_status_label.keys()),
-        default=list(opcoes_status_label.keys()),
-        key=f"filtro_status_base_{uid}",
+    tem_vp_carregado = "VP" in disciplina_sel
+    tem_ee_carregado = "EE" in disciplina_sel
+
+    df_vp = df[df["disciplina_label"] == "VP"] if "disciplina_label" in df.columns else df
+    df_ee = df[df["disciplina_label"] == "EE"] if "disciplina_label" in df.columns else df
+
+    st.markdown("**📋 Status Base VP**")
+    opcoes_status_vp = _opcoes_status_base(df_vp) if tem_vp_carregado else []
+    opcoes_status_vp_label = {f"{c} — {STATUS_BASE.get(c, c)}": c for c in opcoes_status_vp}
+    status_vp_nome_sel = st.multiselect(
+        "Status Base VP",
+        options=list(opcoes_status_vp_label.keys()),
+        default=list(opcoes_status_vp_label.keys()),
+        key=f"filtro_status_base_vp_{uid}",
         label_visibility="collapsed",
-        help="Classificação oficial de status_usuario (SAP) — ver 08_GLOSSARIOS.",
+        help="Classificação oficial de status_usuario (SAP/VP) — ver 08_GLOSSARIOS.",
+        disabled=not tem_vp_carregado,
     )
-    status_sel = [opcoes_status_label[n] for n in status_nome_sel if n in opcoes_status_label]
-    if not status_sel:
-        status_sel = opcoes_status
+    status_vp_sel = [opcoes_status_vp_label[n] for n in status_vp_nome_sel if n in opcoes_status_vp_label]
+    if not status_vp_sel:
+        status_vp_sel = opcoes_status_vp
+
+    st.markdown("**📋 Status Base EE**")
+    opcoes_status_ee = _opcoes_status_base(df_ee) if tem_ee_carregado else []
+    opcoes_status_ee_label = {f"{c} — {STATUS_BASE.get(c, c)}": c for c in opcoes_status_ee}
+    status_ee_nome_sel = st.multiselect(
+        "Status Base EE",
+        options=list(opcoes_status_ee_label.keys()),
+        default=list(opcoes_status_ee_label.keys()),
+        key=f"filtro_status_base_ee_{uid}",
+        label_visibility="collapsed",
+        help="Status_Final_ok (Aberto/Encerrado) — único status disponível para EE.",
+        disabled=not tem_ee_carregado,
+    )
+    status_ee_sel = [opcoes_status_ee_label[n] for n in status_ee_nome_sel if n in opcoes_status_ee_label]
+    if not status_ee_sel:
+        status_ee_sel = opcoes_status_ee
 
     return {
         "prioridades":     prioridades_sel,
         "familias":        familias_sel,
         "tipos_inspecao":  tipos_sel,
-        "status_base":     status_sel,
+        "status_base_vp":  status_vp_sel,
+        "status_base_ee":  status_ee_sel,
     }
 
 
@@ -257,12 +291,27 @@ def aplicar_filtros_atributos(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     if tipos and "tipo_atividade" in df.columns:
         df = df[df["tipo_atividade"].isin(tipos)]
 
-    status_base = filtros.get("status_base") or []
-    if status_base and ("status_usuario" in df.columns or "status_final" in df.columns):
+    # Status Base VP e EE são filtros independentes — cada um só restringe
+    # as linhas da SUA disciplina (via 'disciplina_label'); linhas da outra
+    # disciplina passam intocadas por aquele filtro.
+    status_vp = filtros.get("status_base_vp") or []
+    status_ee = filtros.get("status_base_ee") or []
+    if (status_vp or status_ee) and "disciplina_label" in df.columns:
         col_su = df["status_usuario"] if "status_usuario" in df.columns else pd.Series([None] * len(df), index=df.index)
         col_sf = df["status_final"] if "status_final" in df.columns else pd.Series([None] * len(df), index=df.index)
-        efetivo = [status_base_efetivo(su, sf) for su, sf in zip(col_su, col_sf)]
-        df = df[pd.Series(efetivo, index=df.index).isin(status_base)]
+        efetivo = pd.Series(
+            [status_base_efetivo(su, sf) for su, sf in zip(col_su, col_sf)],
+            index=df.index,
+        )
+        eh_vp = df["disciplina_label"] == "VP"
+        eh_ee = df["disciplina_label"] == "EE"
+
+        mantem = pd.Series(True, index=df.index)
+        if status_vp:
+            mantem &= ~eh_vp | efetivo.isin(status_vp)
+        if status_ee:
+            mantem &= ~eh_ee | efetivo.isin(status_ee)
+        df = df[mantem]
 
     return df
 
@@ -271,7 +320,9 @@ def aplicar_filtros_atributos(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
 
 # region ====================== SESSÃO 3: render_filtros_cascata() =============
 
-def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
+def render_filtros_cascata(
+    df: pd.DataFrame, gerencia: str = "SP", disciplina_sel: str = "VP+EE",
+) -> dict:
     """
     Renderiza filtros em cascata na sidebar com botões Aplicar / Limpar.
 
@@ -316,7 +367,8 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
             f"filtro_trechos_{uid}", f"filtro_patios_{uid}",
             f"filtro_data_ini_{uid}", f"filtro_data_fim_{uid}",
             f"filtro_prioridade_{uid}", f"filtro_familia_{uid}",
-            f"filtro_tipo_insp_{uid}", f"filtro_status_base_{uid}",
+            f"filtro_tipo_insp_{uid}",
+            f"filtro_status_base_vp_{uid}", f"filtro_status_base_ee_{uid}",
         ]:
             if key in st.session_state:
                 del st.session_state[key]
@@ -456,7 +508,7 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
         # (Sprint 4.5 — recuperados do app1.py, ver components/filtros.py Sessão 2B)
         st.markdown("---")
         st.markdown("**🎛️ Atributos**")
-        filtros_attrs = render_filtros_atributos(df, gerencia)
+        filtros_attrs = render_filtros_atributos(df, gerencia, disciplina_sel)
 
         # Botão Aplicar (dentro do form — dispara o rerun com novos valores)
         st.form_submit_button(
