@@ -283,7 +283,12 @@ def render_filtros_cascata(df: pd.DataFrame, gerencia: str = "SP") -> dict:
     if "data_nota" in df.columns:
         datas_validas = pd.to_datetime(df["data_nota"], errors="coerce").dropna()
         if not datas_validas.empty:
-            data_min = datas_validas.min().date()
+            # Clampa em [2018-01-01, data_max] — uma data mal parseada na
+            # planilha (ex.: serial Excel/ano incorreto) pode gerar um mínimo
+            # fora desse intervalo, o que quebra o st.date_input abaixo
+            # (min_value/max_value fixos) com StreamlitAPIException.
+            candidato = datas_validas.min().date()
+            data_min = min(max(candidato, date(2018, 1, 1)), data_max)
             # ⚠️ NÃO sobrescreve data_max — mantém date.today()
 
     # ── Botão Limpar (fora do form — limpa session_state e rerun imediato) ───
