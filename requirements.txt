@@ -21,7 +21,6 @@ streamlit-aggrid>=1.0.5
 streamlit-extras>=0.4.0
 
 # Autenticação
-bcrypt>=4.0.0
 email-validator>=2.0.0
 
 # Utilitários

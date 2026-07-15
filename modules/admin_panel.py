@@ -9,32 +9,12 @@
 #   2. 📋 Logs        — Histórico de acessos e uploads
 #   3. ⚙️ Configurações — Pesos padrão de score por gerência, km de malha
 
-import importlib
-import base64
-import hashlib
-import os
 from datetime import datetime
 
 import streamlit as st
 import pandas as pd
 
-bcrypt_spec = importlib.util.find_spec("bcrypt")
-if bcrypt_spec is not None:
-    bcrypt = importlib.import_module("bcrypt")
-else:
-    class _BcryptFallback:
-        @staticmethod
-        def gensalt() -> bytes:
-            return os.urandom(16)
-
-        @staticmethod
-        def hashpw(password: bytes, salt: bytes) -> bytes:
-            digest = hashlib.pbkdf2_hmac("sha256", password, salt, 100_000)
-            return base64.b64encode(salt + digest)
-
-    bcrypt = _BcryptFallback()
-
-from database.client  import get_supabase
+from database.client  import get_supabase, get_supabase_admin
 from database.queries import get_uploads_historico
 
 # region ====================== SESSÃO 1: Guard de acesso =====================
@@ -102,8 +82,9 @@ def _render_aba_usuarios(admin_logado: dict) -> None:
 
     Funcionalidades:
       - Listagem com status ativo/inativo
-      - Criar novo usuário (com senha hasheada em bcrypt)
+      - Criar novo usuário (conta real no Supabase Auth, sem depender de SMTP)
       - Editar perfil e gerência
+      - Resetar senha diretamente via API admin do Supabase
       - Ativar / desativar (soft delete — nunca apaga do banco)
     """
     st.markdown("### 👥 Gestão de Usuários")
@@ -235,6 +216,27 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
                     ativo=ativo,
                 )
 
+            st.markdown("---")
+            st.markdown("**🔑 Resetar Senha**")
+            with st.form("form_resetar_senha"):
+                nova_senha = st.text_input(
+                    "Nova senha provisória", type="password",
+                    help="Mínimo 8 caracteres. Repasse ao usuário por um canal seguro.",
+                )
+                submit_reset = st.form_submit_button("🔑 Resetar Senha")
+
+            if submit_reset:
+                if len(nova_senha) < 8:
+                    st.error("❌ Senha deve ter no mínimo 8 caracteres.")
+                else:
+                    admin_logado = st.session_state.get("usuario", {})
+                    _resetar_senha(
+                        user_id=user_id_sel,
+                        email=row.get("email", ""),
+                        nova_senha=nova_senha,
+                        admin_id=admin_logado.get("id"),
+                    )
+
 
 def _buscar_usuarios() -> pd.DataFrame:
     """Busca todos os usuários no banco."""
@@ -260,23 +262,30 @@ def _criar_usuario(
     gerencia: str | None,
     criado_por: str | None,
 ) -> None:
-    """Persiste novo usuário com senha hasheada."""
+    """
+    Cria a conta de login (Supabase Auth) e o perfil (tabela 'usuarios').
+
+    A senha nunca é armazenada pelo app — ela vive só no Supabase Auth
+    (ver database/schema.sql). email_confirm=True libera o acesso na hora,
+    sem precisar de e-mail de confirmação (a MRS ainda não liberou SMTP).
+    """
     try:
+        admin = get_supabase_admin()
+        admin.auth.admin.create_user({
+            "email":         email,
+            "password":      senha,
+            "email_confirm": True,
+        })
+
         supabase = get_supabase()
-
-        # Hash bcrypt — nunca armazenar senha em plaintext
-        senha_hash = bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
         dados = {
             "nome":       nome,
             "email":      email,
-            "senha_hash": senha_hash,
             "perfil":     perfil,
             "gerencia":   gerencia,
             "ativo":      True,
             "criado_por": criado_por,
         }
-
         supabase.table("usuarios").insert(dados).execute()
 
         # Registra no log de auditoria
@@ -286,14 +295,56 @@ def _criar_usuario(
             admin_id=criado_por,
         )
 
-        st.success(f"✅ Usuário **{nome}** criado com sucesso!")
+        st.success(f"✅ Usuário **{nome}** criado com sucesso! Já pode logar com a senha provisória.")
         st.rerun()
 
     except Exception as e:
-        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+        msg = str(e).lower()
+        if "duplicate" in msg or "unique" in msg or "already been registered" in msg or "already registered" in msg:
             st.error("❌ E-mail já cadastrado na plataforma.")
         else:
             st.error(f"❌ Erro ao criar usuário: {e}")
+
+
+def _resetar_senha(user_id: str, email: str, nova_senha: str, admin_id: str | None) -> None:
+    """
+    Reseta a senha de um usuário diretamente via API admin do Supabase —
+    não depende de SMTP/e-mail de recuperação.
+    """
+    try:
+        admin = get_supabase_admin()
+
+        # Localiza o usuário no Supabase Auth pelo e-mail (a API admin não
+        # busca por e-mail diretamente, então paginamos até encontrar).
+        auth_user_id = None
+        pagina = 1
+        while auth_user_id is None:
+            resp = admin.auth.admin.list_users(page=pagina, per_page=200)
+            usuarios_pagina = resp.users if hasattr(resp, "users") else resp
+            if not usuarios_pagina:
+                break
+            for u in usuarios_pagina:
+                if (u.email or "").strip().lower() == email.strip().lower():
+                    auth_user_id = u.id
+                    break
+            pagina += 1
+
+        if not auth_user_id:
+            st.error("❌ Usuário não encontrado no Supabase Auth (conta pode ter sido criada antes da correção — recrie o usuário).")
+            return
+
+        admin.auth.admin.update_user_by_id(auth_user_id, {"password": nova_senha})
+
+        _registrar_log(
+            acao="RESETAR_SENHA",
+            detalhes={"user_id": user_id, "email": email},
+            admin_id=admin_id,
+        )
+
+        st.success(f"✅ Senha de **{email}** redefinida com sucesso!")
+
+    except Exception as e:
+        st.error(f"❌ Erro ao resetar senha: {e}")
 
 
 def _editar_usuario(
