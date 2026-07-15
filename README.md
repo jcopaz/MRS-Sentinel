@@ -147,7 +147,7 @@ mrs-painel-malha/
 | **Sprint 2** | Upload de planilhas + Persistência | ✅ Concluído |
 | **Sprint 3** | Visualizações SP e VP (9 elementos) | ✅ Concluído |
 | **Sprint 4** | Visão Geral + Admin completo | ✅ Concluído |
-| **Sprint 5** | Alertas automáticos + hot-spots crônicos | ⬜ Próxima |
+| **Sprint 5** | Alertas automáticos + hot-spots crônicos | ✅ Concluído |
 | **Sprint 6+** | KM real, Mapas, PDF, SAP | 🔮 Futuro |
 
 ---
