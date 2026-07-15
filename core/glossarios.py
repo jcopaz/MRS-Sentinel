@@ -338,6 +338,43 @@ def status_base_label(status: str) -> str:
             return val
     return status
 
+
+_TOKENS_CONCLUIDA_FALLBACK = ("conc", "encerr", "fecha", "resolv")
+_TOKENS_ABERTA_FALLBACK    = ("abert",)
+
+
+def status_base_efetivo(status_usuario, status_final=None) -> str | None:
+    """
+    Código efetivo de Status Base para uma nota, com fallback para EE.
+
+    A Eletroeletrônica (EE) normalmente não preenche 'status_usuario' (os 17
+    códigos detalhados do SAP/VP) — só tem 'Status_Final_ok' (coluna G da
+    planilha, mapeada como 'status_final'), com apenas "Aberto"/"Encerrado".
+    Sem esse fallback, o filtro de Status Base fica sem opções pra notas EE.
+
+    Prioridade: status_usuario (código detalhado, ex. 'ABER', 'CONC', 'EXEC')
+    > status_final (texto livre "Aberto"/"Encerrado", mapeado pros códigos
+    'ABER'/'CONC'). Retorna None se nenhum dos dois trouxer informação.
+    """
+    def _limpo(v) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        return "" if s.lower() in ("", "nan", "none", "<na>", "nat") else s
+
+    su = _limpo(status_usuario).upper()
+    if su:
+        return su
+
+    sf = _limpo(status_final).lower()
+    if sf:
+        if any(tok in sf for tok in _TOKENS_CONCLUIDA_FALLBACK):
+            return "CONC"
+        if any(tok in sf for tok in _TOKENS_ABERTA_FALLBACK):
+            return "ABER"
+
+    return None
+
 # endregion
 
 

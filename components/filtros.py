@@ -20,7 +20,9 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 
-from core.glossarios import nome_ramal, RAMAIS_MRS, STATUS_BASE, PESO_PRIORIDADE
+from core.glossarios import (
+    nome_ramal, RAMAIS_MRS, STATUS_BASE, PESO_PRIORIDADE, status_base_efetivo,
+)
 
 # Centros de trabalho por gerência (fonte: 08_GLOSSARIOS.md)
 CENTROS_POR_GERENCIA = {
@@ -132,14 +134,22 @@ def _opcoes_tipos_inspecao(df: pd.DataFrame) -> list[str]:
 
 def _opcoes_status_base(df: pd.DataFrame) -> list[str]:
     """
-    Códigos de status_usuario presentes nos dados, na ordem oficial de
+    Códigos de Status Base presentes nos dados, na ordem oficial de
     STATUS_BASE (core/glossarios.py). Inclui códigos não catalogados no fim.
+
+    Usa status_base_efetivo() — a EE normalmente não preenche
+    'status_usuario' (só tem 'Status_Final_ok'/'status_final' com
+    Aberto/Encerrado), então sem esse fallback o filtro fica vazio
+    quando só notas EE estão selecionadas.
     """
-    if "status_usuario" not in df.columns:
+    if "status_usuario" not in df.columns and "status_final" not in df.columns:
         return []
-    presentes = set(
-        str(s).strip().upper() for s in df["status_usuario"].dropna().unique().tolist()
-    )
+    col_su = df["status_usuario"] if "status_usuario" in df.columns else pd.Series([None] * len(df), index=df.index)
+    col_sf = df["status_final"] if "status_final" in df.columns else pd.Series([None] * len(df), index=df.index)
+    presentes = {
+        cod for cod in (status_base_efetivo(su, sf) for su, sf in zip(col_su, col_sf))
+        if cod
+    }
     ordenados = [c for c in STATUS_BASE if c in presentes]
     extras = sorted(presentes - set(ordenados))
     return ordenados + extras
@@ -248,8 +258,11 @@ def aplicar_filtros_atributos(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         df = df[df["tipo_atividade"].isin(tipos)]
 
     status_base = filtros.get("status_base") or []
-    if status_base and "status_usuario" in df.columns:
-        df = df[df["status_usuario"].str.strip().str.upper().isin(status_base)]
+    if status_base and ("status_usuario" in df.columns or "status_final" in df.columns):
+        col_su = df["status_usuario"] if "status_usuario" in df.columns else pd.Series([None] * len(df), index=df.index)
+        col_sf = df["status_final"] if "status_final" in df.columns else pd.Series([None] * len(df), index=df.index)
+        efetivo = [status_base_efetivo(su, sf) for su, sf in zip(col_su, col_sf)]
+        df = df[pd.Series(efetivo, index=df.index).isin(status_base)]
 
     return df
 
