@@ -1,0 +1,32 @@
+name: Keep MRS Sentinel Awake
+
+# Pings HTTP simples (cron-job.org etc.) não funcionam aqui: o Streamlit
+# Community Cloud redireciona qualquer requisição sem navegador de verdade
+# para um bootstrap de autenticação em share.streamlit.io, mesmo com o app
+# público e mesmo no endpoint de health check. Este workflow usa um
+# Chromium headless (Playwright) — que executa JS e segue redirecionamentos
+# como um navegador real — pra visitar o app periodicamente e evitar que o
+# Streamlit Cloud o coloque pra dormir por inatividade.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.45.0-jammy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Visitar o app para mantê-lo acordado
+        run: |
+          pip install --quiet playwright
+          python scripts/keep_alive.py
