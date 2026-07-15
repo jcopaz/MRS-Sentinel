@@ -25,6 +25,7 @@ from datetime import datetime
 from core.glossarios import (
     FAMILIAS_VP, FAMILIAS_EE, GLOSSARIO_VP, GLOSSARIO_EE,
     normalizar_coluna_ramal, RAMAIS_MRS, status_base_label,
+    GERENCIA_POR_CENTRO,
 )
 from core.score_engine import aplicar_score_dataframe
 
@@ -427,6 +428,36 @@ def _mapear_peso_prioridade(prio: str) -> int:
         return _PESO_PRIORIDADE[p]
     return _PESO_PRIORIDADE.get(p[:1], 1)
 
+
+def detectar_gerencia_nota(centro_trab, gerencia_origem=None) -> str | None:
+    """
+    Detecta a gerência (SP ou VP) de UMA nota — permite subir planilhas com
+    notas de mais de uma gerência de uma vez só (o restante do pipeline
+    ainda recebe uma gerência única por chamada, via parâmetro 'gerencia').
+
+    Ordem de prioridade:
+      1) centro_trab → GERENCIA_POR_CENTRO (mapeamento oficial de centros)
+      2) fallback: texto de 'gerencia_origem' (ex.: "E.SP", "E.VP")
+
+    Retorna None quando não dá pra determinar com segurança — nesse caso
+    o chamador usa a gerência selecionada manualmente no upload.
+    """
+    if centro_trab and str(centro_trab).strip():
+        centro = str(centro_trab).strip().upper()
+        if centro in GERENCIA_POR_CENTRO:
+            return GERENCIA_POR_CENTRO[centro]
+
+    if gerencia_origem and str(gerencia_origem).strip():
+        texto = str(gerencia_origem).strip().upper()
+        tem_sp = "SP" in texto
+        tem_vp = "VP" in texto
+        if tem_sp and not tem_vp:
+            return "SP"
+        if tem_vp and not tem_sp:
+            return "VP"
+
+    return None
+
 # endregion
 
 
@@ -540,8 +571,18 @@ def processar_planilha(
     df = aplicar_score_dataframe(df, disciplina)
 
     # Passo 14: Metadados de origem
-    df["gerencia"]   = gerencia
-    df["disciplina"] = disciplina
+    # Gerência detectada linha a linha (centro_trab / gerencia_origem) —
+    # permite subir um arquivo com notas de mais de uma gerência de uma vez.
+    # 'gerencia_auto' marca se a detecção teve sucesso; quando falha, a nota
+    # cai na gerência selecionada manualmente na tela de upload.
+    centro_col = df["centro_trab"] if "centro_trab" in df.columns else pd.Series([None] * len(df), index=df.index)
+    origem_col = df["gerencia_origem"] if "gerencia_origem" in df.columns else pd.Series([None] * len(df), index=df.index)
+    detectadas = [
+        detectar_gerencia_nota(c, g) for c, g in zip(centro_col, origem_col)
+    ]
+    df["gerencia_auto"] = [d is not None for d in detectadas]
+    df["gerencia"]      = [d if d else gerencia for d in detectadas]
+    df["disciplina"]    = disciplina
 
     # Passo 15: numero_nota numérico + filtro linhas inválidas
     if "numero_nota" in df.columns:

@@ -139,6 +139,24 @@ def _render_upload_area(gerencia: str, disciplina: str):
         st.warning("⚠️ Nenhuma nota encontrada na planilha.")
         return
 
+    # Notas cuja gerência detectada (por centro_trab/gerencia_origem) o
+    # usuário não tem permissão de subir são descartadas do upload — evita
+    # que um Assistente da SP suba, sem querer, notas da VP misturadas
+    # no mesmo arquivo.
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+    nao_permitidas = [g for g in gerencias_presentes if not can_upload(g)]
+    if nao_permitidas:
+        qtd_excluida = int(df["gerencia"].isin(nao_permitidas).sum())
+        st.warning(
+            f"⚠️ {qtd_excluida} nota(s) identificadas para a(s) gerência(s) "
+            f"**{', '.join(nao_permitidas)}** foram descartadas — você só tem "
+            f"permissão de upload para a Gerência **{gerencia}**."
+        )
+        df = df[~df["gerencia"].isin(nao_permitidas)].reset_index(drop=True)
+        if df.empty:
+            st.error("❌ Nenhuma nota restante após aplicar as permissões de upload.")
+            return
+
     # Mostra resultado do processamento
     _render_preview(df, arquivo.name, formato, disc_detectada, tamanho_mb, gerencia)
 
@@ -160,6 +178,8 @@ def _render_preview(
     }.get(formato, formato)
 
     total_notas = len(df)
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist()) if "gerencia" in df.columns else [gerencia]
+    mista = len(gerencias_presentes) > 1
 
     # Cards de resumo
     st.markdown("### ✅ Planilha Reconhecida")
@@ -168,13 +188,32 @@ def _render_preview(
     with col1:
         st.metric("📋 Total de Notas", f"{total_notas:,}".replace(",", "."))
     with col2:
-        st.metric("🏭 Gerência", gerencia)
+        st.metric("🏭 Gerência", " + ".join(gerencias_presentes) if mista else gerencia)
     with col3:
         st.metric("📌 Disciplina", disciplina)
     with col4:
         st.metric("📄 Formato", f"Tipo {formato}")
 
     st.caption(f"Formato detectado: **{formato_legivel}** · Arquivo: `{nome_arquivo}` ({tamanho_mb:.1f} MB)")
+
+    # Planilha com mais de uma gerência detectada — mostra o detalhamento
+    if mista:
+        contagem = df["gerencia"].value_counts()
+        st.info(
+            "📦 **Arquivo com notas de mais de uma gerência** — detectado pelo "
+            "centro de trabalho de cada nota. Cada gerência será gravada "
+            "separadamente:\n\n" +
+            "\n".join(f"- **{g}**: {int(contagem[g]):,} nota(s)".replace(",", ".") for g in gerencias_presentes)
+        )
+
+    if "gerencia_auto" in df.columns:
+        qtd_fallback = int((~df["gerencia_auto"]).sum())
+        if qtd_fallback:
+            st.warning(
+                f"⚠️ {qtd_fallback} nota(s) não puderam ser classificadas automaticamente "
+                f"pelo centro de trabalho e foram associadas à Gerência **{gerencia}** "
+                "(selecionada manualmente) — confira se está correto."
+            )
 
     # KPIs rápidos
     col_a, col_b, col_c = st.columns(3)
@@ -194,10 +233,10 @@ def _render_preview(
     # Preview da tabela (primeiras 20 linhas)
     with st.expander("🔍 Preview dos dados (primeiras 20 linhas)", expanded=False):
         colunas_show = [c for c in [
-            "numero_nota", "prioridade", "ramal", "trecho", "origem",
+            "numero_nota", "gerencia", "prioridade", "ramal", "trecho", "origem",
             "familia_defeito", "defeito_legivel", "status_amigavel",
             "lead_time_dias", "score", "data_nota",
-        ] if c in df.columns]
+        ] if c in df.columns and (c != "gerencia" or mista)]
         st.dataframe(
             df[colunas_show].head(20),
             use_container_width=True,
@@ -205,9 +244,10 @@ def _render_preview(
         )
 
     # Aviso sobre substituição
+    gerencias_txt = " e ".join(gerencias_presentes) if mista else gerencia
     st.warning(
         f"⚠️ **Atenção:** Esta ação irá **substituir** a base ativa da "
-        f"Gerência **{gerencia}** — Disciplina **{disciplina}**. "
+        f"Gerência **{gerencias_txt}** — Disciplina **{disciplina}**. "
         "Os dados anteriores serão arquivados e não poderão ser recuperados automaticamente.",
         icon="⚠️"
     )
@@ -224,7 +264,7 @@ def _render_preview(
         )
 
     if confirmar:
-        _executar_upload(df, nome_arquivo, gerencia, disciplina, tamanho_mb)
+        _executar_upload(df, nome_arquivo, disciplina, tamanho_mb)
 
 # endregion
 
@@ -234,15 +274,49 @@ def _render_preview(
 def _executar_upload(
     df: pd.DataFrame,
     nome_arquivo: str,
-    gerencia: str,
     disciplina: str,
     tamanho_mb: float,
 ):
     """
-    Persiste os dados no Supabase em 3 etapas:
+    Persiste as notas no Supabase, agrupando por gerência detectada em cada
+    linha (ver core/parser.py: detectar_gerencia_nota) — permite subir um
+    arquivo com notas de mais de uma gerência de uma vez.
+    """
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+    total_geral = len(df)
+    mista = len(gerencias_presentes) > 1
+
+    sucesso_algum = False
+    for ger in gerencias_presentes:
+        sub_df = df[df["gerencia"] == ger].reset_index(drop=True)
+        tamanho_proporcional = (
+            tamanho_mb * (len(sub_df) / total_geral) if total_geral else tamanho_mb
+        )
+        if mista:
+            st.markdown(f"#### 🏭 Gerência {ger} — {len(sub_df):,} nota(s)".replace(",", "."))
+        if _executar_upload_gerencia(sub_df, nome_arquivo, ger, disciplina, tamanho_proporcional):
+            sucesso_algum = True
+
+    if sucesso_algum:
+        st.balloons()
+        # Limpa o estado do uploader para permitir novo upload
+        st.session_state.pop("upload_arquivo", None)
+
+
+def _executar_upload_gerencia(
+    df: pd.DataFrame,
+    nome_arquivo: str,
+    gerencia: str,
+    disciplina: str,
+    tamanho_mb: float,
+) -> bool:
+    """
+    Persiste as notas de UMA gerência em 3 etapas:
     1. Arquiva uploads ativos anteriores (gerencia+disciplina)
     2. Insere registro em uploads_historico
     3. Insere notas em lote
+
+    Retorna True em caso de sucesso, False em caso de falha.
     """
     supabase    = get_supabase()
     usuario_id  = get_id()
@@ -310,24 +384,23 @@ def _executar_upload(
             f"✅ **Upload concluído!** {total_notas:,} notas da Gerência **{gerencia}** "
             f"— **{disciplina}** carregadas com sucesso.".replace(",", ".")
         )
-        st.balloons()
-        
+
         from database.queries import invalidar_cache_notas
         invalidar_cache_notas()
 
         # Recálculo automático de alertas (Sprint 5) — não bloqueia o upload
         _recalcular_alertas_pos_upload(gerencia, disciplina)
 
-        # Limpa o estado do uploader para permitir novo upload
-        st.session_state.pop("upload_arquivo", None)
+        return True
 
     except Exception as e:
         barra.empty()
-        st.error(f"❌ Falha durante o upload: {e}")
+        st.error(f"❌ Falha durante o upload da Gerência {gerencia}: {e}")
         st.info(
             "Os dados anteriores **não foram removidos** pois o erro ocorreu antes da substituição.",
             icon="ℹ️"
         )
+        return False
 
 
 def _recalcular_alertas_pos_upload(gerencia: str, disciplina: str) -> None:
