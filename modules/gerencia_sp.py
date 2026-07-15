@@ -38,7 +38,7 @@ from core.glossarios import (
 )
 
 # Queries do banco
-from database.queries import get_notas_gerencia, get_kpis_gerencia, get_ranking_hotspots
+from database.queries import get_notas_cached, get_kpis_gerencia, get_ranking_hotspots
 
 # endregion
 
@@ -58,14 +58,16 @@ def _carregar_dados(disciplina_sel: str) -> pd.DataFrame:
     """
     frames = []
 
+    # get_notas_cached (st.cache_data) já retorna uma cópia isolada do cache
+    # a cada chamada — seguro mutar direto, sem custo extra de memória.
     if disciplina_sel in ("VP", "VP+EE"):
-        df_vp = get_notas_gerencia("SP", "VP")
+        df_vp = get_notas_cached("SP", "VP")
         if not df_vp.empty:
             df_vp["disciplina_label"] = "VP"
             frames.append(df_vp)
 
     if disciplina_sel in ("EE", "VP+EE"):
-        df_ee = get_notas_gerencia("SP", "EE")
+        df_ee = get_notas_cached("SP", "EE")
         if not df_ee.empty:
             df_ee["disciplina_label"] = "EE"
             frames.append(df_ee)

@@ -40,7 +40,7 @@ from core.score_engine import (
 from core.glossarios import normalizar_coluna_ramal, nome_ramal, RAMAIS_MRS
 
 # Queries do banco
-from database.queries import get_notas_gerencia
+from database.queries import get_notas_cached
 
 # endregion
 
@@ -60,14 +60,16 @@ def _carregar_dados_vp(disciplina_sel: str) -> pd.DataFrame:
     """
     frames = []
 
+    # get_notas_cached (st.cache_data) já retorna uma cópia isolada do cache
+    # a cada chamada — seguro mutar direto, sem custo extra de memória.
     if disciplina_sel in ("VP", "VP+EE"):
-        df_vp = get_notas_gerencia("VP", "VP")
+        df_vp = get_notas_cached("VP", "VP")
         if not df_vp.empty:
             df_vp["disciplina_label"] = "VP"
             frames.append(df_vp)
 
     if disciplina_sel in ("EE", "VP+EE"):
-        df_ee = get_notas_gerencia("VP", "EE")
+        df_ee = get_notas_cached("VP", "EE")
         if not df_ee.empty:
             df_ee["disciplina_label"] = "EE"
             frames.append(df_ee)
