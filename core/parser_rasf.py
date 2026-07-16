@@ -162,10 +162,11 @@ COLUNAS_NUM_RASF = [
 # region ====================== SESSÃO 2: Helpers de normalização ==============
 
 def _sim_nao(valor) -> bool:
-    """Converte 'Sim'/'Não' (e variações) em bool. Vazio/None -> False."""
+    """Converte 'Sim'/'Não' (e variações, incl. marcação por 'X' — padrão do
+    RASF na coluna Z 'Gerador THP (300)') em bool. Vazio/None -> False."""
     if valor is None:
         return False
-    return str(valor).strip().casefold() in {"sim", "s", "true", "1", "yes"}
+    return str(valor).strip().casefold() in {"sim", "s", "x", "true", "1", "yes"}
 
 
 def _mapear_gerencia(valor) -> str | None:

@@ -10,18 +10,18 @@
 # Entrada: DataFrame canônico produzido por core.parser_rasf / queries_rasf.
 # Uso:     render_inteligencia_ee(df, escopo="SP"|"VP"|"GLOBAL")
 #
-# 7 blocos:
-#   1. Painel de Prioridade  (KPIs + Pareto contagem × THP)
-#   1B. Obras × Manutenção   (classificação via "Origem da Atividade")
-#   2. Ranking de Reincidência por Ativo (TPLNR)
-#   3. Unifilar EE           (ativo × posição seq. no trecho, cor=score, anel reincidência)
-#   4. Backlog RCA / Gatilho (gatilho sem causa raiz)
-#   5. Análise 6M            (Ishikawa consolidado)
-#   6. Tendência mensal
+# 4 blocos (recorte pedido pelo Julio — 16/07/2026):
+#   1. Unifilar EE           (ativo × posição seq. no trecho, cor=score, anel
+#                             reincidência, tamanho=qtd de falhas)
+#   2. Pareto de Sintomas    (contagem × THP)
+#   3. Obras × Manutenção    (qtd de falhas / THP por "Descrição da Origem da
+#                             Atividade" RASF, sem agrupar em categoria)
+#   4. Ranking de Reincidência por Ativo (agrupado pela coluna K do RASF —
+#                             "Local de instalação", não o código TPLNR)
 #
-# Filtros: Sistema, Origem Obras×Manutenção, Reincidência, Período (essenciais)
-#   + Responsável, Ativo, Pátio, Tipo Solicitação, Origem Atividade, Grupo do
-#   Ativo (expander "Mais filtros")
+# Filtros (essenciais): Sistema, Reincidência, Gerador THP (coluna Z do
+#   RASF — marcada com "X"), Período (Data da nota), Descrição Tipo
+#   Solicitação, Descrição da Origem da Atividade, Pátio, Grupo do Ativo.
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
@@ -69,13 +69,6 @@ _PESO_TIPO_FALHA = {
     "Baixo Impacto": 0.25,
 }
 
-# Meses em português (idêntico ao padrão de components/heatmap.py e
-# components/visao_gerencial.py) — todo gráfico com data usa isso, nunca
-# formatação de data nativa do ECharts/navegador (que sai em inglês).
-MESES_PT_ABREV = {
-    1: "jan", 2: "fev", 3: "mar", 4: "abr", 5: "mai", 6: "jun",
-    7: "jul", 8: "ago", 9: "set", 10: "out", 11: "nov", 12: "dez",
-}
 # endregion
 
 
@@ -176,13 +169,13 @@ def _multiselect_coluna(df: pd.DataFrame, coluna: str, label: str, escopo: str, 
 
 def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
     """
-    Filtros da aba. Linha essencial sempre visível: Sistema, Categoria
-    (Obras/Manutenção), Reincidência, Período. Os demais (Responsável,
-    Ativo, Pátio, Tipo Solicitação, Origem da Atividade, Grupo do Ativo)
-    ficam num expander pra não poluir o topo da tela.
+    Filtros da aba — recorte pedido pelo Julio (16/07/2026): Sistema,
+    Reincidência, Gerador THP, Período sempre visíveis; Descrição Tipo
+    Solicitação, Descrição da Origem da Atividade, Pátio e Grupo do Ativo
+    num expander pra não poluir o topo da tela.
 
     Aplicados sobre o df ANTES de _enriquecer() — assim o score_ee e todas as
-    agregações dos 6 blocos já refletem só o recorte filtrado. Mesmo padrão
+    agregações dos blocos já refletem só o recorte filtrado. Mesmo padrão
     defensivo de components/filtros.py: seleção vazia = sem filtro (volta a
     lista cheia), evita "aba em branco" por engano.
     """
@@ -190,23 +183,24 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
         return df
 
     st.markdown("##### 🔍 Filtros")
-    col_sist, col_cat, col_reinc, col_periodo = st.columns([1, 1, 1, 1.4])
+    col_sist, col_reinc, col_thp, col_periodo = st.columns([1, 1, 1, 1.4])
 
     with col_sist:
         sistema_sel = _multiselect_coluna(df, "sistema", "Sistema", escopo)
-
-    with col_cat:
-        categoria_sel = _multiselect_coluna(
-            df, "origem_categoria", "Origem: Obras × Manutenção", escopo,
-            help="Derivado de 'Descrição da Origem da Atividade' — ver bloco "
-                 "🏗️ Obras × Manutenção logo abaixo pra entender a classificação.",
-        )
 
     with col_reinc:
         reincidencia_opt = st.radio(
             "Reincidência (90d, ativo)", ["Todas", "Só reincidentes", "Só não reincidentes"],
             index=0, key=f"ee_filtro_reincid_{escopo}",
             help="Usa o campo 'Reincidência 90 dias ativo' já pré-calculado pelo RASF.",
+        )
+
+    with col_thp:
+        gerador_thp_opt = st.radio(
+            "Gerador THP (300)", ["Todas", "Só com THP", "Só sem THP"],
+            index=0, key=f"ee_filtro_thp_{escopo}",
+            help="Coluna Z do RASF ('Gerador THP (300)') — sinalizada com "
+                 "'X' nas notas que geraram trem parado.",
         )
 
     with col_periodo:
@@ -222,35 +216,28 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
             key=f"ee_filtro_periodo_{escopo}",
         )
 
-    with st.expander("🔎 Mais filtros — Responsável, Ativo, Pátio, Tipo, Origem, Grupo do Ativo"):
-        col_a, col_b, col_c = st.columns(3)
+    with st.expander("🔎 Mais filtros — Tipo Solicitação, Origem da Atividade, Pátio, Grupo do Ativo"):
+        col_a, col_b = st.columns(2)
         with col_a:
-            resp_sel = _multiselect_coluna(df, "responsavel", "Responsável", escopo)
             tipo_sel = _multiselect_coluna(df, "desc_tipo_solicitacao", "Descrição Tipo Solicitação", escopo)
-        with col_b:
-            ativo_sel = _multiselect_coluna(
-                df, "local_instalacao", "Ativo (TPLNR)", escopo,
-                help="Local de Instalação — mesmo código usado no Ranking de Reincidência.",
-            )
             origem_sel = _multiselect_coluna(df, "desc_origem_atividade", "Descrição da Origem da Atividade", escopo)
-        with col_c:
+        with col_b:
             patio_sel = _multiselect_coluna(df, "local_patio", "Pátio", escopo)
             grupo_sel = _multiselect_coluna(df, "grupo_ativo", "Grupo do Ativo", escopo)
 
     d = df.copy()
     if sistema_sel is not None and "sistema" in d.columns:
         d = d[d["sistema"].isin(sistema_sel)]
-    if categoria_sel is not None and "origem_categoria" in d.columns:
-        d = d[d["origem_categoria"].isin(categoria_sel)]
     if "reincidencia_ativo" in d.columns:
         if reincidencia_opt == "Só reincidentes":
             d = d[d["reincidencia_ativo"]]
         elif reincidencia_opt == "Só não reincidentes":
             d = d[~d["reincidencia_ativo"]]
-    if resp_sel is not None and "responsavel" in d.columns:
-        d = d[d["responsavel"].isin(resp_sel)]
-    if ativo_sel is not None and "local_instalacao" in d.columns:
-        d = d[d["local_instalacao"].isin(ativo_sel)]
+    if "gerador_thp" in d.columns:
+        if gerador_thp_opt == "Só com THP":
+            d = d[d["gerador_thp"]]
+        elif gerador_thp_opt == "Só sem THP":
+            d = d[~d["gerador_thp"]]
     if patio_sel is not None and "local_patio" in d.columns:
         d = d[d["local_patio"].isin(patio_sel)]
     if tipo_sel is not None and "desc_tipo_solicitacao" in d.columns:
@@ -268,31 +255,10 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
 # endregion
 
 
-# region ====================== SESSÃO 3: BLOCO 1 — Painel de Prioridade ========
+# region ====================== SESSÃO 3: BLOCO 2 — Pareto de Sintomas x THP ====
 
-def _bloco_prioridade(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 🎯 Painel de Prioridade — onde atacar")
-
-    total = len(df)
-    thp_h = df["thp_h"].sum()
-    reincid = int(df.get("reincidencia_ativo", pd.Series(dtype=bool)).sum())
-    confiab = int(df.get("impacta_confiabilidade", pd.Series(dtype=bool)).sum())
-    backlog = int(df.get("lacuna_rca", pd.Series(dtype=bool)).sum())
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    _kpi(c1, "Falhas EE", _fmt_int(total), COR_PRIMARIA)
-    _kpi(c2, "Trem parado (THP)", _fmt_h(thp_h), COR_THP)
-    _kpi(c3, "Reincid. 90d (ativo)",
-         f"{_fmt_int(reincid)}",
-         COR_CRIT, sub=f"{100*reincid/total:.0f}% do total" if total else "")
-    _kpi(c4, "Impacta confiab.",
-         f"{_fmt_int(confiab)}",
-         COR_WARN, sub=f"{100*confiab/total:.0f}% do total" if total else "")
-    _kpi(c5, "Backlog RCA", _fmt_int(backlog), COR_CRONICO,
-         sub="gatilho sem causa raiz")
-
-    st.markdown("---")
-    st.markdown("##### 📊 Pareto de Sintomas — contagem × trem parado (THP)")
+def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 📊 Pareto de Sintomas × THP")
     st.caption(
         "O sintoma mais **frequente** nem sempre é o que mais **para trem**. "
         "As barras mostram volume; a linha, o THP acumulado (h)."
@@ -360,44 +326,36 @@ def _bloco_prioridade(df: pd.DataFrame, escopo: str = ""):
 # endregion
 
 
-# region ====================== SESSÃO 3B: BLOCO 1B — Obras × Manutenção =======
+# region ====================== SESSÃO 4: BLOCO 3 — Obras × Manutenção =========
 # Pedido do Julio (16/07/2026): a malha está em obras de remodelação — falha
 # originada de Obras pede estratégia de bloqueio diferente (comissionamento/
-# padrão de entrega) de falha de Manutenção tradicional (RCA/plano). Achado
-# nos dados reais: "Descrição da Origem da Atividade" já tem o valor
-# "PROJETOS E OBRAS" isolado — não precisou inventar heurística nenhuma, só
-# ler o que já existe (ver core.parser_rasf.classificar_origem_atividade).
+# padrão de entrega) de falha de Manutenção tradicional (RCA/plano). Em vez
+# de agrupar num rótulo Obras/Manutenção derivado, o bloco mostra a
+# quantidade de falhas e o THP por cada valor bruto de "Descrição da Origem
+# da Atividade" (RASF) — dá pra ver exatamente qual origem pesa mais, sem a
+# perda de granularidade da categorização (ajuste 16/07/2026).
 
-_CORES_ORIGEM_CATEGORIA = {
-    "Obras": "#7c3aed",
-    "Manutenção": COR_PRIMARIA,
-    "Não classificado": COR_WARN,
-    "Não informado": "#9ca3af",
-}
+_TOP_ORIGENS_ATIVIDADE = 15
 
 
 def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🏗️ Obras × Manutenção — como atacar")
     st.caption(
-        "Classificação automática de 'Descrição da Origem da Atividade' "
-        "(regra: contém \"OBRA\" → **Obras**, contém \"MANUTEN\" → "
-        "**Manutenção**, resto → **Não classificado**). Falha de **Obras** "
-        "geralmente pede bloqueio na frente de trabalho (padrão de "
-        "comissionamento/entrega); falha de **Manutenção** pede RCA/plano "
-        "de manutenção tradicional — duas estratégias diferentes. "
-        "Categorização é ajustável sem deploy (`configuracoes`, chave "
-        "`rasf_origem_categoria_overrides`) — expanda abaixo pra ver o "
-        "detalhe e sugerir ajustes."
+        "Quantidade de falhas e THP por 'Descrição da Origem da Atividade' "
+        "(RASF) — cada origem pede uma estratégia diferente: falha originada "
+        "de obra costuma pedir bloqueio na frente de trabalho (padrão de "
+        "comissionamento/entrega); falha de manutenção tradicional pede "
+        "RCA/plano de manutenção."
     )
 
-    if "origem_categoria" not in df.columns:
+    if "desc_origem_atividade" not in df.columns:
         st.info("Coluna de origem da atividade indisponível.")
         return
 
     g = (
-        df.groupby("origem_categoria")
+        df.groupby("desc_origem_atividade")
           .agg(
-              falhas=("origem_categoria", "size"),
+              falhas=("desc_origem_atividade", "size"),
               thp_h=("thp_h", "sum"),
               reincidencias=("reincidencia_ativo", "sum"),
               backlog=("lacuna_rca", "sum"),
@@ -410,25 +368,24 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
         return
 
     total = int(g["falhas"].sum())
+    top1 = g.iloc[0]
+    pct_top1 = 100 * top1["falhas"] / total if total else 0
 
-    cols = st.columns(len(g))
-    for col, (_, r) in zip(cols, g.iterrows()):
-        cat = str(r["origem_categoria"])
-        pct = 100 * r["falhas"] / total if total else 0
-        _kpi(
-            col, cat, f"{int(r['falhas']):,}".replace(",", "."),
-            _CORES_ORIGEM_CATEGORIA.get(cat, COR_PRIMARIA),
-            sub=f"{pct:.0f}% · {int(r['reincidencias'])} reincid. · {int(r['backlog'])} sem 6M",
-        )
+    c1, c2, c3 = st.columns(3)
+    _kpi(c1, "Falhas no recorte", _fmt_int(total), COR_PRIMARIA)
+    _kpi(c2, "Trem parado (THP)", _fmt_h(g["thp_h"].sum()), COR_THP)
+    _kpi(c3, "Origem principal", str(top1["desc_origem_atividade"])[:28],
+         COR_CRIT, sub=f"{_fmt_int(top1['falhas'])} falhas · {pct_top1:.0f}% do total")
+
+    g_chart = g.head(_TOP_ORIGENS_ATIVIDADE)
 
     if not ECHARTS_OK:
         st.dataframe(g, use_container_width=True, hide_index=True)
         return
 
-    categorias = g["origem_categoria"].astype(str).tolist()
-    falhas     = [int(v) for v in g["falhas"]]
-    thp        = [round(float(v), 1) for v in g["thp_h"]]
-    cores      = [_CORES_ORIGEM_CATEGORIA.get(c, COR_PRIMARIA) for c in categorias]
+    rotulos = g_chart["desc_origem_atividade"].astype(str).str.slice(0, 32).tolist()
+    falhas  = [int(v) for v in g_chart["falhas"]]
+    thp     = [round(float(v), 1) for v in g_chart["thp_h"]]
 
     opt = {
         "tooltip": {
@@ -440,10 +397,11 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
             "data": ["Falhas", "THP (h)"], "top": 0,
             "textStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
         },
-        "grid": {"left": "3%", "right": "6%", "top": "18%", "bottom": "10%", "containLabel": True},
+        "grid": {"left": "3%", "right": "6%", "top": "15%", "bottom": "26%", "containLabel": True},
         "xAxis": {
-            "type": "category", "data": categorias,
-            "axisLabel": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+            "type": "category", "data": rotulos,
+            "axisLabel": {"color": "#374151", "fontSize": 10, "rotate": 40, "interval": 0},
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
         },
         "yAxis": [
             {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151"},
@@ -452,46 +410,45 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
              "axisLabel": {"color": COR_THP}, "splitLine": {"show": False}},
         ],
         "series": [
-            {"name": "Falhas", "type": "bar",
-             "data": [{"value": v, "itemStyle": {"color": cores[i]}} for i, v in enumerate(falhas)],
-             "label": {"show": True, "position": "top", "color": "#1f2937", "fontWeight": "bold"},
-             "barWidth": "40%"},
+            {"name": "Falhas", "type": "bar", "data": falhas,
+             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%"},
             {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
              "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
              "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
         ],
     }
-    st_echarts(opt, height="360px", key=f"ee_obras_manut_{escopo}")
+    st_echarts(opt, height="420px", key=f"ee_obras_manut_{escopo}")
 
-    with st.expander("🔎 Ver quais valores de 'Origem da Atividade' caem em cada categoria"):
-        tab = (
-            df.groupby(["origem_categoria", "desc_origem_atividade"])
-              .size().reset_index(name="qtd")
-              .sort_values(["origem_categoria", "qtd"], ascending=[True, False])
-        )
-        st.dataframe(
-            tab.rename(columns={
-                "origem_categoria": "Categoria",
-                "desc_origem_atividade": "Origem da Atividade (RASF)",
-                "qtd": "Qtd falhas",
-            }),
-            use_container_width=True, hide_index=True,
-        )
+    with st.expander("🔎 Ver tabela completa por Origem da Atividade"):
+        tab = g.rename(columns={
+            "desc_origem_atividade": "Origem da Atividade (RASF)",
+            "falhas": "Falhas",
+            "thp_h": "THP (h)",
+            "reincidencias": "Reincid. 90d",
+            "backlog": "Backlog RCA",
+        })
+        tab["THP (h)"] = tab["THP (h)"].round(0).astype(int)
+        st.dataframe(tab, use_container_width=True, hide_index=True)
 
 # endregion
 
 
-# region ====================== SESSÃO 4: BLOCO 2 — Ranking Reincidência ========
+# region ====================== SESSÃO 5: BLOCO 4 — Ranking Reincidência ========
 
 def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### ♻️ Ranking de Reincidência por Ativo")
     st.caption(
-        "Ativos (TPLNR) que mais reincidem. A reincidência 90 dias vem do próprio "
-        "RASF. Foque o topo: são os ativos que voltam a falhar."
+        "Ativos (coluna K do RASF — 'Local de instalação') que mais "
+        "reincidem. A reincidência 90 dias vem do próprio RASF. Foque o "
+        "topo: são os ativos que voltam a falhar."
     )
 
-    if "local_instalacao" not in df.columns:
-        st.info("Coluna de ativo (TPLNR) indisponível.")
+    # Coluna K do export RASF ("Local de instalação") — descrição do ativo,
+    # não o código TPLNR (coluna J). Pedido do Julio (16/07/2026): o ranking
+    # deve agrupar por essa coluna, não pelo código.
+    col_ativo = "local_instalacao_desc" if "local_instalacao_desc" in df.columns else "local_instalacao"
+    if col_ativo not in df.columns:
+        st.info("Coluna de ativo (Local de instalação) indisponível.")
         return
 
     col_n, col_ord = st.columns([1, 2])
@@ -505,9 +462,9 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
         )
 
     g = (
-        df.groupby("local_instalacao")
+        df.groupby(col_ativo)
           .agg(
-              falhas=("local_instalacao", "size"),
+              falhas=(col_ativo, "size"),
               reincidencias=("reincidencia_ativo", "sum"),
               thp_h=("thp_h", "sum"),
               patio=("patio", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
@@ -531,7 +488,7 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
         return
 
     tabela = g.rename(columns={
-        "local_instalacao": "Ativo (TPLNR)",
+        col_ativo: "Local de Instalação",
         "patio": "Pátio",
         "sistema": "Sistema",
         "falhas": "Falhas",
@@ -542,7 +499,7 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
     tabela["THP (h)"] = tabela["THP (h)"].round(0).astype(int)
 
     st.dataframe(
-        tabela[["Ativo (TPLNR)", "Pátio", "Sistema", "Falhas",
+        tabela[["Local de Instalação", "Pátio", "Sistema", "Falhas",
                 "Reincid. 90d", "THP (h)", "Impacta confiab."]],
         use_container_width=True, hide_index=True,
         column_config={
@@ -556,7 +513,7 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
 # endregion
 
 
-# region ====================== SESSÃO 5: BLOCO 3 — Unifilar EE =================
+# region ====================== SESSÃO 6: BLOCO 1 — Unifilar EE =================
 
 def _top_sintomas(x, k: int = 5):
     """Lista até k sintomas mais comuns — mesmo padrão de _top5_defeitos do
@@ -795,206 +752,7 @@ def _unifilar_fallback(df: pd.DataFrame):
 # endregion
 
 
-# region ====================== SESSÃO 6: BLOCO 4 — Backlog RCA / Gatilho =======
-
-def _bloco_backlog(df: pd.DataFrame):
-    st.markdown("#### 🧭 Backlog de Classificação — Gatilhos sem 6M definido")
-    st.caption(
-        "Ocorrências que são **Gatilho de Análise** (PG-ENG-0088, §6.4.1) mas ainda "
-        "não têm classificação 6M/Componente preenchida — é a fila de análise pendente. "
-        "⚠️ Isso mede **classificação**, não **validação**: o procedimento ainda exige "
-        "que o especialista da área valide a causa em até 5 dias úteis (fluxo formal, "
-        "não rastreado neste export) — uma ocorrência pode estar aqui como \"coberta\" "
-        "e ainda não ter passado por esse crivo."
-    )
-
-    if "lacuna_rca" not in df.columns:
-        st.info("Campo de gatilho/causa raiz indisponível.")
-        return
-
-    gat = int(df.get("gatilho_analise", pd.Series(dtype=bool)).sum())
-    back = int(df["lacuna_rca"].sum())
-    feito = gat - back
-    cobertura = (100 * feito / gat) if gat else 0
-
-    c1, c2, c3 = st.columns(3)
-    _kpi(c1, "Gatilhos de análise", _fmt_int(gat), COR_PRIMARIA)
-    _kpi(c2, "Com 6M classificado", _fmt_int(feito), COR_OK,
-         sub=f"{cobertura:.0f}% de cobertura")
-    _kpi(c3, "Backlog (sem 6M)", _fmt_int(back), COR_CRONICO,
-         sub="priorizar classificação")
-
-    st.progress(min(cobertura / 100, 1.0),
-                text=f"Cobertura de classificação 6M: {cobertura:.0f}%")
-
-    bl = df[df["lacuna_rca"]].copy()
-    if bl.empty:
-        st.success("✅ Sem backlog: todos os gatilhos têm causa raiz. 🎉")
-        return
-
-    bl = bl.sort_values("thp_h", ascending=False)
-    cols = [c for c in ["data_nota", "numero_nota", "local_patio",
-                        "local_instalacao", "sistema", "anomalia_sintoma",
-                        "gatilho_eng", "thp_h", "responsavel"] if c in bl.columns]
-    tab = bl[cols].head(50).rename(columns={
-        "data_nota": "Data", "numero_nota": "Nota", "local_patio": "Pátio",
-        "local_instalacao": "Ativo (TPLNR)", "sistema": "Sistema",
-        "anomalia_sintoma": "Sintoma", "gatilho_eng": "Gatilho",
-        "thp_h": "THP (h)", "responsavel": "Responsável",
-    })
-    if "THP (h)" in tab.columns:
-        tab["THP (h)"] = tab["THP (h)"].round(0).astype(int)
-    if "Data" in tab.columns:
-        tab["Data"] = pd.to_datetime(tab["Data"], errors="coerce").dt.strftime("%d/%m/%Y")
-    st.dataframe(tab, use_container_width=True, hide_index=True)
-    st.caption(f"Mostrando {min(len(bl),50)} de {len(bl)} pendências (ordenado por THP).")
-
-# endregion
-
-
-# region ====================== SESSÃO 7: BLOCO 5 — Análise 6M ==================
-
-def _bloco_6m(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 🐟 Análise 6M — Ishikawa consolidado")
-    st.caption(
-        "Distribuição das causas raiz já classificadas (Eng > Manutenção). "
-        "Responde: é gente, material, método ou máquina? — direciona o bloqueio."
-    )
-
-    if "m6_nivel1" not in df.columns:
-        st.info("Campo 6M indisponível.")
-        return
-
-    classificados = df[df["m6_nivel1"].notna() & (df["m6_nivel1"].astype(str).str.strip() != "")]
-    if classificados.empty:
-        st.warning("Nenhuma falha com 6M classificado no escopo atual.")
-        return
-
-    total = len(df)
-    cob = 100 * len(classificados) / total if total else 0
-    st.markdown(
-        f"<div style='color:#6b7280;font-size:0.85rem;margin-bottom:6px;'>"
-        f"🔎 {len(classificados):,} de {total:,} falhas classificadas "
-        f"({cob:.0f}%) — as demais aguardam análise.</div>".replace(",", "."),
-        unsafe_allow_html=True,
-    )
-
-    g = (classificados.groupby("m6_nivel1")
-         .agg(qtd=("m6_nivel1", "size"), thp_h=("thp_h", "sum"))
-         .reset_index().sort_values("qtd", ascending=True))
-
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        st.dataframe(g, use_container_width=True, hide_index=True)
-        return
-
-    categorias = g["m6_nivel1"].astype(str).tolist()
-    valores    = [int(v) for v in g["qtd"]]
-
-    opt = {
-        "tooltip": {
-            "trigger": "axis", "axisPointer": {"type": "shadow"},
-            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
-            "textStyle": {"color": "#1f2937"}, "formatter": "<b>{b}</b><br/>Falhas: <b>{c}</b>",
-        },
-        "grid": {"left": "3%", "right": "10%", "top": "5%", "bottom": "5%", "containLabel": True},
-        "xAxis": {"type": "value", "name": "Nº de falhas", "axisLabel": {"color": "#374151"},
-                  "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
-        "yAxis": {
-            "type": "category", "data": categorias,
-            "axisLabel": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
-        },
-        "series": [{
-            "type": "bar", "data": valores,
-            "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [0, 4, 4, 0]},
-            "label": {"show": True, "position": "right", "color": "#1f2937",
-                      "fontSize": 12, "fontWeight": "bold"},
-            "barWidth": "55%",
-        }],
-    }
-    altura = max(300, 40 * len(categorias) + 80)
-    st_echarts(opt, height=f"{altura}px", key=f"ee_6m_{escopo}")
-
-# endregion
-
-
-# region ====================== SESSÃO 8: BLOCO 6 — Tendência YoY ===============
-
-def _bloco_tendencia(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 📈 Tendência mensal")
-    st.caption("Evolução do volume de falhas e do THP ao longo do tempo.")
-
-    if "data_nota" not in df.columns:
-        st.info("Coluna de data indisponível.")
-        return
-
-    d = df.copy()
-    d["data_nota"] = pd.to_datetime(d["data_nota"], errors="coerce")
-    d = d.dropna(subset=["data_nota"])
-    if d.empty:
-        st.info("Sem datas válidas no escopo atual.")
-        return
-
-    d["mes"] = d["data_nota"].dt.to_period("M").dt.to_timestamp()
-    g = (d.groupby("mes")
-           .agg(falhas=("mes", "size"), thp_h=("thp_h", "sum"),
-                reincid=("reincidencia_ativo", "sum"))
-           .reset_index().sort_values("mes"))
-
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        st.dataframe(g, use_container_width=True, hide_index=True)
-        return
-
-    # Rótulos em PT-BR ("jan/25") — nunca formatação nativa (sai em inglês).
-    rotulos = [f"{MESES_PT_ABREV[m.month]}/{str(m.year)[-2:]}" for m in g["mes"]]
-    falhas  = [int(v) for v in g["falhas"]]
-    thp     = [round(float(v), 1) for v in g["thp_h"]]
-
-    opt = {
-        "tooltip": {
-            "trigger": "axis",
-            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
-            "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
-            "textStyle": {"color": "#1f2937", "fontSize": 12},
-            "axisPointer": {"type": "line", "lineStyle": {"color": COR_PRIMARIA, "type": "dashed"}},
-        },
-        "legend": {
-            "data": ["Falhas", "THP (h)"], "top": 0,
-            "textStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
-        },
-        "grid": {"left": "3%", "right": "6%", "top": "15%", "bottom": "18%", "containLabel": True},
-        "xAxis": {
-            "type": "category", "data": rotulos,
-            "axisLabel": {"color": "#374151", "fontSize": 11, "rotate": 35 if len(rotulos) > 10 else 0},
-            "axisLine": {"lineStyle": {"color": "#9ca3af"}}, "boundaryGap": True,
-        },
-        "yAxis": [
-            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151"},
-             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
-            {"type": "value", "name": "THP (h)", "position": "right",
-             "axisLabel": {"color": COR_THP}, "splitLine": {"show": False}},
-        ],
-        "dataZoom": [
-            {"type": "slider", "show": True, "bottom": 5, "height": 18,
-             "borderColor": "#d1d5db", "fillerColor": "rgba(30,58,95,0.15)",
-             "handleStyle": {"color": COR_PRIMARIA}},
-            {"type": "inside"},
-        ],
-        "series": [
-            {"name": "Falhas", "type": "bar", "data": falhas,
-             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}},
-            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
-             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
-             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 7},
-        ],
-    }
-    st_echarts(opt, height="380px", key=f"ee_tendencia_{escopo}")
-
-# endregion
-
-
-# region ====================== SESSÃO 9: KPI helper ============================
+# region ====================== SESSÃO 7: KPI helper ============================
 
 def _kpi(col, label, valor, cor, sub=""):
     with col:
@@ -1015,7 +773,7 @@ def _kpi(col, label, valor, cor, sub=""):
 # endregion
 
 
-# region ====================== SESSÃO 10: Entrada pública ======================
+# region ====================== SESSÃO 8: Entrada pública ======================
 
 def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     """
@@ -1042,8 +800,8 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
         unsafe_allow_html=True,
     )
 
-    # Filtros (Responsável, Ativo, Pátio, Período) — aplicados ANTES do
-    # enriquecimento, pra score_ee e todas as agregações já refletirem o
+    # Filtros (Sistema, Reincidência, Período + expander) — aplicados ANTES
+    # do enriquecimento, pra score_ee e todas as agregações já refletirem o
     # recorte escolhido.
     df = _render_filtros(df, escopo)
     if df.empty:
@@ -1053,18 +811,12 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     df = _enriquecer(df)
     st.markdown("---")
 
-    _bloco_prioridade(df, escopo)
+    _bloco_unifilar(df, escopo)
+    st.markdown("---")
+    _bloco_pareto_sintomas(df, escopo)
     st.markdown("---")
     _bloco_obras_manutencao(df, escopo)
     st.markdown("---")
     _bloco_reincidencia(df, escopo)
-    st.markdown("---")
-    _bloco_unifilar(df, escopo)
-    st.markdown("---")
-    _bloco_backlog(df)
-    st.markdown("---")
-    _bloco_6m(df, escopo)
-    st.markdown("---")
-    _bloco_tendencia(df, escopo)
 
 # endregion
