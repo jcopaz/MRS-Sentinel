@@ -165,3 +165,17 @@ def carregar_overrides_origem_categoria() -> dict[str, str]:
     except Exception:
         pass
     return {}
+
+
+def invalidar_cache_rasf() -> None:
+    """
+    Força limpeza do cache RASF (get_rasf_cached).
+    Deve ser chamada após upload ou exclusão de dados RASF para garantir
+    dados frescos nas telas — mesmo padrão de database.queries.invalidar_cache_notas.
+
+    Uso:
+        from database.queries_rasf import invalidar_cache_rasf
+        invalidar_cache_rasf()
+    """
+    get_rasf_cached.clear()
+    st.toast("🔄 Cache RASF atualizado.", icon="✅")

@@ -727,4 +727,72 @@ def _render_aba_gestao_dados() -> None:
     st.markdown("---")
     st.caption("💡 Após apagar, vá para a tela da Gerência e faça um novo upload da planilha.")
 
+    st.markdown("---")
+    _render_secao_apagar_rasf()
+
+# endregion
+
+
+# region ====================== SESSÃO X.1: Apagar RASF =======================
+
+def _render_secao_apagar_rasf() -> None:
+    """Permite apagar a base RASF (rasf_ee) por gerência para reprocessamento —
+    mesmo padrão da seção de notas acima, mas na tabela dedicada do RASF."""
+    st.markdown("#### 🗑️ Apagar base RASF (Eletroeletrônica)")
+
+    st.warning(
+        "⚠️ **Atenção**: Esta operação apaga permanentemente as linhas do RASF "
+        "no banco (tabela `rasf_ee`). Use apenas para reprocessar um export "
+        "com parser corrigido.",
+        icon="⚠️",
+    )
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        ger_del_rasf = st.selectbox("Gerência", ["SP", "VP", "Ambas"], key="del_ger_rasf")
+
+    supabase = get_supabase()
+    ger_filtro = ger_del_rasf if ger_del_rasf != "Ambas" else None
+
+    # Preview de quantas linhas serão apagadas
+    try:
+        q = supabase.table("rasf_ee").select("id", count="exact")
+        if ger_filtro:
+            q = q.eq("gerencia", ger_filtro)
+        res = q.execute()
+        total_rasf = res.count or 0
+    except Exception:
+        total_rasf = "?"
+
+    st.info(f"📊 Linhas RASF que serão apagadas: **{total_rasf}**")
+
+    confirmacao_rasf = st.text_input(
+        'Digite "CONFIRMAR" para habilitar o botão:',
+        key="del_confirm_txt_rasf",
+    )
+
+    if st.button(
+        f"🗑️ Apagar base RASF — {ger_del_rasf}",
+        type="primary",
+        disabled=(confirmacao_rasf.strip().upper() != "CONFIRMAR"),
+        key="btn_apagar_rasf",
+    ):
+        try:
+            q = supabase.table("rasf_ee").delete()
+            if ger_filtro:
+                q = q.eq("gerencia", ger_filtro)
+            else:
+                q = q.gt("id", 0)  # id é BIGSERIAL >0 — PostgREST exige um filtro no delete()
+            q.execute()
+
+            from database.queries_rasf import invalidar_cache_rasf
+            invalidar_cache_rasf()
+
+            st.success(f"✅ {total_rasf} linhas RASF de {ger_del_rasf} apagadas com sucesso!")
+            st.rerun()
+        except Exception as ex:
+            st.error(f"❌ Erro ao apagar RASF: {ex}")
+
+    st.caption("💡 Após apagar, vá para Alimentação de Dados e refaça o upload do export RASF.")
+
 # endregion
