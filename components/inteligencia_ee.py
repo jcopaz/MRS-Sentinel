@@ -13,7 +13,7 @@
 # 6 blocos:
 #   1. Painel de Prioridade  (KPIs + Pareto contagem × THP)
 #   2. Ranking de Reincidência por Ativo (TPLNR)
-#   3. Unifilar EE           (pátio × volume, cor=score, anel reincidência)
+#   3. Unifilar EE           (ativo × posição seq. no trecho, cor=score, anel reincidência)
 #   4. Backlog RCA / Gatilho (gatilho sem causa raiz)
 #   5. Análise 6M            (Ishikawa consolidado)
 #   6. Tendência YoY         (opcional — Base Congelada)
@@ -395,15 +395,28 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
 
 # region ====================== SESSÃO 5: BLOCO 3 — Unifilar EE =================
 
+def _top_sintomas(x, k: int = 5):
+    """Lista até k sintomas mais comuns — mesmo padrão de _top5_defeitos do
+    Unifilar VP/EE (components/unifilar.py)."""
+    vc = x.dropna().value_counts().head(k)
+    if len(vc) == 0:
+        return "—"
+    return "<br/>".join(
+        f"&nbsp;&nbsp;• {s} <span style='color:#9ca3af;'>({n})</span>"
+        for s, n in vc.items()
+    )
+
+
 def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 🗺️ Unifilar EE — pátios da malha")
+    st.markdown("#### 🗺️ Unifilar EE — ativos por trecho")
     st.caption(
-        "Cada bolha é um pátio. Tamanho = volume de falhas · Cor = score de "
-        "prioridade · 🟣 Anel roxo = pátio com **ativos reincidentes** "
-        "(≥3 reincidências de 90 dias, ≥30% das falhas do pátio). "
-        "⚠️ Conceito diferente do \"hot-spot crônico\" do Unifilar VP/EE "
-        "(que é por ramal+pátio+família num período de 6 meses) — aqui é "
-        "reincidência de ativo (TPLNR) em 90 dias, já pré-calculada pelo RASF."
+        "Mesmo estilo visual do Unifilar VP/EE (bolhas, pulso, zoom). "
+        "⚠️ O eixo horizontal é **posição sequencial dos ativos dentro do "
+        "trecho** (ordenados por pátio → TPLNR) — não é KM real, o RASF não "
+        "traz medição de distância. Tamanho = volume de falhas · Cor = score "
+        "de prioridade · 🟣 Anel roxo = ativo **reincidente** (≥3 "
+        "reincidências de 90 dias — conceito diferente do hot-spot crônico "
+        "do Unifilar VP/EE, que é por ramal+pátio+família em 6 meses)."
     )
 
     if not ECHARTS_OK:
@@ -411,84 +424,124 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
         _unifilar_fallback(df)
         return
 
-    if "patio" not in df.columns or df["patio"].dropna().empty:
-        st.info("Não foi possível decodificar pátios do TPLNR neste escopo.")
+    if ("ramal" not in df.columns or df["ramal"].dropna().empty
+            or "local_instalacao" not in df.columns or df["local_instalacao"].dropna().empty):
+        st.info("Não foi possível decodificar ramal/ativo do TPLNR neste escopo.")
         _unifilar_fallback(df)
         return
 
+    df_u = df.dropna(subset=["ramal", "local_instalacao"]).copy()
+    ramais_disp = sorted(df_u["ramal"].unique())
+
+    if len(ramais_disp) == 1:
+        ramal_view = ramais_disp[0]
+        st.markdown(
+            f"<div style='padding:8px 12px;background:{COR_PRIMARIA};color:#fff;"
+            f"border-radius:8px;text-align:center;margin-bottom:10px;'>"
+            f"🚂 Visualizando: <b>{nome_ramal(ramal_view, 'completo')}</b></div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        opcoes_label = [
+            f"{nome_ramal(r, 'completo')} ({len(df_u[df_u['ramal'] == r]):,})".replace(",", ".")
+            for r in ramais_disp
+        ]
+        escolha = st.radio(
+            "🚂 Trecho:", opcoes_label, horizontal=True, key=f"ee_unif_ramal_{escopo}",
+            help="Cada trecho tem sua própria escala de posição sequencial.",
+        )
+        ramal_view = ramais_disp[opcoes_label.index(escolha)]
+
+    d = df_u[df_u["ramal"] == ramal_view].copy()
+
+    # Posição sequencial por ativo, ordenada por pátio → TPLNR (mesmo espírito
+    # de _criar_km_sequencial() do Unifilar VP/EE, só que granularidade por
+    # ativo em vez de pátio, já que a análise aqui é por TPLNR).
+    ordem_ativos = (
+        d.sort_values(["patio", "local_instalacao"])["local_instalacao"]
+         .drop_duplicates().tolist()
+    )
+    pos_map = {a: i for i, a in enumerate(ordem_ativos)}
+    d["posicao"] = d["local_instalacao"].map(pos_map)
+
     g = (
-        df.dropna(subset=["patio"])
-          .groupby("patio")
-          .agg(
-              falhas=("patio", "size"),
-              score=("score_ee", "mean"),
-              reincidencias=("reincidencia_ativo", "sum"),
-              thp_h=("thp_h", "sum"),
-              ramal=("ramal", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
-          )
-          .reset_index()
-          .sort_values("falhas", ascending=False)
-          .head(30)
+        d.groupby("local_instalacao")
+         .agg(
+             posicao=("posicao", "first"),
+             patio=("patio", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
+             sistema=("sistema", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
+             falhas=("local_instalacao", "size"),
+             score=("score_ee", "mean"),
+             reincidencias=("reincidencia_ativo", "sum"),
+             thp_h=("thp_h", "sum"),
+             sintomas=("anomalia_sintoma", _top_sintomas),
+             responsavel=("responsavel", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
+         )
+         .reset_index()
+         .sort_values("posicao")
     )
     if g.empty:
         _unifilar_fallback(df)
         return
 
     g["reincidencias"] = g["reincidencias"].astype(int)
-    # Crônico: pátio com reincidência relevante (>= 30% das falhas reincidem
-    # e pelo menos 3 reincidências) — critério simples e transparente.
-    g["cronico"] = (g["reincidencias"] >= 3) & \
-                   (g["reincidencias"] >= 0.30 * g["falhas"])
+    g["cronico"] = g["reincidencias"] >= 3  # já é por ativo — sinal direto do RASF
 
     fmax = float(g["falhas"].max() or 1)
 
     def _bsize(n):
-        return 18 + 42 * (n / fmax)
+        return 14 + 36 * (n / fmax)
 
     pts, pts_cronico = [], []
     for _, r in g.iterrows():
         size = _bsize(r["falhas"])
         pts.append({
-            "value": [str(r["patio"]), round(float(r["score"]), 3)],
+            "value": [float(r["posicao"]), round(float(r["score"]), 3)],
             "symbolSize": size,
+            "_ativo": str(r["local_instalacao"]),
+            "_patio": str(r["patio"]),
+            "_sistema": str(r["sistema"]),
             "_falhas": int(r["falhas"]),
             "_reincid": int(r["reincidencias"]),
             "_thp": round(float(r["thp_h"]), 0),
-            "_ramal": str(r["ramal"]),
+            "_sintomas": r["sintomas"],
+            "_resp": str(r["responsavel"]),
         })
         if r["cronico"]:
             pts_cronico.append({
-                "value": [str(r["patio"]), round(float(r["score"]), 3)],
+                "value": [float(r["posicao"]), round(float(r["score"]), 3)],
                 "symbolSize": size + RING_DELTA,
             })
 
     tooltip = JsCode("""
         function(p){
             var d = p.data || {};
-            var badge = %s;
-            return '<b>Pátio '+ (d.value ? d.value[0] : '') +'</b> '+badge+'<br/>'
-                 + 'Ramal: '+ (d._ramal||'—') +'<br/>'
-                 + 'Falhas: <b>'+ (d._falhas||0) +'</b><br/>'
-                 + 'Reincidências: <b>'+ (d._reincid||0) +'</b><br/>'
-                 + 'THP: <b>'+ (d._thp||0) +' h</b><br/>'
-                 + 'Score: '+ (d.value ? d.value[1] : '');
+            var badge = (d._reincid>=3)
+                ? '<span style="color:#7c3aed">♻️ REINCIDENTE</span>' : '';
+            return '<div style="min-width:230px;">'
+                 + '<b>'+ (d._ativo||'') +'</b> '+ badge +'<br/>'
+                 + 'Pátio: <b>'+ (d._patio||'—') +'</b> · Sistema: <b>'+ (d._sistema||'—') +'</b><br/>'
+                 + 'Falhas: <b>'+ (d._falhas||0) +'</b> · THP: <b>'+ (d._thp||0) +' h</b><br/>'
+                 + 'Reincidências (90d): <b>'+ (d._reincid||0) +'</b><br/>'
+                 + 'Responsável: '+ (d._resp||'—') +'<br/>'
+                 + '<div style="margin-top:6px;font-size:12px;color:#6b7280;"><b>Sintomas:</b></div>'
+                 + '<div style="font-size:12px;">'+ (d._sintomas||'—') +'</div>'
+                 + '</div>';
         }
-    """ % ("(d._reincid>=3 && d._reincid>=0.3*d._falhas)"
-           " ? '<span style=\"color:#7c3aed\">♻️ ATIVOS REINCIDENTES</span>' : ''"))
+    """)
 
     series = [
         {
-            "name": "Pátios",
-            "type": "scatter",
-            "data": pts,
-            "itemStyle": {"opacity": 0.85},
+            "name": "Ativos", "type": "scatter", "data": pts,
+            "itemStyle": {"opacity": 0.85, "borderColor": "#fff", "borderWidth": 1.5},
         },
-        {  # pulso nos 20% de maior score
-            "name": "Crítico",
-            "type": "effectScatter",
-            "rippleEffect": {"scale": 3, "brushType": "stroke"},
-            "data": [p for p in pts if p["value"][1] >= _percentil_score(pts, 0.80)],
+        {  # pulso nos 10% de maior score — fiel ao Unifilar VP/EE
+            "name": "Crítico", "type": "effectScatter",
+            "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
+            "showEffectOn": "render",
+            "data": [p for p in pts if p["value"][1] >= _percentil_score(pts, 0.90)],
             "symbolSize": JsCode("function(v,p){return p.data.symbolSize;}"),
+            "itemStyle": {"borderColor": "#fff", "borderWidth": 2},
             "z": 3,
         },
     ]
@@ -510,23 +563,48 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
         })
 
     option = {
-        "tooltip": {"trigger": "item", "formatter": tooltip},
-        "grid": {"left": 40, "right": 30, "top": 50, "bottom": 70},
-        "xaxis": {"type": "category", "name": "Pátio",
-                  "axisLabel": {"rotate": 40}},
-        "yAxis": {"type": "value", "name": "Score", "max": 1},
+        "tooltip": {
+            "trigger": "item",
+            "backgroundColor": "rgba(255,255,255,0.98)",
+            "borderColor": COR_PRIMARIA, "borderWidth": 2, "padding": [10, 14],
+            "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;max-width:320px;",
+            "textStyle": {"color": "#1f2937", "fontSize": 12},
+            "formatter": tooltip,
+        },
+        "grid": {"left": 50, "right": 90, "top": 20, "bottom": 75, "containLabel": True},
+        "xAxis": {
+            "type": "value", "name": "Posição sequencial no trecho (não é KM real)",
+            "nameLocation": "middle", "nameGap": 32,
+            "nameTextStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
+            "axisLabel": {"color": "#374151", "fontSize": 11},
+            "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}},
+        },
+        "yAxis": {"type": "value", "name": "Score", "min": 0, "max": 1, "show": False},
         "visualMap": {
             "min": 0, "max": 1, "dimension": 1,
             "seriesIndex": [0, 1],
             "orient": "horizontal", "left": "center", "bottom": 0,
             "text": ["Crítico", "Normal"], "calculable": True,
+            "textStyle": {"color": "#1f2937", "fontSize": 11},
             "inRange": {"color": [COR_OK, COR_WARN, COR_CRIT]},
         },
+        "dataZoom": [
+            {"type": "slider", "show": True, "xAxisIndex": [0], "bottom": 40, "height": 20,
+             "borderColor": "#d1d5db", "fillerColor": "rgba(30,58,95,0.15)",
+             "handleStyle": {"color": COR_PRIMARIA}},
+            {"type": "inside", "xAxisIndex": [0]},
+        ],
         "series": series,
     }
-    # ECharts espera 'xAxis'/'yAxis' — corrige a chave.
-    option["xAxis"] = option.pop("xaxis")
-    st_echarts(options=option, height="460px", key=f"ee_unifilar_{escopo}")
+    st_echarts(options=option, height="460px", key=f"ee_unifilar_{escopo}_{ramal_view}")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."))
+    densidade = len(d) / max(len(g), 1)
+    c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
+    top_ativo = str(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
+    c3.metric("🎯 Ativo mais crítico", top_ativo)
 
 
 def _percentil_score(pts, q):
