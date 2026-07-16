@@ -527,6 +527,10 @@ def _top_sintomas(x, k: int = 5):
     )
 
 
+_GAP_TRECHOS = 3  # espaço (em posições) entre um trecho e o próximo no modo "Todos"
+_OPCAO_TODOS = "🌐 Todos os trechos (visão geral)"
+
+
 def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🗺️ Unifilar EE — ativos por trecho")
     st.caption(
@@ -536,7 +540,10 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
         "traz medição de distância. Tamanho = volume de falhas · Cor = score "
         "de prioridade · 🟣 Anel roxo = ativo **reincidente** (≥3 "
         "reincidências de 90 dias — conceito diferente do hot-spot crônico "
-        "do Unifilar VP/EE, que é por ramal+pátio+família em 6 meses)."
+        "do Unifilar VP/EE, que é por ramal+pátio+família em 6 meses). "
+        f"Escolha **\"{_OPCAO_TODOS}\"** pra ver todos os trechos concatenados "
+        "lado a lado (linhas tracejadas separam cada trecho) e achar o ponto "
+        "mais crítico da malha inteira, não só de um trecho."
     )
 
     if not ECHARTS_OK:
@@ -553,8 +560,10 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
     df_u = df.dropna(subset=["ramal", "local_instalacao"]).copy()
     ramais_disp = sorted(df_u["ramal"].unique())
 
+    modo_todos = False
+    ramal_view = ramais_disp[0] if ramais_disp else None
+
     if len(ramais_disp) == 1:
-        ramal_view = ramais_disp[0]
         st.markdown(
             f"<div style='padding:8px 12px;background:{COR_PRIMARIA};color:#fff;"
             f"border-radius:8px;text-align:center;margin-bottom:10px;'>"
@@ -562,30 +571,59 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
             unsafe_allow_html=True,
         )
     else:
-        opcoes_label = [
+        opcoes_label = [_OPCAO_TODOS] + [
             f"{nome_ramal(r, 'completo')} ({len(df_u[df_u['ramal'] == r]):,})".replace(",", ".")
             for r in ramais_disp
         ]
         escolha = st.radio(
             "🚂 Trecho:", opcoes_label, horizontal=True, key=f"ee_unif_ramal_{escopo}",
-            help="Cada trecho tem sua própria escala de posição sequencial.",
+            help="\"Todos os trechos\" concatena tudo num único gráfico — "
+                 "ótimo pra comparar criticidade entre trechos.",
         )
-        ramal_view = ramais_disp[opcoes_label.index(escolha)]
-
-    d = df_u[df_u["ramal"] == ramal_view].copy()
+        if escolha == _OPCAO_TODOS:
+            modo_todos = True
+        else:
+            ramal_view = ramais_disp[opcoes_label.index(escolha) - 1]
 
     # Posição sequencial por ativo, ordenada por pátio → TPLNR (mesmo espírito
     # de _criar_km_sequencial() do Unifilar VP/EE, só que granularidade por
     # ativo em vez de pátio, já que a análise aqui é por TPLNR).
-    ordem_ativos = (
-        d.sort_values(["patio", "local_instalacao"])["local_instalacao"]
-         .drop_duplicates().tolist()
-    )
-    pos_map = {a: i for i, a in enumerate(ordem_ativos)}
-    d["posicao"] = d["local_instalacao"].map(pos_map)
+    # No modo "Todos", cada trecho ganha sua própria faixa de posições,
+    # separadas por um espaço fixo (_GAP_TRECHOS) — mantém a leitura de
+    # "sequência dentro do trecho" e ainda permite comparar tudo de uma vez.
+    fronteiras = []
+    if modo_todos:
+        d = df_u.copy()
+        pos_map = {}
+        offset = 0
+        for r in ramais_disp:
+            sub = d[d["ramal"] == r]
+            ordem = (
+                sub.sort_values(["patio", "local_instalacao"])["local_instalacao"]
+                   .drop_duplicates().tolist()
+            )
+            if not ordem:
+                continue
+            for i, a in enumerate(ordem):
+                pos_map[(r, a)] = offset + i
+            fronteiras.append({
+                "ramal": r, "inicio": offset, "fim": offset + len(ordem) - 1,
+                "label": nome_ramal(r, "completo"),
+            })
+            offset += len(ordem) + _GAP_TRECHOS
+        d["posicao"] = [pos_map.get((rr, aa)) for rr, aa in zip(d["ramal"], d["local_instalacao"])]
+        d = d.dropna(subset=["posicao"])
+    else:
+        d = df_u[df_u["ramal"] == ramal_view].copy()
+        ordem_ativos = (
+            d.sort_values(["patio", "local_instalacao"])["local_instalacao"]
+             .drop_duplicates().tolist()
+        )
+        pos_map = {a: i for i, a in enumerate(ordem_ativos)}
+        d["posicao"] = d["local_instalacao"].map(pos_map)
 
     g = (
-        d.groupby("local_instalacao")
+        d.groupby(["ramal", "local_instalacao"])
          .agg(
              posicao=("posicao", "first"),
              patio=("patio", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
@@ -619,6 +657,7 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
             "value": [float(r["posicao"]), round(float(r["score"]), 3)],
             "symbolSize": size,
             "_ativo": str(r["local_instalacao"]),
+            "_ramal": nome_ramal(r["ramal"], "completo") if modo_todos else None,
             "_patio": str(r["patio"]),
             "_sistema": str(r["sistema"]),
             "_falhas": int(r["falhas"]),
@@ -638,8 +677,11 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
             var d = p.data || {};
             var badge = (d._reincid>=3)
                 ? '<span style="color:#7c3aed">♻️ REINCIDENTE</span>' : '';
+            var ramalLinha = d._ramal
+                ? ('Trecho: <b>'+ d._ramal +'</b><br/>') : '';
             return '<div style="min-width:230px;">'
                  + '<b>'+ (d._ativo||'') +'</b> '+ badge +'<br/>'
+                 + ramalLinha
                  + 'Pátio: <b>'+ (d._patio||'—') +'</b> · Sistema: <b>'+ (d._sistema||'—') +'</b><br/>'
                  + 'Falhas: <b>'+ (d._falhas||0) +'</b> · THP: <b>'+ (d._thp||0) +' h</b><br/>'
                  + 'Reincidências (90d): <b>'+ (d._reincid||0) +'</b><br/>'
@@ -682,6 +724,28 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
             "z": 4,
         })
 
+    if modo_todos and len(fronteiras) > 1:
+        # Linha tracejada + rótulo no início de cada trecho (menos o primeiro,
+        # que já começa no eixo) — separa visualmente cada trecho concatenado.
+        series[0]["markLine"] = {
+            "symbol": "none",
+            "silent": True,
+            "animation": False,
+            "lineStyle": {"color": "#9ca3af", "type": "dashed", "width": 1},
+            "label": {
+                "formatter": "{b}", "position": "insideEndTop",
+                "color": "#374151", "fontSize": 10, "fontWeight": "bold",
+                "rotate": 90, "distance": [4, 4],
+            },
+            "data": [
+                {"xAxis": f["inicio"] - _GAP_TRECHOS / 2, "name": f["label"]}
+                for f in fronteiras[1:]
+            ],
+        }
+
+    eixo_nome = ("Trechos concatenados (linhas tracejadas separam cada trecho — não é KM real)"
+                 if modo_todos else "Posição sequencial no trecho (não é KM real)")
+
     option = {
         "tooltip": {
             "trigger": "item",
@@ -693,7 +757,7 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
         },
         "grid": {"left": 50, "right": 90, "top": 20, "bottom": 75, "containLabel": True},
         "xAxis": {
-            "type": "value", "name": "Posição sequencial no trecho (não é KM real)",
+            "type": "value", "name": eixo_nome,
             "nameLocation": "middle", "nameGap": 32,
             "nameTextStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
             "axisLine": {"lineStyle": {"color": "#9ca3af"}},
@@ -717,14 +781,24 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
         ],
         "series": series,
     }
-    st_echarts(options=option, height="460px", key=f"ee_unifilar_{escopo}_{ramal_view}")
+    chart_key = f"ee_unifilar_{escopo}_{'TODOS' if modo_todos else ramal_view}"
+    st_echarts(options=option, height="460px", key=chart_key)
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."))
-    densidade = len(d) / max(len(g), 1)
-    c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
-    top_ativo = str(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
-    c3.metric("🎯 Ativo mais crítico", top_ativo)
+    if modo_todos:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("🚂 Ativos (todos os trechos)", f"{len(g):,}".replace(",", "."))
+        densidade = len(d) / max(len(g), 1)
+        c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
+        top_row = g.sort_values("score", ascending=False).iloc[0]
+        c3.metric("🎯 Ativo mais crítico", str(top_row["local_instalacao"]))
+        c4.metric("🚂 Trecho do ativo crítico", nome_ramal(top_row["ramal"], "completo"))
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."))
+        densidade = len(d) / max(len(g), 1)
+        c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
+        top_ativo = str(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
+        c3.metric("🎯 Ativo mais crítico", top_ativo)
 
 
 def _percentil_score(pts, q):
