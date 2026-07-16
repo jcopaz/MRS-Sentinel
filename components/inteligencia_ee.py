@@ -20,10 +20,11 @@
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
+from datetime import date
+
 import numpy as np
 import pandas as pd
 import streamlit as st
-import plotly.graph_objects as go
 
 try:
     from streamlit_echarts import st_echarts, JsCode
@@ -61,6 +62,14 @@ _PESO_TIPO_FALHA = {
     "Alto Impacto":  0.80,
     "Médio Impacto": 0.50,
     "Baixo Impacto": 0.25,
+}
+
+# Meses em português (idêntico ao padrão de components/heatmap.py e
+# components/visao_gerencial.py) — todo gráfico com data usa isso, nunca
+# formatação de data nativa do ECharts/navegador (que sai em inglês).
+MESES_PT_ABREV = {
+    1: "jan", 2: "fev", 3: "mar", 4: "abr", 5: "mai", 6: "jun",
+    7: "jul", 8: "ago", 9: "set", 10: "out", 11: "nov", 12: "dez",
 }
 # endregion
 
@@ -134,9 +143,92 @@ def _fmt_h(v) -> str:
 # endregion
 
 
+# region ====================== SESSÃO 2B: Filtros ==============================
+
+def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
+    """
+    Filtros de atributo da aba: Responsável, Ativo (TPLNR), Pátio, Período.
+
+    Aplicados sobre o df ANTES de _enriquecer() — assim o score_ee e todas as
+    agregações dos 6 blocos já refletem só o recorte filtrado. Mesmo padrão
+    defensivo de components/filtros.py: seleção vazia = sem filtro (volta a
+    lista cheia), evita "aba em branco" por engano.
+    """
+    if df.empty:
+        return df
+
+    st.markdown("##### 🔍 Filtros")
+    col_resp, col_ativo, col_patio, col_periodo = st.columns([1, 1, 1, 1.4])
+
+    with col_resp:
+        opcoes_resp = sorted(
+            r for r in df.get("responsavel", pd.Series(dtype=object)).dropna().unique()
+            if str(r).strip()
+        )
+        resp_sel = st.multiselect(
+            "Responsável", opcoes_resp, default=opcoes_resp,
+            key=f"ee_filtro_resp_{escopo}",
+        )
+        if not resp_sel:
+            resp_sel = opcoes_resp
+
+    with col_ativo:
+        opcoes_ativo = sorted(
+            a for a in df.get("local_instalacao", pd.Series(dtype=object)).dropna().unique()
+            if str(a).strip()
+        )
+        ativo_sel = st.multiselect(
+            "Ativo (TPLNR)", opcoes_ativo, default=opcoes_ativo,
+            key=f"ee_filtro_ativo_{escopo}",
+            help="Local de Instalação — mesmo código usado no Ranking de Reincidência.",
+        )
+        if not ativo_sel:
+            ativo_sel = opcoes_ativo
+
+    with col_patio:
+        opcoes_patio = sorted(
+            p for p in df.get("local_patio", pd.Series(dtype=object)).dropna().unique()
+            if str(p).strip()
+        )
+        patio_sel = st.multiselect(
+            "Pátio", opcoes_patio, default=opcoes_patio,
+            key=f"ee_filtro_patio_{escopo}",
+        )
+        if not patio_sel:
+            patio_sel = opcoes_patio
+
+    with col_periodo:
+        data_max = date.today()  # SEMPRE hoje — nunca derivar dos dados
+        datas_validas = pd.to_datetime(df.get("data_nota"), errors="coerce").dropna()
+        data_min_disp = datas_validas.min().date() if not datas_validas.empty else date(2018, 1, 1)
+        periodo = st.date_input(
+            "Período (data da nota)",
+            value=(data_min_disp, data_max),
+            min_value=date(2018, 1, 1),
+            max_value=data_max,
+            format="DD/MM/YYYY",
+            key=f"ee_filtro_periodo_{escopo}",
+        )
+
+    d = df.copy()
+    if "responsavel" in d.columns:
+        d = d[d["responsavel"].isin(resp_sel)]
+    if "local_instalacao" in d.columns:
+        d = d[d["local_instalacao"].isin(ativo_sel)]
+    if "local_patio" in d.columns:
+        d = d[d["local_patio"].isin(patio_sel)]
+    if "data_nota" in d.columns and isinstance(periodo, (tuple, list)) and len(periodo) == 2:
+        col_data = pd.to_datetime(d["data_nota"], errors="coerce")
+        d = d[(col_data.dt.date >= periodo[0]) & (col_data.dt.date <= periodo[1])]
+
+    return d
+
+# endregion
+
+
 # region ====================== SESSÃO 3: BLOCO 1 — Painel de Prioridade ========
 
-def _bloco_prioridade(df: pd.DataFrame):
+def _bloco_prioridade(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🎯 Painel de Prioridade — onde atacar")
 
     total = len(df)
@@ -181,35 +273,54 @@ def _bloco_prioridade(df: pd.DataFrame):
 
     g["rotulo"] = g["anomalia_sintoma"].astype(str).str.slice(0, 42)
 
-    fig = go.Figure()
-    fig.add_bar(
-        x=g["rotulo"], y=g["qtd"], name="Nº de falhas",
-        marker_color=COR_PRIMARIA,
-        hovertemplate="%{x}<br>Falhas: %{y}<extra></extra>",
-    )
-    fig.add_trace(go.Scatter(
-        x=g["rotulo"], y=g["thp_h"], name="THP (h)",
-        yaxis="y2", mode="lines+markers",
-        line=dict(color=COR_THP, width=3),
-        marker=dict(size=8, color=COR_THP),
-        hovertemplate="%{x}<br>THP: %{y:.0f} h<extra></extra>",
-    ))
-    fig.update_layout(
-        height=420, margin=dict(l=10, r=10, t=30, b=120),
-        xaxis=dict(tickangle=-40),
-        yaxis=dict(title="Nº de falhas"),
-        yaxis2=dict(title="THP (h)", overlaying="y", side="right", showgrid=False),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-        plot_bgcolor="white",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        st.dataframe(g[["anomalia_sintoma", "qtd", "thp_h"]], use_container_width=True, hide_index=True)
+        return
+
+    labels = g["rotulo"].tolist()
+    qtd    = [int(v) for v in g["qtd"]]
+    thp    = [round(float(v), 1) for v in g["thp_h"]]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis", "axisPointer": {"type": "shadow"},
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
+            "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
+            "textStyle": {"color": "#1f2937", "fontSize": 12},
+        },
+        "legend": {
+            "data": ["Nº de falhas", "THP (h)"], "top": 0,
+            "textStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+        },
+        "grid": {"left": "3%", "right": "6%", "top": "15%", "bottom": "24%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": labels,
+            "axisLabel": {"color": "#374151", "fontSize": 10, "rotate": 40, "interval": 0},
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
+        },
+        "yAxis": [
+            {"type": "value", "name": "Nº de falhas", "axisLabel": {"color": "#374151"},
+             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+            {"type": "value", "name": "THP (h)", "position": "right",
+             "axisLabel": {"color": COR_THP}, "splitLine": {"show": False}},
+        ],
+        "series": [
+            {"name": "Nº de falhas", "type": "bar", "data": qtd,
+             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%"},
+            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
+             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
+             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
+        ],
+    }
+    st_echarts(opt, height="420px", key=f"ee_pareto_{escopo}")
 
 # endregion
 
 
 # region ====================== SESSÃO 4: BLOCO 2 — Ranking Reincidência ========
 
-def _bloco_reincidencia(df: pd.DataFrame):
+def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### ♻️ Ranking de Reincidência por Ativo")
     st.caption(
         "Ativos (TPLNR) que mais reincidem. A reincidência 90 dias vem do próprio "
@@ -222,12 +333,12 @@ def _bloco_reincidencia(df: pd.DataFrame):
 
     col_n, col_ord = st.columns([1, 2])
     with col_n:
-        top_n = st.selectbox("Top N", [10, 15, 20, 30], index=1, key="rank_reincid_n")
+        top_n = st.selectbox("Top N", [10, 15, 20, 30], index=1, key=f"rank_reincid_n_{escopo}")
     with col_ord:
         ordem = st.selectbox(
             "Ordenar por",
             ["Reincidências (90d)", "Nº de falhas", "THP (h)"],
-            index=0, key="rank_reincid_ord",
+            index=0, key=f"rank_reincid_ord_{escopo}",
         )
 
     g = (
@@ -284,7 +395,7 @@ def _bloco_reincidencia(df: pd.DataFrame):
 
 # region ====================== SESSÃO 5: BLOCO 3 — Unifilar EE =================
 
-def _bloco_unifilar(df: pd.DataFrame):
+def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🗺️ Unifilar EE — pátios da malha")
     st.caption(
         "Cada bolha é um pátio. Tamanho = volume de falhas · Cor = score de "
@@ -415,7 +526,7 @@ def _bloco_unifilar(df: pd.DataFrame):
     }
     # ECharts espera 'xAxis'/'yAxis' — corrige a chave.
     option["xAxis"] = option.pop("xaxis")
-    st_echarts(options=option, height="460px")
+    st_echarts(options=option, height="460px", key=f"ee_unifilar_{escopo}")
 
 
 def _percentil_score(pts, q):
@@ -502,7 +613,7 @@ def _bloco_backlog(df: pd.DataFrame):
 
 # region ====================== SESSÃO 7: BLOCO 5 — Análise 6M ==================
 
-def _bloco_6m(df: pd.DataFrame):
+def _bloco_6m(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🐟 Análise 6M — Ishikawa consolidado")
     st.caption(
         "Distribuição das causas raiz já classificadas (Eng > Manutenção). "
@@ -531,25 +642,44 @@ def _bloco_6m(df: pd.DataFrame):
          .agg(qtd=("m6_nivel1", "size"), thp_h=("thp_h", "sum"))
          .reset_index().sort_values("qtd", ascending=True))
 
-    fig = go.Figure()
-    fig.add_bar(
-        y=g["m6_nivel1"], x=g["qtd"], orientation="h",
-        marker_color=COR_PRIMARIA,
-        text=g["qtd"], textposition="outside",
-        hovertemplate="%{y}<br>Falhas: %{x}<extra></extra>",
-    )
-    fig.update_layout(
-        height=380, margin=dict(l=10, r=30, t=20, b=20),
-        xaxis_title="Nº de falhas", plot_bgcolor="white",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        st.dataframe(g, use_container_width=True, hide_index=True)
+        return
+
+    categorias = g["m6_nivel1"].astype(str).tolist()
+    valores    = [int(v) for v in g["qtd"]]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis", "axisPointer": {"type": "shadow"},
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
+            "textStyle": {"color": "#1f2937"}, "formatter": "<b>{b}</b><br/>Falhas: <b>{c}</b>",
+        },
+        "grid": {"left": "3%", "right": "10%", "top": "5%", "bottom": "5%", "containLabel": True},
+        "xAxis": {"type": "value", "name": "Nº de falhas", "axisLabel": {"color": "#374151"},
+                  "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+        "yAxis": {
+            "type": "category", "data": categorias,
+            "axisLabel": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+        },
+        "series": [{
+            "type": "bar", "data": valores,
+            "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [0, 4, 4, 0]},
+            "label": {"show": True, "position": "right", "color": "#1f2937",
+                      "fontSize": 12, "fontWeight": "bold"},
+            "barWidth": "55%",
+        }],
+    }
+    altura = max(300, 40 * len(categorias) + 80)
+    st_echarts(opt, height=f"{altura}px", key=f"ee_6m_{escopo}")
 
 # endregion
 
 
 # region ====================== SESSÃO 8: BLOCO 6 — Tendência YoY ===============
 
-def _bloco_tendencia(df: pd.DataFrame):
+def _bloco_tendencia(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 📈 Tendência mensal")
     st.caption("Evolução do volume de falhas e do THP ao longo do tempo.")
 
@@ -570,22 +700,55 @@ def _bloco_tendencia(df: pd.DataFrame):
                 reincid=("reincidencia_ativo", "sum"))
            .reset_index().sort_values("mes"))
 
-    fig = go.Figure()
-    fig.add_bar(x=g["mes"], y=g["falhas"], name="Falhas",
-                marker_color=COR_PRIMARIA,
-                hovertemplate="%{x|%b/%Y}<br>Falhas: %{y}<extra></extra>")
-    fig.add_trace(go.Scatter(
-        x=g["mes"], y=g["thp_h"], name="THP (h)", yaxis="y2",
-        mode="lines+markers", line=dict(color=COR_THP, width=3),
-        hovertemplate="%{x|%b/%Y}<br>THP: %{y:.0f} h<extra></extra>"))
-    fig.update_layout(
-        height=360, margin=dict(l=10, r=10, t=30, b=20),
-        yaxis=dict(title="Falhas"),
-        yaxis2=dict(title="THP (h)", overlaying="y", side="right", showgrid=False),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-        plot_bgcolor="white",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        st.dataframe(g, use_container_width=True, hide_index=True)
+        return
+
+    # Rótulos em PT-BR ("jan/25") — nunca formatação nativa (sai em inglês).
+    rotulos = [f"{MESES_PT_ABREV[m.month]}/{str(m.year)[-2:]}" for m in g["mes"]]
+    falhas  = [int(v) for v in g["falhas"]]
+    thp     = [round(float(v), 1) for v in g["thp_h"]]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis",
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
+            "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
+            "textStyle": {"color": "#1f2937", "fontSize": 12},
+            "axisPointer": {"type": "line", "lineStyle": {"color": COR_PRIMARIA, "type": "dashed"}},
+        },
+        "legend": {
+            "data": ["Falhas", "THP (h)"], "top": 0,
+            "textStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+        },
+        "grid": {"left": "3%", "right": "6%", "top": "15%", "bottom": "18%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": rotulos,
+            "axisLabel": {"color": "#374151", "fontSize": 11, "rotate": 35 if len(rotulos) > 10 else 0},
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}}, "boundaryGap": True,
+        },
+        "yAxis": [
+            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151"},
+             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+            {"type": "value", "name": "THP (h)", "position": "right",
+             "axisLabel": {"color": COR_THP}, "splitLine": {"show": False}},
+        ],
+        "dataZoom": [
+            {"type": "slider", "show": True, "bottom": 5, "height": 18,
+             "borderColor": "#d1d5db", "fillerColor": "rgba(30,58,95,0.15)",
+             "handleStyle": {"color": COR_PRIMARIA}},
+            {"type": "inside"},
+        ],
+        "series": [
+            {"name": "Falhas", "type": "bar", "data": falhas,
+             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}},
+            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
+             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
+             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 7},
+        ],
+    }
+    st_echarts(opt, height="380px", key=f"ee_tendencia_{escopo}")
 
 # endregion
 
@@ -629,8 +792,6 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
         )
         return
 
-    df = _enriquecer(df)
-
     rotulo = {"SP": "Gerência SP", "VP": "Gerência VP",
               "GLOBAL": "Visão Global (SP + VP)"}.get(escopo, escopo)
     st.markdown(
@@ -640,16 +801,27 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
         unsafe_allow_html=True,
     )
 
-    _bloco_prioridade(df)
+    # Filtros (Responsável, Ativo, Pátio, Período) — aplicados ANTES do
+    # enriquecimento, pra score_ee e todas as agregações já refletirem o
+    # recorte escolhido.
+    df = _render_filtros(df, escopo)
+    if df.empty:
+        st.info("ℹ️ Nenhuma falha encontrada com os filtros aplicados.")
+        return
+
+    df = _enriquecer(df)
     st.markdown("---")
-    _bloco_reincidencia(df)
+
+    _bloco_prioridade(df, escopo)
     st.markdown("---")
-    _bloco_unifilar(df)
+    _bloco_reincidencia(df, escopo)
+    st.markdown("---")
+    _bloco_unifilar(df, escopo)
     st.markdown("---")
     _bloco_backlog(df)
     st.markdown("---")
-    _bloco_6m(df)
+    _bloco_6m(df, escopo)
     st.markdown("---")
-    _bloco_tendencia(df)
+    _bloco_tendencia(df, escopo)
 
 # endregion
