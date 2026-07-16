@@ -195,9 +195,9 @@ def _preparar_origem(df: pd.DataFrame) -> pd.DataFrame:
     só confiar na coluna já persistida pelo parser) pra funcionar mesmo com
     bases antigas, subidas antes desta regra existir.
 
-    Também deriva 'consenso_origem_status' (Consenso/Em revisão/Pendente) a
-    partir do bruto 'consenso_origem', com fallback 'Pendente' se a coluna
-    não existir (base antiga).
+    Também deriva 'consenso_origem_status' (Sim/Não/Pendente) a partir do
+    bruto 'consenso_origem', com fallback 'Pendente' se a coluna não existir
+    (base antiga).
     """
     if df.empty:
         return df
@@ -315,8 +315,7 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
             )
             consenso_sel = _multiselect_coluna(
                 df, "consenso_origem_status", "Consenso Origem de Atividade", escopo,
-                help="Consenso = 'Sim' no RASF (processo encerrado) · "
-                     "Em revisão = 'Não' (pode caber revisão) · "
+                help="Sim = processo encerrado · Não = pode caber revisão · "
                      "Pendente = campo em branco (reunião ainda não decidiu).",
             )
         with col_b:

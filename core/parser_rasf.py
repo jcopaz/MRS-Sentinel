@@ -198,7 +198,7 @@ def origem_efetiva(desc_origem_atividade, origem_atividade_correta):
 # (reunião não discutiu/decidiu esse item).
 def status_consenso_origem(valor) -> str:
     """
-    Classifica o status de consenso em 'Consenso' | 'Em revisão' | 'Pendente'.
+    Classifica o status de consenso em 'Sim' | 'Não' | 'Pendente'.
 
     Usa startswith (não igualdade exata) porque o RASF às vezes traz o valor
     com complemento (ex.: 'Sim - Fechado', 'Não - aguardando validação') —
@@ -210,9 +210,9 @@ def status_consenso_origem(valor) -> str:
         return "Pendente"
     vu = v.upper()
     if vu.startswith("SIM") or vu in {"S", "TRUE", "1", "YES", "X"}:
-        return "Consenso"
+        return "Sim"
     if vu.startswith(("NÃO", "NAO")) or vu in {"N", "FALSE", "0", "NO"}:
-        return "Em revisão"
+        return "Não"
     return "Pendente"
 
 
@@ -352,7 +352,7 @@ def processar_rasf(
     else:
         df["origem_atividade_efetiva"] = None
 
-    # Status de consenso da origem (Sim=Consenso, Não=Em revisão, vazio=Pendente)
+    # Status de consenso da origem ('Sim'/'Não' normalizados, vazio=Pendente)
     df["consenso_origem_status"] = df.get("consenso_origem").apply(status_consenso_origem) \
         if "consenso_origem" in df.columns else "Pendente"
 

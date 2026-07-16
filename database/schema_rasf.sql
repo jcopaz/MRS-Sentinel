@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS rasf_ee (
     origem_atividade_correta VARCHAR,                  -- Correção feita em reunião (coluna AW), quando houver
     origem_atividade_efetiva VARCHAR,                  -- desc_origem_atividade OU origem_atividade_correta, ver origem_efetiva()
     consenso_origem         VARCHAR,                   -- Sim/Não/vazio bruto (coluna AV)
-    consenso_origem_status  VARCHAR,                   -- Consenso | Em revisão | Pendente — ver status_consenso_origem()
+    consenso_origem_status  VARCHAR,                   -- Sim | Não | Pendente — ver status_consenso_origem()
     texto_longo             TEXT,
 
     -- Reincidência (pré-calculada no RASF)
@@ -110,7 +110,7 @@ COMMENT ON COLUMN rasf_ee.lacuna_rca IS 'TRUE quando a nota é Gatilho de Análi
 COMMENT ON COLUMN rasf_ee.thp_min IS 'Tempo de Trem Hora Parado (min) — usado para priorização por impacto operacional.';
 COMMENT ON COLUMN rasf_ee.origem_categoria IS 'Obras | Manutenção | Não classificado | Não informado — derivado de origem_atividade_efetiva, regra por substring + overrides configuráveis.';
 COMMENT ON COLUMN rasf_ee.origem_atividade_efetiva IS 'Referência de causa raiz/responsabilidade — desc_origem_atividade, MAS sobreposta por origem_atividade_correta quando esta foi preenchida em reunião com valor diferente (responsabilidade corrigida). Ver core.parser_rasf.origem_efetiva().';
-COMMENT ON COLUMN rasf_ee.consenso_origem_status IS 'Consenso (Sim — processo encerrado) | Em revisão (Não — pode caber revisão) | Pendente (em branco — reunião ainda não decidiu). Ver core.parser_rasf.status_consenso_origem().';
+COMMENT ON COLUMN rasf_ee.consenso_origem_status IS 'Sim (processo encerrado) | Não (pode caber revisão) | Pendente (em branco — reunião ainda não decidiu). Ver core.parser_rasf.status_consenso_origem().';
 
 -- ============================================================
 -- RLS: desligado, mesmo modelo do resto do projeto
