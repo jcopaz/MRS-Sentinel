@@ -856,16 +856,10 @@ _OPCAO_TODOS = "🌐 Todos os trechos (visão geral)"
 def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🗺️ Unifilar EE — ativos por trecho")
     st.caption(
-        "Mesmo estilo visual do Unifilar VP/EE (bolhas, pulso, zoom). "
-        "⚠️ O eixo horizontal é **posição sequencial dos ativos dentro do "
-        "trecho** (ordenados por pátio → TPLNR) — não é KM real, o RASF não "
-        "traz medição de distância. Tamanho = volume de falhas · Cor = score "
-        "de prioridade · 🟣 Anel roxo = ativo **reincidente** (≥3 "
-        "reincidências de 90 dias — conceito diferente do hot-spot crônico "
-        "do Unifilar VP/EE, que é por ramal+pátio+família em 6 meses). "
-        f"Escolha **\"{_OPCAO_TODOS}\"** pra ver todos os trechos concatenados "
-        "lado a lado (linhas tracejadas separam cada trecho) e achar o ponto "
-        "mais crítico da malha inteira, não só de um trecho."
+        "⚠️ Eixo X = posição sequencial no trecho (não é KM real) · "
+        "Tamanho = qtd de falhas · Cor = score de prioridade · "
+        "🟣 Anel roxo = ativo reincidente (≥3 em 90d). "
+        f"Selecione **\"{_OPCAO_TODOS}\"** pra ver a malha inteira de uma vez."
     )
 
     if not ECHARTS_OK:
@@ -1161,8 +1155,12 @@ def _unifilar_fallback(df: pd.DataFrame):
 
 def _kpi(col, label, valor, cor, sub=""):
     # Texto longo (nome de ativo, sintoma, origem...) quebra em várias linhas
-    # em vez de estourar o card — fonte menor pra caber mais sem cortar.
-    tamanho_fonte = "1.1rem" if len(str(valor)) > 18 else "1.5rem"
+    # em vez de estourar/vazar do card — fonte menor pra caber mais sem
+    # cortar. Limiar baixo (12) de propósito: strings tipo "IBA_IBA-SINALIZ"
+    # (16 chars) já vazavam a largura estreita do card em 1.5rem por não
+    # terem espaço pra quebrar — overflow-wrap:anywhere força a quebra
+    # mesmo sem espaço (em "_"/"-"), então cabe inteiro em 2-3 linhas.
+    tamanho_fonte = "1.05rem" if len(str(valor)) > 12 else "1.4rem"
     with col:
         st.markdown(
             f"""
@@ -1171,7 +1169,7 @@ def _kpi(col, label, valor, cor, sub=""):
               <div style="font-size:0.72rem;color:#6b7280;text-transform:uppercase;
                           letter-spacing:.5px;font-weight:600;">{label}</div>
               <div style="font-size:{tamanho_fonte};font-weight:800;color:{cor};line-height:1.25;
-                          margin-top:2px;word-break:break-word;overflow-wrap:break-word;">{valor}</div>
+                          margin-top:2px;word-break:normal;overflow-wrap:anywhere;">{valor}</div>
               <div style="font-size:0.72rem;color:#9ca3af;margin-top:4px;">{sub}</div>
             </div>
             """,
