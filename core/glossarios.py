@@ -408,4 +408,25 @@ def decodificar_tplnr(local_instalacao: str) -> dict:
         return {}
     return match.groupdict()
 
+
+def ativo_curto(local_instalacao: str) -> str:
+    """
+    Versão resumida do TPLNR pra exibição em telas — remove o prefixo
+    'MF-{trecho}-', redundante sempre que o trecho já aparece em outro
+    campo da tela (ex.: card do Unifilar, que já mostra "Trecho: ...").
+
+    Ex.: "MF-RAR-IAA_IAA-SINALIZ-A-ABR10-MCH1B" -> "IAA_IAA-SINALIZ-A-ABR10-MCH1B"
+
+    Cai para a string original se não casar o padrão TPLNR conhecido.
+    """
+    if not local_instalacao:
+        return str(local_instalacao or "")
+    s = str(local_instalacao)
+    match = PADRAO_TPLNR.match(s)
+    trecho = match.group("trecho") if match else None
+    if not trecho:
+        return s
+    prefixo = f"MF-{trecho}-"
+    return s[len(prefixo):] if s.startswith(prefixo) else s
+
 # endregion

@@ -38,7 +38,7 @@ except ImportError:
     ECHARTS_OK = False
 
 try:
-    from core.glossarios import decodificar_tplnr, nome_ramal
+    from core.glossarios import decodificar_tplnr, nome_ramal, ativo_curto
     GLOSS_OK = True
 except Exception:
     GLOSS_OK = False
@@ -48,6 +48,9 @@ except Exception:
 
     def nome_ramal(s, *a, **k):
         return s
+
+    def ativo_curto(s):
+        return str(s or "")
 
 COR_PRIMARIA = "#1e3a5f"
 COR_GOLD     = "#ffb000"
@@ -515,16 +518,26 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
 
 # region ====================== SESSÃO 6: BLOCO 1 — Unifilar EE =================
 
-def _top_sintomas(x, k: int = 5):
-    """Lista até k sintomas mais comuns — mesmo padrão de _top5_defeitos do
-    Unifilar VP/EE (components/unifilar.py)."""
-    vc = x.dropna().value_counts().head(k)
-    if len(vc) == 0:
+def _resumo_sintomas(sub: pd.DataFrame, k: int = 5) -> str:
+    """Lista até k sintomas mais comuns do grupo, com contagem e a data da
+    última ocorrência de CADA sintoma (não a última do ativo em geral) —
+    mesmo padrão de _top5_defeitos do Unifilar VP/EE (components/unifilar.py),
+    acrescido da data pra saber se aquele sintoma específico está "quente"."""
+    if "anomalia_sintoma" not in sub.columns:
         return "—"
-    return "<br/>".join(
-        f"&nbsp;&nbsp;• {s} <span style='color:#9ca3af;'>({n})</span>"
-        for s, n in vc.items()
-    )
+    s = sub.dropna(subset=["anomalia_sintoma"])
+    if s.empty:
+        return "—"
+    contagem = s["anomalia_sintoma"].value_counts().head(k)
+    linhas = []
+    for sintoma, n in contagem.items():
+        datas = pd.to_datetime(s.loc[s["anomalia_sintoma"] == sintoma, "data_nota"], errors="coerce").dropna()
+        ultima = datas.max().strftime("%d/%m/%Y") if not datas.empty else "—"
+        linhas.append(
+            f"&nbsp;&nbsp;• {sintoma} "
+            f"<span style='color:#9ca3af;'>({n} · últ. {ultima})</span>"
+        )
+    return "<br/>".join(linhas)
 
 
 _GAP_TRECHOS = 3  # espaço (em posições) entre um trecho e o próximo no modo "Todos"
@@ -632,8 +645,6 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
              score=("score_ee", "mean"),
              reincidencias=("reincidencia_ativo", "sum"),
              thp_h=("thp_h", "sum"),
-             sintomas=("anomalia_sintoma", _top_sintomas),
-             responsavel=("responsavel", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
          )
          .reset_index()
          .sort_values("posicao")
@@ -641,6 +652,16 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
     if g.empty:
         _unifilar_fallback(df)
         return
+
+    # Sintomas + última data de cada um — precisa de duas colunas (sintoma e
+    # data), por isso não dá pra fazer via .agg() de coluna única acima.
+    sintomas_por_ativo = (
+        d.groupby(["ramal", "local_instalacao"])
+         .apply(_resumo_sintomas, include_groups=False)
+         .rename("sintomas")
+         .reset_index()
+    )
+    g = g.merge(sintomas_por_ativo, on=["ramal", "local_instalacao"], how="left")
 
     g["reincidencias"] = g["reincidencias"].astype(int)
     g["cronico"] = g["reincidencias"] >= 3  # já é por ativo — sinal direto do RASF
@@ -656,7 +677,7 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
         pts.append({
             "value": [float(r["posicao"]), round(float(r["score"]), 3)],
             "symbolSize": size,
-            "_ativo": str(r["local_instalacao"]),
+            "_ativo": ativo_curto(r["local_instalacao"]),
             "_ramal": nome_ramal(r["ramal"], "completo") if modo_todos else None,
             "_patio": str(r["patio"]),
             "_sistema": str(r["sistema"]),
@@ -664,7 +685,6 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
             "_reincid": int(r["reincidencias"]),
             "_thp": round(float(r["thp_h"]), 0),
             "_sintomas": r["sintomas"],
-            "_resp": str(r["responsavel"]),
         })
         if r["cronico"]:
             pts_cronico.append({
@@ -685,7 +705,6 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
                  + 'Pátio: <b>'+ (d._patio||'—') +'</b> · Sistema: <b>'+ (d._sistema||'—') +'</b><br/>'
                  + 'Falhas: <b>'+ (d._falhas||0) +'</b> · THP: <b>'+ (d._thp||0) +' h</b><br/>'
                  + 'Reincidências (90d): <b>'+ (d._reincid||0) +'</b><br/>'
-                 + 'Responsável: '+ (d._resp||'—') +'<br/>'
                  + '<div style="margin-top:6px;font-size:12px;color:#6b7280;"><b>Sintomas:</b></div>'
                  + '<div style="font-size:12px;">'+ (d._sintomas||'—') +'</div>'
                  + '</div>';
@@ -769,7 +788,8 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
             "min": 0, "max": 1, "dimension": 1,
             "seriesIndex": [0, 1],
             "orient": "horizontal", "left": "center", "bottom": 0,
-            "text": ["Crítico", "Normal"], "calculable": True,
+            "text": ["🔴 Crítico (1,0)", "🟢 Normal (0,0)"],
+            "calculable": True, "precision": 2, "showLabel": True,
             "textStyle": {"color": "#1f2937", "fontSize": 11},
             "inRange": {"color": [COR_OK, COR_WARN, COR_CRIT]},
         },
@@ -790,14 +810,14 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
         densidade = len(d) / max(len(g), 1)
         c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
         top_row = g.sort_values("score", ascending=False).iloc[0]
-        c3.metric("🎯 Ativo mais crítico", str(top_row["local_instalacao"]))
+        c3.metric("🎯 Ativo mais crítico", ativo_curto(top_row["local_instalacao"]))
         c4.metric("🚂 Trecho do ativo crítico", nome_ramal(top_row["ramal"], "completo"))
     else:
         c1, c2, c3 = st.columns(3)
         c1.metric("🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."))
         densidade = len(d) / max(len(g), 1)
         c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
-        top_ativo = str(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
+        top_ativo = ativo_curto(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
         c3.metric("🎯 Ativo mais crítico", top_ativo)
 
 
