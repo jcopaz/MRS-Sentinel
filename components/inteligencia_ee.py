@@ -10,12 +10,18 @@
 # Entrada: DataFrame canônico produzido por core.parser_rasf / queries_rasf.
 # Uso:     render_inteligencia_ee(df, escopo="SP"|"VP"|"GLOBAL")
 #
-# 4 blocos (recorte pedido pelo Julio — 16/07/2026):
+# Blocos (recorte pedido pelo Julio — 16/07/2026, cards+heatmap em 16/07/2026):
+#   0. Cards Resumo          (ativo c/ mais falhas, ativo c/ maior THP, ativo
+#                             mais reincidente, sintoma mais crítico por THP,
+#                             origem de atividade mais frequente)
 #   1. Unifilar EE           (ativo × posição seq. no trecho, cor=score, anel
 #                             reincidência, tamanho=qtd de falhas)
-#   2. Pareto de Sintomas    (contagem × THP)
+#   2. Pareto de Sintomas    (contagem × THP, barras com % de representatividade)
 #   3. Obras × Manutenção    (qtd de falhas / THP por "Descrição da Origem da
-#                             Atividade" RASF, sem agrupar em categoria)
+#                             Atividade" RASF, sem agrupar em categoria; barras
+#                             com % de representatividade)
+#   3B. Heatmap Trecho×Origem (Trecho × Descrição da Origem da Atividade ×
+#                             quantidade de falhas)
 #   4. Ranking de Reincidência por Ativo (agrupado pela coluna K do RASF —
 #                             "Local de instalação", não o código TPLNR)
 #
@@ -26,6 +32,7 @@
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
 from datetime import date
+import json
 
 import numpy as np
 import pandas as pd
@@ -258,6 +265,93 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
 # endregion
 
 
+# region ====================== SESSÃO 2C: BLOCO 0 — Cards Resumo ==============
+
+def _bloco_cards_resumo(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 📌 Resumo Executivo")
+    st.caption(
+        "Panorama rápido do recorte filtrado — pra achar de cara qual ativo "
+        "mais falha, qual mais para trem, qual sintoma mais crítico e qual "
+        "origem de atividade predomina."
+    )
+
+    if df.empty or "local_instalacao" not in df.columns:
+        st.info("Sem dados suficientes pra montar o resumo.")
+        return
+
+    col_ativo = "local_instalacao"
+    c1, c2, c3, c4, c5 = st.columns(5)
+
+    # 1) Ativo com mais falhas + tipo de falha predominante nele
+    grp_falhas = df.groupby(col_ativo).size()
+    if not grp_falhas.empty:
+        ativo_top = grp_falhas.idxmax()
+        falhas_top = int(grp_falhas.max())
+        sub_df = df[df[col_ativo] == ativo_top]
+        tipo_moda = (
+            sub_df["tipo_falha"].dropna().mode()
+            if "tipo_falha" in sub_df.columns else pd.Series(dtype=object)
+        )
+        tipo_txt = str(tipo_moda.iloc[0]) if not tipo_moda.empty else "—"
+        _kpi(c1, "Ativo com mais falhas", ativo_curto(ativo_top), COR_PRIMARIA,
+             sub=f"{_fmt_int(falhas_top)} falhas · tipo mais comum: {tipo_txt}")
+    else:
+        _kpi(c1, "Ativo com mais falhas", "—", COR_PRIMARIA)
+
+    # 2) Ativo com maior THP
+    grp_thp = df.groupby(col_ativo)["thp_h"].sum()
+    if not grp_thp.empty and grp_thp.max() > 0:
+        ativo_thp_top = grp_thp.idxmax()
+        thp_top = float(grp_thp.max())
+        falhas_desse = int(grp_falhas.get(ativo_thp_top, 0))
+        _kpi(c2, "Ativo com maior THP", ativo_curto(ativo_thp_top), COR_THP,
+             sub=f"{_fmt_h(thp_top)} · {_fmt_int(falhas_desse)} falhas")
+    else:
+        _kpi(c2, "Ativo com maior THP", "—", COR_THP)
+
+    # 3) Ativo mais reincidente
+    if "reincidencia_ativo" in df.columns:
+        grp_reincid = df.groupby(col_ativo)["reincidencia_ativo"].sum()
+        if not grp_reincid.empty and grp_reincid.max() > 0:
+            ativo_reincid_top = grp_reincid.idxmax()
+            reincid_top = int(grp_reincid.max())
+            _kpi(c3, "Ativo mais reincidente", ativo_curto(ativo_reincid_top), COR_CRONICO,
+                 sub=f"{_fmt_int(reincid_top)} reincidências (90d)")
+        else:
+            _kpi(c3, "Ativo mais reincidente", "—", COR_CRONICO)
+    else:
+        _kpi(c3, "Ativo mais reincidente", "—", COR_CRONICO)
+
+    # 4) Sintoma mais crítico por THP (complementa o Pareto, que ordena por contagem)
+    if "anomalia_sintoma" in df.columns:
+        grp_sint_thp = df.groupby("anomalia_sintoma")["thp_h"].sum()
+        if not grp_sint_thp.empty and grp_sint_thp.max() > 0:
+            sintoma_top = grp_sint_thp.idxmax()
+            thp_sint_top = float(grp_sint_thp.max())
+            _kpi(c4, "Sintoma mais crítico (THP)", str(sintoma_top)[:26], COR_CRIT,
+                 sub=f"{_fmt_h(thp_sint_top)} de trem parado")
+        else:
+            _kpi(c4, "Sintoma mais crítico (THP)", "—", COR_CRIT)
+    else:
+        _kpi(c4, "Sintoma mais crítico (THP)", "—", COR_CRIT)
+
+    # 5) Origem de atividade mais frequente
+    if "desc_origem_atividade" in df.columns:
+        grp_origem = df["desc_origem_atividade"].value_counts()
+        if not grp_origem.empty:
+            origem_top = grp_origem.idxmax()
+            qtd_origem_top = int(grp_origem.max())
+            pct_origem = 100 * qtd_origem_top / len(df) if len(df) else 0
+            _kpi(c5, "Origem mais frequente", str(origem_top)[:26], COR_WARN,
+                 sub=f"{_fmt_int(qtd_origem_top)} falhas · {pct_origem:.0f}% do total")
+        else:
+            _kpi(c5, "Origem mais frequente", "—", COR_WARN)
+    else:
+        _kpi(c5, "Origem mais frequente", "—", COR_WARN)
+
+# endregion
+
+
 # region ====================== SESSÃO 3: BLOCO 2 — Pareto de Sintomas x THP ====
 
 def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
@@ -292,6 +386,7 @@ def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
     labels = g["rotulo"].tolist()
     qtd    = [int(v) for v in g["qtd"]]
     thp    = [round(float(v), 1) for v in g["thp_h"]]
+    total_falhas = len(df) or 1  # denominador do % — total do escopo filtrado, não só o top 12
 
     opt = {
         "tooltip": {
@@ -318,7 +413,14 @@ def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
         ],
         "series": [
             {"name": "Nº de falhas", "type": "bar", "data": qtd,
-             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%"},
+             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
+             "label": {
+                 "show": True, "position": "top", "color": "#1f2937",
+                 "fontSize": 10, "fontWeight": "bold",
+                 "formatter": JsCode(
+                     f"function(p){{return p.value + ' (' + (p.value/{total_falhas}*100).toFixed(0) + '%)';}}"
+                 ),
+             }},
             {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
              "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
              "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
@@ -414,7 +516,14 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
         ],
         "series": [
             {"name": "Falhas", "type": "bar", "data": falhas,
-             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%"},
+             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
+             "label": {
+                 "show": True, "position": "top", "color": "#1f2937",
+                 "fontSize": 10, "fontWeight": "bold",
+                 "formatter": JsCode(
+                     f"function(p){{return p.value + ' (' + (p.value/{total or 1}*100).toFixed(0) + '%)';}}"
+                 ),
+             }},
             {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
              "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
              "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
@@ -432,6 +541,108 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
         })
         tab["THP (h)"] = tab["THP (h)"].round(0).astype(int)
         st.dataframe(tab, use_container_width=True, hide_index=True)
+
+# endregion
+
+
+# region ====================== SESSÃO 4B: Heatmap Trecho × Origem =============
+
+_TOP_ORIGENS_HEATMAP = 12  # linhas do heatmap (eixo Y) — evita poluir com origens raras
+
+
+def _bloco_heatmap_trecho_origem(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 🔥 Mapa de Calor — Trecho × Origem da Atividade")
+    st.caption(
+        "Cruza Trecho (eixo X) × Descrição da Origem da Atividade (eixo Y) — "
+        "a cor e o número em cada célula mostram a quantidade de falhas "
+        "daquela combinação. Ajuda a achar não só ONDE, mas O QUE está "
+        "acontecendo em cada trecho."
+    )
+
+    if "ramal" not in df.columns or "desc_origem_atividade" not in df.columns:
+        st.info("Colunas de trecho/origem da atividade indisponíveis.")
+        return
+
+    d = df.dropna(subset=["ramal", "desc_origem_atividade"]).copy()
+    if d.empty:
+        st.info("Sem dados de trecho/origem no escopo atual.")
+        return
+
+    trechos = sorted(d["ramal"].unique())
+    top_origens = d["desc_origem_atividade"].value_counts().head(_TOP_ORIGENS_HEATMAP).index.tolist()
+    d = d[d["desc_origem_atividade"].isin(top_origens)]
+    if d.empty:
+        st.info("Sem dados suficientes pra montar o mapa de calor.")
+        return
+
+    pivot = (
+        d.groupby(["ramal", "desc_origem_atividade"])
+         .size().reset_index(name="falhas")
+    )
+
+    trecho_labels = [nome_ramal(r, "completo") for r in trechos]
+    origem_labels = [str(o)[:32] for o in top_origens]
+    trecho_idx = {r: i for i, r in enumerate(trechos)}
+    origem_idx = {o: i for i, o in enumerate(top_origens)}
+
+    dados_heatmap = [
+        [trecho_idx[row["ramal"]], origem_idx[row["desc_origem_atividade"]], int(row["falhas"])]
+        for _, row in pivot.iterrows()
+    ]
+    max_val = max((v[2] for v in dados_heatmap), default=1)
+
+    if not ECHARTS_OK:
+        st.dataframe(
+            pivot.rename(columns={
+                "ramal": "Trecho", "desc_origem_atividade": "Origem da Atividade", "falhas": "Falhas",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+        return
+
+    tooltip_fmt = JsCode(f"""
+        function(p){{
+            var trechos = {json.dumps(trecho_labels, ensure_ascii=False)};
+            var origens = {json.dumps(origem_labels, ensure_ascii=False)};
+            return '<b>'+ trechos[p.value[0]] +'</b><br/>'
+                 + origens[p.value[1]] +'<br/>'
+                 + 'Falhas: <b>'+ p.value[2] +'</b>';
+        }}
+    """)
+
+    opt = {
+        "tooltip": {
+            "position": "top",
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
+            "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
+            "textStyle": {"color": "#1f2937", "fontSize": 12},
+            "formatter": tooltip_fmt,
+        },
+        "grid": {"left": "3%", "right": "4%", "top": "5%", "bottom": "26%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": trecho_labels,
+            "axisLabel": {"color": "#374151", "fontSize": 10, "rotate": 40, "interval": 0},
+            "splitArea": {"show": True},
+        },
+        "yAxis": {
+            "type": "category", "data": origem_labels,
+            "axisLabel": {"color": "#374151", "fontSize": 10},
+            "splitArea": {"show": True},
+        },
+        "visualMap": {
+            "min": 0, "max": max_val, "calculable": True, "orient": "horizontal",
+            "left": "center", "bottom": 0,
+            "inRange": {"color": ["#eef2ff", COR_PRIMARIA, COR_CRIT]},
+            "textStyle": {"color": "#1f2937"},
+        },
+        "series": [{
+            "type": "heatmap", "data": dados_heatmap,
+            "label": {"show": True, "color": "#1f2937", "fontSize": 10},
+            "emphasis": {"itemStyle": {"shadowBlur": 10, "shadowColor": "rgba(0,0,0,0.3)"}},
+        }],
+    }
+    altura = max(360, 34 * len(origem_labels) + 160)
+    st_echarts(opt, height=f"{altura}px", key=f"ee_heatmap_trecho_origem_{escopo}")
 
 # endregion
 
@@ -905,11 +1116,15 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     df = _enriquecer(df)
     st.markdown("---")
 
+    _bloco_cards_resumo(df, escopo)
+    st.markdown("---")
     _bloco_unifilar(df, escopo)
     st.markdown("---")
     _bloco_pareto_sintomas(df, escopo)
     st.markdown("---")
     _bloco_obras_manutencao(df, escopo)
+    st.markdown("---")
+    _bloco_heatmap_trecho_origem(df, escopo)
     st.markdown("---")
     _bloco_reincidencia(df, escopo)
 
