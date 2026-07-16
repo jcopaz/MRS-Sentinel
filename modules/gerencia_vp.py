@@ -239,13 +239,14 @@ def render_gerencia_vp():
         )
 
     # ── 6 Abas ────────────────────────────────────────────────────────────────
-    aba_kpi, aba_ger, aba_unif, aba_heat, aba_rank, aba_temp = st.tabs([
+    aba_kpi, aba_ger, aba_unif, aba_heat, aba_rank, aba_temp, aba_ee = st.tabs([
         "📊 Visão Geral",
         "🎯 Visão Gerencial",
         "🗺️ Unifilar",
         "🌡️ Heatmap",
         "🏆 Ranking",
         "📈 Temporal",
+        "🔌 Inteligência EE",
     ])
 
     # endregion
@@ -339,5 +340,16 @@ def render_gerencia_vp():
             metrica=metrica,
             gerencia="VP",
         )
+
+    # endregion
+
+    # region =================== SESSÃO 4.6: Aba — Inteligência EE (RASF) ======
+    with aba_ee:
+        from components.inteligencia_ee import render_inteligencia_ee
+        from database.queries_rasf import get_rasf_cached
+
+        with st.spinner("⏳ Carregando base RASF (Eletroeletrônica)..."):
+            df_rasf = get_rasf_cached("VP")
+        render_inteligencia_ee(df_rasf, escopo="VP")
 
     # endregion

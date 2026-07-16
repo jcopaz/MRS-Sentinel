@@ -35,15 +35,75 @@ import plotly.graph_objects as go
 
 from core.glossarios import nome_ramal
 
+# Motor de alertas — usado só para marcar hot-spots CRÔNICOS (anel extra).
+# Import resiliente: se o módulo/dep falhar, o unifilar segue funcionando
+# normalmente, apenas sem o anel crônico.
+try:
+    from core.alertas import detectar_hotspots_cronicos, carregar_config_alertas
+    ALERTAS_OK = True
+except Exception:
+    ALERTAS_OK = False
+
 COR_PRIMARIA = "#1e3a5f"
 COR_GOLD     = "#ffb000"
 COR_CRIT     = "#dc2626"
 COR_OK       = "#16a34a"
 COR_WARN     = "#f59e0b"
+COR_CRONICO  = "#7c3aed"   # roxo — anel de hot-spot crônico (distinto do pulso)
+
+# Folga (px) do anel crônico em relação ao diâmetro da bolha que ele circunda.
+RING_DELTA   = 12
 # endregion
 
 
 # region ====================== SESSÃO 2: construir_serie_unifilar() ============
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cfg_alertas_cached():
+    """Config de alertas (n_min / janela_meses) — cacheada 5 min p/ não bater
+    no Supabase a cada rerun do unifilar. Falha graciosa para defaults."""
+    return carregar_config_alertas()
+
+
+def _marcar_cronicos(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Marca cada nota com `is_cronico=True` se pertence a um hot-spot crônico
+    (ramal+origem+familia_defeito com >= n_min notas na janela) — MESMA
+    granularidade e regra do motor de alertas (core/alertas.py).
+
+    Não altera nada da série existente: apenas adiciona a coluna auxiliar
+    usada para desenhar o anel crônico. Falha graciosa (coluna toda False).
+    """
+    df = df.copy()
+    df["is_cronico"] = False
+    if not ALERTAS_OK or df.empty or "data_nota" not in df.columns:
+        return df
+
+    present = [c for c in ("ramal", "origem", "familia_defeito")
+               if c in df.columns]
+    if not present:
+        return df
+
+    try:
+        cfg = _cfg_alertas_cached()
+        hs = detectar_hotspots_cronicos(df, cfg)
+    except Exception:
+        return df
+
+    if hs is None or hs.empty:
+        return df
+
+    def _norm(vals):
+        return tuple("" if pd.isna(v) else str(v) for v in vals)
+
+    chaves = {_norm(t) for t in zip(*[hs[c] for c in present])}
+    if not chaves:
+        return df
+
+    df["is_cronico"] = [_norm(t) in chaves
+                        for t in zip(*[df[c] for c in present])]
+    return df
+
 
 def _top5_defeitos(x):
     vc = x.dropna().value_counts().head(5)
@@ -73,10 +133,11 @@ def construir_serie_unifilar(df_base: pd.DataFrame, bin_km: float,
     FIEL AO app1.py — mesma lógica de agregação, tamanho e limiar pulsante.
 
     Returns:
-        (pontos_normais, pontos_pulsantes, agreg_df, km_min, km_max)
+        (pontos_normais, pontos_pulsantes, pontos_cronicos, agreg_df,
+         km_min, km_max)
     """
     if len(df_base) == 0:
-        return [], [], pd.DataFrame(), None, None
+        return [], [], [], pd.DataFrame(), None, None
 
     df_t = df_base.copy()
 
@@ -111,10 +172,13 @@ def construir_serie_unifilar(df_base: pd.DataFrame, bin_km: float,
     if col_lt:     agg_dict["lt_medio"]   = (col_lt,
                                              lambda x: x.dropna().mean()
                                              if x.dropna().any() else None)
+    tem_cronico = "is_cronico" in df_t.columns
+    if tem_cronico:
+        agg_dict["n_cronicos"] = ("is_cronico", "sum")
 
     agreg = df_t.groupby("bin_km").agg(**agg_dict).reset_index()
     if len(agreg) == 0:
-        return [], [], pd.DataFrame(), None, None
+        return [], [], [], pd.DataFrame(), None, None
 
     qtd_max   = agreg["qtd_notas"].max()
     score_max = agreg["score_total"].max()
@@ -127,9 +191,21 @@ def construir_serie_unifilar(df_base: pd.DataFrame, bin_km: float,
 
     pontos_normais   = []
     pontos_pulsantes = []
+    pontos_cronicos  = []
 
     for _, row in agreg.iterrows():
         tamanho = calc_tamanho(row["qtd_notas"])
+
+        n_cron = int(row["n_cronicos"]) if (tem_cronico
+                 and pd.notna(row.get("n_cronicos"))) else 0
+        cron_txt = (
+            f"<div style='margin-top:6px;padding:4px 8px;"
+            f"background:rgba(124,58,237,0.08);border-left:3px solid "
+            f"{COR_CRONICO};border-radius:4px;font-size:12px;color:#5b21b6;'>"
+            f"♻️ <b>Hot-spot CRÔNICO</b> — {n_cron} nota(s) recorrente(s) "
+            f"neste local</div>"
+            if n_cron > 0 else ""
+        )
 
         lt_txt = (
             f"⏱️ Lead time médio: <b>{row['lt_medio']:.0f} dias</b><br/>"
@@ -158,16 +234,18 @@ def construir_serie_unifilar(df_base: pd.DataFrame, bin_km: float,
             f"<div style='margin-top:6px;font-size:12px;color:#6b7280;'>"
             f"<b>Top defeitos:</b></div>"
             f"<div style='font-size:12px;'>{def_txt}</div>"
+            f"{cron_txt}"
             f"</div>"
         )
 
+        valor = [
+            float(row["bin_km"] + bin_km / 2),
+            y_offset,
+            float(row["score_total"]),
+            int(row["qtd_notas"]),
+        ]
         ponto = {
-            "value": [
-                float(row["bin_km"] + bin_km / 2),
-                y_offset,
-                float(row["score_total"]),
-                int(row["qtd_notas"]),
-            ],
+            "value": valor,
             "symbolSize": tamanho,
             "tooltipHTML": hover,
         }
@@ -177,9 +255,18 @@ def construir_serie_unifilar(df_base: pd.DataFrame, bin_km: float,
         else:
             pontos_normais.append(ponto)
 
+        # Anel crônico (camada extra, NÃO substitui o pulso): mesmo ponto,
+        # símbolo um pouco maior que a bolha, desenhado como aro vazado.
+        if n_cron > 0:
+            pontos_cronicos.append({
+                "value": valor,
+                "symbolSize": tamanho + RING_DELTA,
+            })
+
     km_min = float(agreg["bin_km"].min()) if len(agreg) else None
     km_max = float(agreg["bin_km"].max() + bin_km) if len(agreg) else None
-    return pontos_normais, pontos_pulsantes, agreg, km_min, km_max
+    return (pontos_normais, pontos_pulsantes, pontos_cronicos,
+            agreg, km_min, km_max)
 
 # endregion
 
@@ -422,18 +509,52 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
         st.warning("⚠️ Nenhuma nota com os filtros de trecho aplicados.")
         return
 
+    # ── Marca hot-spots crônicos (para o anel extra) ──────────────────────────
+    # Feito ANTES do split Abertas/Concluídas para que o anel crônico apareça
+    # em ambos os eixos do modo Dual. Não altera a lógica do pulso (top 10%).
+    df_t_completo = _marcar_cronicos(df_t_completo)
+    ha_cronicos = bool(df_t_completo["is_cronico"].any())
+
     st.caption(
         f"Cada bolha = agrupamento de notas em **{bin_km*1000:.0f} m**. "
         f"**Tamanho** = qtd de notas | **Cor** = score de criticidade | "
-        f"**Bolhas pulsantes** = top 10% mais críticos. "
-        f"Use a barra inferior para **zoom** no KM."
+        f"**Bolhas pulsantes** = top 10% mais críticos"
+        + (f" | <span style='color:{COR_CRONICO};font-weight:600;'>"
+           f"⭕ anel roxo = hot-spot crônico</span> (defeito recorrente no "
+           f"mesmo local)" if ha_cronicos else "")
+        + ". Use a barra inferior para **zoom** no KM.",
+        unsafe_allow_html=True,
     )
 
     # ── Monta séries ──────────────────────────────────────────────────────────
     series           = []
+    indices_score    = []   # séries coloridas pelo score (escopo do visualMap)
     km_min_global    = float("inf")
     km_max_global    = float("-inf")
     score_max_global = 0
+
+    def _add_score_series(s):
+        """Adiciona série cuja cor vem do visualMap (score)."""
+        indices_score.append(len(series))
+        series.append(s)
+
+    def _serie_anel_cronico(pontos, nome):
+        """Aro vazado roxo ao redor das bolhas crônicas — camada decorativa
+        (silent) que NÃO interfere no pulso nem no tooltip da bolha."""
+        return {
+            "name": nome, "type": "scatter", "data": pontos,
+            "symbol": "circle", "silent": True,
+            "itemStyle": {
+                "color": "rgba(0,0,0,0)",          # aro vazado
+                "borderColor": COR_CRONICO,
+                "borderWidth": 3,
+                "shadowBlur": 6,
+                "shadowColor": "rgba(124,58,237,0.5)",
+            },
+            "emphasis": {"disabled": True},
+            "tooltip": {"show": False},
+            "z": 3,
+        }
 
     if modo_view == "Dual":
         df_a = df_t_completo[df_t_completo["origem_base"] == "Abertas"].copy()
@@ -446,10 +567,10 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
             st.info("ℹ️ Nenhuma nota **Aberta** nos filtros atuais — "
                     "eixo superior ficará vazio.")
 
-        pn_a, pp_a, agreg_a, kma_min, kma_max = construir_serie_unifilar(
+        pn_a, pp_a, pc_a, agreg_a, kma_min, kma_max = construir_serie_unifilar(
             df_a, bin_km, y_offset=1, label="📋 Abertas (Diagnóstico)"
         )
-        pn_c, pp_c, agreg_c, kmc_min, kmc_max = construir_serie_unifilar(
+        pn_c, pp_c, pc_c, agreg_c, kmc_min, kmc_max = construir_serie_unifilar(
             df_c, bin_km, y_offset=-1, label="✅ Concluídas (Realizado)"
         )
 
@@ -478,18 +599,23 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
              "symbol": "none", "silent": True, "tooltip": {"show": False}},
         ]
         if pn_a:
-            series.append({
+            _add_score_series({
                 "name": "📋 Abertas", "type": "scatter", "data": pn_a,
                 "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5,
                               "opacity": 0.85}})
         if pn_c:
-            series.append({
+            _add_score_series({
                 "name": "✅ Concluídas", "type": "scatter", "data": pn_c,
                 "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5,
                               "opacity": 0.85}})
+        # Anel crônico (aro roxo) — camada extra, não colorida pelo score
+        if pc_a:
+            series.append(_serie_anel_cronico(pc_a, "♻️ Abertas Crônicas"))
+        if pc_c:
+            series.append(_serie_anel_cronico(pc_c, "♻️ Concluídas Crônicas"))
         # effectScatter — pulsante (fiel ao app1: period=3, scale=2.8)
         if pp_a:
-            series.append({
+            _add_score_series({
                 "name": "🔥 Abertas Críticos", "type": "effectScatter",
                 "data": pp_a,
                 "rippleEffect": {"period": 3, "scale": 2.8,
@@ -497,7 +623,7 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
                 "showEffectOn": "render",
                 "itemStyle": {"borderColor": "#fff", "borderWidth": 2}})
         if pp_c:
-            series.append({
+            _add_score_series({
                 "name": "🔥 Concluídas Críticos", "type": "effectScatter",
                 "data": pp_c,
                 "rippleEffect": {"period": 3, "scale": 2.8,
@@ -520,7 +646,7 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
         )
     else:
         # Empilhado / base única
-        pn, pp, agreg, kmm, kmx = construir_serie_unifilar(
+        pn, pp, pc, agreg, kmm, kmx = construir_serie_unifilar(
             df_t_completo, bin_km, y_offset=0, label=f"📊 {label_ramal_final}"
         )
         if kmm is not None and pd.notna(kmm): km_min_global = kmm
@@ -537,13 +663,16 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
             "symbol": "none", "silent": True, "tooltip": {"show": False},
         })
         if pn:
-            series.append({
+            _add_score_series({
                 "name": "Notas", "type": "scatter", "data": pn,
                 "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5,
                               "opacity": 0.85}})
+        # Anel crônico (aro roxo) — camada extra, não colorida pelo score
+        if pc:
+            series.append(_serie_anel_cronico(pc, "♻️ Crônicos"))
         # effectScatter pulsante — fiel ao app1
         if pp:
-            series.append({
+            _add_score_series({
                 "name": "🔥 Hot-spots críticos", "type": "effectScatter",
                 "data": pp,
                 "rippleEffect": {"period": 3, "scale": 2.8,
@@ -606,11 +735,14 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
                 "function(params){ return params.data.tooltipHTML || ''; }"
             ).js_code,
         },
-        # visualMap: score → cor (verde → vermelho) — idêntico ao app1
+        # visualMap: score → cor (verde → vermelho) — idêntico ao app1.
+        # seriesIndex restringe a coloração às bolhas/pulsos; o anel crônico
+        # (roxo, cor fixa) fica de fora para não ser recolorido pelo score.
         "visualMap": {
             "min": 0,
             "max": float(score_max_global) if score_max_global > 0 else 100,
             "dimension": 2,
+            "seriesIndex": indices_score,
             "show": True, "orient": "vertical",
             "right": 10, "top": "middle",
             "itemHeight": 120, "itemWidth": 14,

@@ -314,13 +314,14 @@ def render_gerencia_geral():
         )
 
     # ── 6 Abas ────────────────────────────────────────────────────────────────
-    aba_cons, aba_ger, aba_comp, aba_unif, aba_temp, aba_rank = st.tabs([
+    aba_cons, aba_ger, aba_comp, aba_unif, aba_temp, aba_rank, aba_ee = st.tabs([
         "📊 Consolidado",
         "🎯 Visão Gerencial",
         "⚖️ SP × VP",
         "🗺️ Unifilar Total",
         "📈 Temporal Global",
         "🏆 Top Hot-spots",
+        "🔌 Inteligência EE",
     ])
 
     # endregion
@@ -499,5 +500,21 @@ def render_gerencia_geral():
             df_rank = df_rank[df_rank["gerencia_label"] == ger_rank]
 
         render_ranking(df_rank, top_n=top_n, ordem=ordem, gerencia="GERAL")
+
+    # endregion
+
+    # region =================== SESSÃO 5.6: Aba — Inteligência EE (Global) ====
+    with aba_ee:
+        from components.inteligencia_ee import render_inteligencia_ee
+        from database.queries_rasf import get_rasf_cached
+
+        with st.spinner("⏳ Carregando base RASF (Eletroeletrônica)..."):
+            df_rasf = get_rasf_cached(None)  # ambas as gerências
+
+        # Respeita o filtro de gerências visíveis da Visão Global.
+        if not df_rasf.empty and "gerencia" in df_rasf.columns:
+            df_rasf = df_rasf[df_rasf["gerencia"].isin(gerencias_vis)]
+
+        render_inteligencia_ee(df_rasf, escopo="GLOBAL")
 
     # endregion

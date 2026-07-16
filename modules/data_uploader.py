@@ -68,10 +68,15 @@ def _render_selecao() -> tuple[str, str]:
     with col2:
         disciplina = st.selectbox(
             "📋 Disciplina",
-            ["VP", "EE"],
-            format_func=lambda x: "🛤️ Via Permanente (VP)" if x == "VP" else "⚡ Eletroeletrônica (EE)",
-            help="Será detectada automaticamente, mas você pode forçar aqui."
-        )
+                ["VP", "EE", "RASF"],
+                format_func=lambda x: {
+                    "VP":   "🛤️ Via Permanente (VP)",
+                    "EE":   "⚡ Eletroeletrônica (EE)",
+                    "RASF": "🔌 RASF — Análise de Falha EE",
+                }.get(x, x),
+                help="VP/EE = planilha SAP de notas. RASF = export da Reunião de "
+                     "Análise Sistêmica de Falha (alimenta a aba de Inteligência EE)."
+            )
 
     return gerencia, disciplina
 
@@ -82,6 +87,11 @@ def _render_selecao() -> tuple[str, str]:
 
 def _render_upload_area(gerencia: str, disciplina: str):
     """Área de upload + pipeline completo."""
+
+    # RASF tem pipeline próprio (parser + tabela dedicada rasf_ee).
+    if disciplina == "RASF":
+        _render_upload_rasf(gerencia)
+        return
 
     st.markdown("---")
     st.markdown("### 📁 Selecione o Arquivo")
@@ -431,6 +441,196 @@ def _recalcular_alertas_pos_upload(gerencia: str, disciplina: str) -> None:
             pass
     except Exception as e:
         st.warning(f"⚠️ Upload concluído, mas o recálculo de alertas falhou: {e}")
+
+# endregion
+
+
+# region ====================== SESSÃO 4B: Pipeline RASF (Inteligência EE) ======
+
+def _render_upload_rasf(gerencia: str):
+    """
+    Upload do export RASF (Reunião de Análise Sistêmica de Falha).
+    Parser dedicado (core.parser_rasf) → tabela rasf_ee. Mesmo padrão
+    anti-duplicação dos uploads de notas (uploads_historico, disciplina='RASF').
+    """
+    from core.parser_rasf import carregar_rasf_xlsx
+    from database.queries_rasf import carregar_gatilhos_analise
+
+    gatilhos_ativos = carregar_gatilhos_analise()
+
+    st.markdown("---")
+    st.markdown("### 📁 Selecione o export RASF")
+    st.markdown(f"""
+    <div style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:10px;
+        padding:12px 16px; margin-bottom:1rem; font-size:0.85rem; color:#374151;">
+        <strong>Arquivo esperado:</strong> export RASF de Eletroeletrônica
+        (aba <code>Export</code>, layout canônico de 77 colunas).<br>
+        <strong>Alimenta:</strong> a aba <em>🔌 Inteligência de Falhas EE</em>
+        nas Gerências e na Visão Global.<br>
+        <strong>Tamanho máximo:</strong> 50 MB<br>
+        <strong>Gatilhos de análise ativos</strong> (PG-ENG-0088, editável em
+        Configurações): {', '.join(sorted(gatilhos_ativos))}
+    </div>
+    """, unsafe_allow_html=True)
+
+    arquivo = st.file_uploader(
+        "Export RASF",
+        type=["xlsx", "xls"],
+        key="upload_rasf",
+        label_visibility="collapsed",
+    )
+    if not arquivo:
+        return
+
+    tamanho_mb = arquivo.size / (1024 * 1024)
+    if tamanho_mb > 50:
+        st.error(f"❌ Arquivo muito grande ({tamanho_mb:.1f} MB). Máximo: 50 MB.")
+        return
+
+    st.markdown("---")
+    st.markdown("### 🔄 Processando RASF...")
+    with st.spinner(f"Analisando **{arquivo.name}**..."):
+        try:
+            arquivo_bytes = io.BytesIO(arquivo.read())
+            df = carregar_rasf_xlsx(arquivo_bytes, gatilhos_analise=gatilhos_ativos)
+        except Exception as e:
+            st.error(f"❌ Erro ao processar o RASF: {e}")
+            return
+
+    if df.empty:
+        st.warning("⚠️ Nenhuma linha válida encontrada no export RASF.")
+        return
+
+    # Linhas com "Gerência" fora de GEE.SP/GEV.SP/GEE.VP/GEV.VP viram None em
+    # core.parser_rasf._mapear_gerencia() — sem este aviso elas desapareceriam
+    # silenciosamente do upload (nunca entram em gerencias_presentes abaixo).
+    sem_gerencia = df["gerencia"].isna()
+    if sem_gerencia.any():
+        qtd_sem = int(sem_gerencia.sum())
+        valores_originais = (
+            df.loc[sem_gerencia, "_gerencia_raw"].dropna().unique().tolist()
+            if "_gerencia_raw" in df.columns else []
+        )
+        detalhe = f" (valores encontrados: {', '.join(map(str, valores_originais))})" if valores_originais else ""
+        st.warning(
+            f"⚠️ **{qtd_sem} linha(s) com gerência não reconhecida** foram descartadas{detalhe}. "
+            f"Só são aceitos: GEE.SP, GEV.SP, GEE.VP, GEV.VP. Verifique a coluna "
+            f"'Gerência' no export se o número parecer alto."
+        )
+        df = df[~sem_gerencia].reset_index(drop=True)
+        if df.empty:
+            st.error("❌ Nenhuma linha com gerência reconhecida no arquivo.")
+            return
+
+    # Descarta gerências sem permissão (mesma regra dos uploads de notas).
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+    nao_permitidas = [g for g in gerencias_presentes if not can_upload(g)]
+    if nao_permitidas:
+        qtd = int(df["gerencia"].isin(nao_permitidas).sum())
+        st.warning(
+            f"⚠️ {qtd} linha(s) da(s) gerência(s) **{', '.join(nao_permitidas)}** "
+            f"foram descartadas — você só pode subir RASF da Gerência **{gerencia}**."
+        )
+        df = df[~df["gerencia"].isin(nao_permitidas)].reset_index(drop=True)
+        if df.empty:
+            st.error("❌ Nenhuma linha restante após aplicar as permissões.")
+            return
+
+    # Preview enxuto
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Linhas", f"{len(df):,}".replace(",", "."))
+    c2.metric("Reincid. ativo", f"{int(df['reincidencia_ativo'].sum()):,}".replace(",", "."))
+    c3.metric("Sem 6M classificado", f"{int(df['lacuna_rca'].sum()):,}".replace(",", "."))
+    c4.metric("THP (h)", f"{df['thp_min'].sum()/60:,.0f}".replace(",", "."))
+
+    st.dataframe(
+        df[[c for c in ["data_nota", "numero_nota", "gerencia", "local_patio",
+                        "sistema", "anomalia_sintoma", "gatilho_eng", "thp_min"]
+            if c in df.columns]].head(20),
+        use_container_width=True, hide_index=True,
+    )
+
+    if st.button("✅ Confirmar e gravar RASF", type="primary", use_container_width=True):
+        _executar_upload_rasf(df, arquivo.name, gerencia, tamanho_mb)
+
+
+def _executar_upload_rasf(df, nome_arquivo: str, gerencia_default: str, tamanho_mb: float):
+    """Grava o RASF em rasf_ee, uma gerência por vez (anti-duplicação)."""
+    from core.parser_rasf import df_rasf_para_registros
+    from database.queries_rasf import DISCIPLINA_RASF, get_rasf_cached
+
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+    total = len(df)
+    sucesso = False
+
+    for ger in gerencias_presentes:
+        sub = df[df["gerencia"] == ger].reset_index(drop=True)
+        if _gravar_rasf_gerencia(sub, nome_arquivo, ger,
+                                 tamanho_mb * (len(sub) / total) if total else tamanho_mb):
+            sucesso = True
+
+    if sucesso:
+        try:
+            get_rasf_cached.clear()
+        except Exception:
+            pass
+        st.balloons()
+        st.session_state.pop("upload_rasf", None)
+
+
+def _gravar_rasf_gerencia(df, nome_arquivo: str, gerencia: str, tamanho_mb: float) -> bool:
+    from core.parser_rasf import df_rasf_para_registros
+    from database.queries_rasf import DISCIPLINA_RASF
+
+    supabase   = get_supabase()
+    usuario_id = get_id()
+    total      = len(df)
+    barra = st.progress(0, text="Iniciando gravação do RASF...")
+
+    try:
+        barra.progress(10, text="Arquivando RASF anterior...")
+        supabase.table("uploads_historico").update({"status": "substituido"}).match({
+            "gerencia": gerencia, "disciplina": DISCIPLINA_RASF, "status": "ativo",
+        }).execute()
+
+        barra.progress(25, text="Registrando upload...")
+        resp = supabase.table("uploads_historico").insert({
+            "usuario_id":    usuario_id,
+            "gerencia":      gerencia,
+            "disciplina":    DISCIPLINA_RASF,
+            "nome_arquivo":  nome_arquivo,
+            "total_notas":   total,
+            "tamanho_bytes": int(tamanho_mb * 1024 * 1024),
+            "status":        "ativo",
+            "metadados": {"origem": "RASF", "colunas": list(df.columns)},
+        }).execute()
+        upload_id = resp.data[0]["id"]
+
+        barra.progress(40, text="Convertendo dados...")
+        registros = df_rasf_para_registros(df, upload_id)
+
+        lote = 500
+        total_lotes = (len(registros) + lote - 1) // lote
+        for i in range(0, len(registros), lote):
+            supabase.table("rasf_ee").insert(registros[i:i + lote]).execute()
+            barra.progress(min(40 + int(55 * (i + lote) / len(registros)), 95),
+                           text=f"Inserindo... lote {i//lote + 1}/{total_lotes}")
+
+        barra.progress(100, text="Concluído!")
+        log_acesso(usuario_id, "upload_rasf", {
+            "gerencia": gerencia, "arquivo": nome_arquivo,
+            "total": total, "upload_id": upload_id,
+        })
+        st.success(
+            f"✅ **RASF gravado!** {total:,} linha(s) da Gerência **{gerencia}** "
+            f"carregadas.".replace(",", ".")
+        )
+        return True
+
+    except Exception as e:
+        barra.empty()
+        st.error(f"❌ Falha ao gravar RASF da Gerência {gerencia}: {e}")
+        return False
 
 # endregion
 
