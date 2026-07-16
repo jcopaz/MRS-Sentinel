@@ -20,7 +20,7 @@
 #   3. Obras × Manutenção    (qtd de falhas / THP por "Descrição da Origem da
 #                             Atividade" RASF, sem agrupar em categoria; barras
 #                             com % de representatividade)
-#   3B. Heatmap Trecho×Origem (Trecho × Descrição da Origem da Atividade ×
+#   3B. Heatmap Pátio×Origem  (Pátio × Descrição da Origem da Atividade ×
 #                             quantidade de falhas)
 #   4. Ranking de Reincidência por Ativo (agrupado pela coluna K do RASF —
 #                             "Local de instalação", não o código TPLNR)
@@ -545,30 +545,30 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
 # endregion
 
 
-# region ====================== SESSÃO 4B: Heatmap Trecho × Origem =============
+# region ====================== SESSÃO 4B: Heatmap Pátio × Origem ==============
 
 _TOP_ORIGENS_HEATMAP = 12  # linhas do heatmap (eixo Y) — evita poluir com origens raras
 
 
-def _bloco_heatmap_trecho_origem(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 🔥 Mapa de Calor — Trecho × Origem da Atividade")
+def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 🔥 Mapa de Calor — Pátio × Origem da Atividade")
     st.caption(
-        "Cruza Trecho (eixo X) × Descrição da Origem da Atividade (eixo Y) — "
+        "Cruza Pátio (eixo X) × Descrição da Origem da Atividade (eixo Y) — "
         "a cor e o número em cada célula mostram a quantidade de falhas "
         "daquela combinação. Ajuda a achar não só ONDE, mas O QUE está "
-        "acontecendo em cada trecho."
+        "acontecendo em cada pátio."
     )
 
-    if "ramal" not in df.columns or "desc_origem_atividade" not in df.columns:
-        st.info("Colunas de trecho/origem da atividade indisponíveis.")
+    if "patio" not in df.columns or "desc_origem_atividade" not in df.columns:
+        st.info("Colunas de pátio/origem da atividade indisponíveis.")
         return
 
-    d = df.dropna(subset=["ramal", "desc_origem_atividade"]).copy()
+    d = df.dropna(subset=["patio", "desc_origem_atividade"]).copy()
     if d.empty:
-        st.info("Sem dados de trecho/origem no escopo atual.")
+        st.info("Sem dados de pátio/origem no escopo atual.")
         return
 
-    trechos = sorted(d["ramal"].unique())
+    patios = sorted(d["patio"].unique())
     top_origens = d["desc_origem_atividade"].value_counts().head(_TOP_ORIGENS_HEATMAP).index.tolist()
     d = d[d["desc_origem_atividade"].isin(top_origens)]
     if d.empty:
@@ -576,17 +576,17 @@ def _bloco_heatmap_trecho_origem(df: pd.DataFrame, escopo: str = ""):
         return
 
     pivot = (
-        d.groupby(["ramal", "desc_origem_atividade"])
+        d.groupby(["patio", "desc_origem_atividade"])
          .size().reset_index(name="falhas")
     )
 
-    trecho_labels = [nome_ramal(r, "completo") for r in trechos]
+    patio_labels = [str(p) for p in patios]
     origem_labels = [str(o)[:32] for o in top_origens]
-    trecho_idx = {r: i for i, r in enumerate(trechos)}
+    patio_idx = {p: i for i, p in enumerate(patios)}
     origem_idx = {o: i for i, o in enumerate(top_origens)}
 
     dados_heatmap = [
-        [trecho_idx[row["ramal"]], origem_idx[row["desc_origem_atividade"]], int(row["falhas"])]
+        [patio_idx[row["patio"]], origem_idx[row["desc_origem_atividade"]], int(row["falhas"])]
         for _, row in pivot.iterrows()
     ]
     max_val = max((v[2] for v in dados_heatmap), default=1)
@@ -594,7 +594,7 @@ def _bloco_heatmap_trecho_origem(df: pd.DataFrame, escopo: str = ""):
     if not ECHARTS_OK:
         st.dataframe(
             pivot.rename(columns={
-                "ramal": "Trecho", "desc_origem_atividade": "Origem da Atividade", "falhas": "Falhas",
+                "patio": "Pátio", "desc_origem_atividade": "Origem da Atividade", "falhas": "Falhas",
             }),
             use_container_width=True, hide_index=True,
         )
@@ -602,9 +602,9 @@ def _bloco_heatmap_trecho_origem(df: pd.DataFrame, escopo: str = ""):
 
     tooltip_fmt = JsCode(f"""
         function(p){{
-            var trechos = {json.dumps(trecho_labels, ensure_ascii=False)};
+            var patios = {json.dumps(patio_labels, ensure_ascii=False)};
             var origens = {json.dumps(origem_labels, ensure_ascii=False)};
-            return '<b>'+ trechos[p.value[0]] +'</b><br/>'
+            return '<b>'+ patios[p.value[0]] +'</b><br/>'
                  + origens[p.value[1]] +'<br/>'
                  + 'Falhas: <b>'+ p.value[2] +'</b>';
         }}
@@ -620,7 +620,7 @@ def _bloco_heatmap_trecho_origem(df: pd.DataFrame, escopo: str = ""):
         },
         "grid": {"left": "3%", "right": "4%", "top": "5%", "bottom": "26%", "containLabel": True},
         "xAxis": {
-            "type": "category", "data": trecho_labels,
+            "type": "category", "data": patio_labels,
             "axisLabel": {"color": "#374151", "fontSize": 10, "rotate": 40, "interval": 0},
             "splitArea": {"show": True},
         },
@@ -642,7 +642,7 @@ def _bloco_heatmap_trecho_origem(df: pd.DataFrame, escopo: str = ""):
         }],
     }
     altura = max(360, 34 * len(origem_labels) + 160)
-    st_echarts(opt, height=f"{altura}px", key=f"ee_heatmap_trecho_origem_{escopo}")
+    st_echarts(opt, height=f"{altura}px", key=f"ee_heatmap_patio_origem_{escopo}")
 
 # endregion
 
@@ -684,6 +684,10 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
               patio=("patio", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
               sistema=("sistema", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
               confiab=("impacta_confiabilidade", "sum"),
+              classificacao=(
+                  "desc_origem_atividade",
+                  lambda s: s.dropna().mode().iloc[0] if not s.dropna().mode().empty else "—",
+              ),
           )
           .reset_index()
     )
@@ -709,11 +713,12 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
         "reincidencias": "Reincid. 90d",
         "thp_h": "THP (h)",
         "confiab": "Impacta confiab.",
+        "classificacao": "Classificação",
     })
     tabela["THP (h)"] = tabela["THP (h)"].round(0).astype(int)
 
     st.dataframe(
-        tabela[["Local de Instalação", "Pátio", "Sistema", "Falhas",
+        tabela[["Local de Instalação", "Pátio", "Sistema", "Classificação", "Falhas",
                 "Reincid. 90d", "THP (h)", "Impacta confiab."]],
         use_container_width=True, hide_index=True,
         column_config={
@@ -1124,7 +1129,7 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     st.markdown("---")
     _bloco_obras_manutencao(df, escopo)
     st.markdown("---")
-    _bloco_heatmap_trecho_origem(df, escopo)
+    _bloco_heatmap_patio_origem(df, escopo)
     st.markdown("---")
     _bloco_reincidencia(df, escopo)
 
