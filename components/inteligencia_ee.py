@@ -169,6 +169,18 @@ def _fmt_h(v) -> str:
         return "0 h"
 
 
+def _trunc_palavra(s, limite: int = 40) -> str:
+    """Trunca preservando palavras inteiras (nunca corta no meio de uma
+    palavra, ex.: 'CIRCUITO DE VIA COM O' virando algo sem sentido) e
+    sinaliza com '…' quando corta de verdade. Usado em texto livre do RASF
+    (sintoma, origem da atividade) que vai para cards/rótulos."""
+    s = str(s)
+    if len(s) <= limite:
+        return s
+    cortado = s[:limite].rsplit(" ", 1)[0]
+    return (cortado or s[:limite]) + "…"
+
+
 def _preparar_origem(df: pd.DataFrame) -> pd.DataFrame:
     """
     Aplica a regra de causa raiz/responsabilidade do RASF (Julio, 16/07/2026):
@@ -239,11 +251,11 @@ def _multiselect_coluna(df: pd.DataFrame, coluna: str, label: str, escopo: str, 
 
 def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
     """
-    Filtros da aba — recorte pedido pelo Julio (16/07/2026): Sistema,
-    Reincidência, Gerador THP, Período sempre visíveis; Descrição Tipo
-    Solicitação, Origem da Atividade (efetiva — já com a correção de
-    responsabilidade aplicada), Consenso, Pátio e Grupo do Ativo num
-    expander pra não poluir o topo da tela.
+    Filtros da aba — recorte pedido pelo Julio (16/07/2026), todos dentro de
+    um único expander recolhível pra não poluir o topo da tela: Sistema,
+    Reincidência, Gerador THP, Período, Descrição Tipo Solicitação, Origem
+    da Atividade (efetiva — já com a correção de responsabilidade aplicada),
+    Consenso, Pátio e Grupo do Ativo.
 
     Recebe o df já passado por _preparar_origem() (chamada no início de
     render_inteligencia_ee) — precisa das colunas 'origem_efetiva' e
@@ -257,41 +269,41 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
     if df.empty:
         return df
 
-    st.markdown("##### 🔍 Filtros")
-    col_sist, col_reinc, col_thp, col_periodo = st.columns([1, 1, 1, 1.4])
+    with st.expander("🔍 Filtros", expanded=False):
+        col_sist, col_reinc, col_thp, col_periodo = st.columns([1, 1, 1, 1.4])
 
-    with col_sist:
-        sistema_sel = _multiselect_coluna(df, "sistema", "Sistema", escopo)
+        with col_sist:
+            sistema_sel = _multiselect_coluna(df, "sistema", "Sistema", escopo)
 
-    with col_reinc:
-        reincidencia_opt = st.radio(
-            "Reincidência (90d, ativo)", ["Todas", "Só reincidentes", "Só não reincidentes"],
-            index=0, key=f"ee_filtro_reincid_{escopo}",
-            help="Usa o campo 'Reincidência 90 dias ativo' já pré-calculado pelo RASF.",
-        )
+        with col_reinc:
+            reincidencia_opt = st.radio(
+                "Reincidência (90d, ativo)", ["Todas", "Só reincidentes", "Só não reincidentes"],
+                index=0, key=f"ee_filtro_reincid_{escopo}",
+                help="Usa o campo 'Reincidência 90 dias ativo' já pré-calculado pelo RASF.",
+            )
 
-    with col_thp:
-        gerador_thp_opt = st.radio(
-            "Gerador THP (300)", ["Todas", "Só com THP", "Só sem THP"],
-            index=0, key=f"ee_filtro_thp_{escopo}",
-            help="Coluna Z do RASF ('Gerador THP (300)') — sinalizada com "
-                 "'X' nas notas que geraram trem parado.",
-        )
+        with col_thp:
+            gerador_thp_opt = st.radio(
+                "Gerador THP (300)", ["Todas", "Só com THP", "Só sem THP"],
+                index=0, key=f"ee_filtro_thp_{escopo}",
+                help="Coluna Z do RASF ('Gerador THP (300)') — sinalizada com "
+                     "'X' nas notas que geraram trem parado.",
+            )
 
-    with col_periodo:
-        data_max = date.today()  # SEMPRE hoje — nunca derivar dos dados
-        datas_validas = pd.to_datetime(df.get("data_nota"), errors="coerce").dropna()
-        data_min_disp = datas_validas.min().date() if not datas_validas.empty else date(2018, 1, 1)
-        periodo = st.date_input(
-            "Período (data da nota)",
-            value=(data_min_disp, data_max),
-            min_value=date(2018, 1, 1),
-            max_value=data_max,
-            format="DD/MM/YYYY",
-            key=f"ee_filtro_periodo_{escopo}",
-        )
+        with col_periodo:
+            data_max = date.today()  # SEMPRE hoje — nunca derivar dos dados
+            datas_validas = pd.to_datetime(df.get("data_nota"), errors="coerce").dropna()
+            data_min_disp = datas_validas.min().date() if not datas_validas.empty else date(2018, 1, 1)
+            periodo = st.date_input(
+                "Período (data da nota)",
+                value=(data_min_disp, data_max),
+                min_value=date(2018, 1, 1),
+                max_value=data_max,
+                format="DD/MM/YYYY",
+                key=f"ee_filtro_periodo_{escopo}",
+            )
 
-    with st.expander("🔎 Mais filtros — Tipo Solicitação, Origem da Atividade, Consenso, Pátio, Grupo do Ativo"):
+        st.markdown("---")
         col_a, col_b = st.columns(2)
         with col_a:
             tipo_sel = _multiselect_coluna(df, "desc_tipo_solicitacao", "Descrição Tipo Solicitação", escopo)
@@ -406,7 +418,7 @@ def _bloco_cards_resumo(df: pd.DataFrame, escopo: str = ""):
         if not grp_sint_thp.empty and grp_sint_thp.max() > 0:
             sintoma_top = grp_sint_thp.idxmax()
             thp_sint_top = float(grp_sint_thp.max())
-            _kpi(c4, "Sintoma mais crítico (THP)", str(sintoma_top)[:26], COR_CRIT,
+            _kpi(c4, "Sintoma mais crítico (THP)", _trunc_palavra(sintoma_top), COR_CRIT,
                  sub=f"{_fmt_h(thp_sint_top)} de trem parado")
         else:
             _kpi(c4, "Sintoma mais crítico (THP)", "—", COR_CRIT)
@@ -421,7 +433,7 @@ def _bloco_cards_resumo(df: pd.DataFrame, escopo: str = ""):
             origem_top = grp_origem.idxmax()
             qtd_origem_top = int(grp_origem.max())
             pct_origem = 100 * qtd_origem_top / len(df) if len(df) else 0
-            _kpi(c5, "Origem mais frequente", str(origem_top)[:26], COR_WARN,
+            _kpi(c5, "Origem mais frequente", _trunc_palavra(origem_top), COR_WARN,
                  sub=f"{_fmt_int(qtd_origem_top)} falhas · {pct_origem:.0f}% do total")
         else:
             _kpi(c5, "Origem mais frequente", "—", COR_WARN)
@@ -560,7 +572,7 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
     c1, c2, c3 = st.columns(3)
     _kpi(c1, "Falhas no recorte", _fmt_int(total), COR_PRIMARIA)
     _kpi(c2, "Trem parado (THP)", _fmt_h(g["thp_h"].sum()), COR_THP)
-    _kpi(c3, "Origem principal", str(top1["origem_efetiva"])[:28],
+    _kpi(c3, "Origem principal", _trunc_palavra(top1["origem_efetiva"]),
          COR_CRIT, sub=f"{_fmt_int(top1['falhas'])} falhas · {pct_top1:.0f}% do total")
 
     g_chart = g.head(_TOP_ORIGENS_ATIVIDADE)
@@ -662,7 +674,7 @@ def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
     )
 
     patio_labels = [str(p) for p in patios]
-    origem_labels = [str(o)[:32] for o in top_origens]
+    origem_labels = [_trunc_palavra(o, 32) for o in top_origens]
     patio_idx = {p: i for i, p in enumerate(patios)}
     origem_idx = {o: i for i, o in enumerate(top_origens)}
 
@@ -963,6 +975,24 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
     g["reincidencias"] = g["reincidencias"].astype(int)
     g["cronico"] = g["reincidencias"] >= 3  # já é por ativo — sinal direto do RASF
 
+    # Leitura rápida ANTES do gráfico — pedido do Julio (16/07/2026): quem
+    # abre a aba já vê o resumo sem precisar rolar a tela pra baixo do Unifilar.
+    if modo_todos:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("🚂 Ativos (todos os trechos)", f"{len(g):,}".replace(",", "."))
+        densidade = len(d) / max(len(g), 1)
+        c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
+        top_row = g.sort_values("score", ascending=False).iloc[0]
+        c3.metric("🎯 Ativo mais crítico", ativo_curto(top_row["local_instalacao"]))
+        c4.metric("🚂 Trecho do ativo crítico", nome_ramal(top_row["ramal"], "completo"))
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."))
+        densidade = len(d) / max(len(g), 1)
+        c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
+        top_ativo = ativo_curto(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
+        c3.metric("🎯 Ativo mais crítico", top_ativo)
+
     fmax = float(g["falhas"].max() or 1)
 
     def _bsize(n):
@@ -1101,22 +1131,6 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
     chart_key = f"ee_unifilar_{escopo}_{'TODOS' if modo_todos else ramal_view}"
     st_echarts(options=option, height="460px", key=chart_key)
 
-    if modo_todos:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("🚂 Ativos (todos os trechos)", f"{len(g):,}".replace(",", "."))
-        densidade = len(d) / max(len(g), 1)
-        c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
-        top_row = g.sort_values("score", ascending=False).iloc[0]
-        c3.metric("🎯 Ativo mais crítico", ativo_curto(top_row["local_instalacao"]))
-        c4.metric("🚂 Trecho do ativo crítico", nome_ramal(top_row["ramal"], "completo"))
-    else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."))
-        densidade = len(d) / max(len(g), 1)
-        c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
-        top_ativo = ativo_curto(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
-        c3.metric("🎯 Ativo mais crítico", top_ativo)
-
 
 def _percentil_score(pts, q):
     vals = sorted(p["value"][1] for p in pts)
@@ -1146,16 +1160,19 @@ def _unifilar_fallback(df: pd.DataFrame):
 # region ====================== SESSÃO 7: KPI helper ============================
 
 def _kpi(col, label, valor, cor, sub=""):
+    # Texto longo (nome de ativo, sintoma, origem...) quebra em várias linhas
+    # em vez de estourar o card — fonte menor pra caber mais sem cortar.
+    tamanho_fonte = "1.1rem" if len(str(valor)) > 18 else "1.5rem"
     with col:
         st.markdown(
             f"""
             <div style="background:white;border:1px solid #e5e7eb;border-left:4px solid {cor};
-                        border-radius:10px;padding:12px 14px;">
+                        border-radius:10px;padding:12px 14px;height:100%;">
               <div style="font-size:0.72rem;color:#6b7280;text-transform:uppercase;
                           letter-spacing:.5px;font-weight:600;">{label}</div>
-              <div style="font-size:1.5rem;font-weight:800;color:{cor};line-height:1.1;
-                          margin-top:2px;">{valor}</div>
-              <div style="font-size:0.72rem;color:#9ca3af;margin-top:2px;">{sub}</div>
+              <div style="font-size:{tamanho_fonte};font-weight:800;color:{cor};line-height:1.25;
+                          margin-top:2px;word-break:break-word;overflow-wrap:break-word;">{valor}</div>
+              <div style="font-size:0.72rem;color:#9ca3af;margin-top:4px;">{sub}</div>
             </div>
             """,
             unsafe_allow_html=True,
