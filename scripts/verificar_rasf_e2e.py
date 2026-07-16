@@ -51,6 +51,11 @@ def main():
     print(f"   ✅ URL: {url}")
 
     print("── 2. Conexão + tabela rasf_ee ─────────────────")
+    # Importa database.client só pelo efeito colateral: ele desliga a
+    # verificação de certificado SSL (redes corporativas com proxy/MITM,
+    # ex.: MRS) — sem isso, create_client() abaixo falha com
+    # CERTIFICATE_VERIFY_FAILED antes mesmo de tentar autenticar.
+    import database.client  # noqa: F401
     from supabase import create_client
     sb = create_client(url, key)
     try:
