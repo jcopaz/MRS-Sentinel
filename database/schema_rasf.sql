@@ -91,6 +91,18 @@ COMMENT ON COLUMN rasf_ee.lacuna_rca IS 'TRUE quando a nota é Gatilho de Análi
 COMMENT ON COLUMN rasf_ee.thp_min IS 'Tempo de Trem Hora Parado (min) — usado para priorização por impacto operacional.';
 
 -- ============================================================
+-- RLS: desligado, mesmo modelo do resto do projeto
+-- ============================================================
+-- Nenhuma tabela deste app (notas, uploads_historico, alertas, configuracoes)
+-- usa Row-Level Security do Postgres — a segurança é toda na camada do app
+-- (auth/permissions.py: require_login(), can_upload(), perfil/gerência),
+-- via o client anon key (database/client.py.get_supabase()). Se o projeto
+-- Supabase tiver RLS habilitado por padrão em tabelas novas, o insert em
+-- rasf_ee falha com 42501 "new row violates row-level security policy"
+-- até isso ser desligado explicitamente. Idempotente — seguro rodar de novo.
+ALTER TABLE rasf_ee DISABLE ROW LEVEL SECURITY;
+
+-- ============================================================
 -- CORREÇÃO: uploads_historico.disciplina tem CHECK restrito a ('VP','EE')
 -- ============================================================
 -- ⚠️ O comentário original aqui dizia que a coluna era "VARCHAR livre" —
