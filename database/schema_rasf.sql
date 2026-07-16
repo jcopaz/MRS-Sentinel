@@ -90,9 +90,19 @@ COMMENT ON TABLE  rasf_ee IS 'Export RASF (Reunião de Análise Sistêmica de Fa
 COMMENT ON COLUMN rasf_ee.lacuna_rca IS 'TRUE quando a nota é Gatilho de Análise mas ainda não tem causa raiz (6M/Componente) — alimenta o Backlog RCA.';
 COMMENT ON COLUMN rasf_ee.thp_min IS 'Tempo de Trem Hora Parado (min) — usado para priorização por impacto operacional.';
 
--- Registra a disciplina 'RASF' como opção válida de upload (reaproveita
--- uploads_historico). Nenhuma alteração de schema em uploads_historico é
--- necessária: a coluna disciplina já é VARCHAR livre.
+-- ============================================================
+-- CORREÇÃO: uploads_historico.disciplina tem CHECK restrito a ('VP','EE')
+-- ============================================================
+-- ⚠️ O comentário original aqui dizia que a coluna era "VARCHAR livre" —
+-- ERRADO. database/schema.sql cria uploads_historico com
+-- `disciplina VARCHAR NOT NULL CHECK (disciplina IN ('VP', 'EE'))`, então
+-- gravar upload_historico com disciplina='RASF' falha com
+-- "violates check constraint uploads_historico_disciplina_check" (23514).
+-- Precisa recriar a constraint incluindo 'RASF'. Idempotente — pode rodar
+-- de novo sem erro mesmo se já tiver sido aplicado.
+ALTER TABLE uploads_historico DROP CONSTRAINT IF EXISTS uploads_historico_disciplina_check;
+ALTER TABLE uploads_historico ADD CONSTRAINT uploads_historico_disciplina_check
+    CHECK (disciplina IN ('VP', 'EE', 'RASF'));
 
 -- ============================================================
 -- CONFIGURAÇÃO: Gatilhos de Análise de Falha (PG-ENG-0088, seção 6.4.1)
