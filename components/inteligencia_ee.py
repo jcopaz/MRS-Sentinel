@@ -446,11 +446,7 @@ def _bloco_cards_resumo(df: pd.DataFrame, escopo: str = ""):
 # region ====================== SESSÃO 3: BLOCO 2 — Pareto de Sintomas x THP ====
 
 def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 📊 Pareto de Sintomas × THP")
-    st.caption(
-        "O sintoma mais **frequente** nem sempre é o que mais **para trem**. "
-        "As barras mostram volume; a linha, o THP acumulado (h)."
-    )
+    st.markdown("#### 📊 Pareto de Sintomas — Falhas × THP por Sintoma")
 
     if "anomalia_sintoma" not in df.columns:
         st.info("Coluna de sintoma indisponível.")
@@ -535,16 +531,7 @@ _TOP_ORIGENS_ATIVIDADE = 15
 
 
 def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 🏗️ Obras × Manutenção — como atacar")
-    st.caption(
-        "Quantidade de falhas e THP por Origem da Atividade **efetiva** "
-        "(RASF) — 'Descrição da Origem da Atividade' é a referência, mas "
-        "sobreposta por 'Origem de Atividade Correta' quando a "
-        "responsabilidade foi corrigida em reunião. Cada origem pede uma "
-        "estratégia diferente: falha originada de obra costuma pedir "
-        "bloqueio na frente de trabalho (padrão de comissionamento/entrega); "
-        "falha de manutenção tradicional pede RCA/plano de manutenção."
-    )
+    st.markdown("#### 🏗️ Obras × Manutenção — Falhas × THP por Origem da Atividade")
 
     if "origem_efetiva" not in df.columns:
         st.info("Coluna de origem da atividade indisponível.")
@@ -644,13 +631,7 @@ _TOP_ORIGENS_HEATMAP = 12  # linhas do heatmap (eixo Y) — evita poluir com ori
 
 
 def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 🔥 Mapa de Calor — Pátio × Origem da Atividade")
-    st.caption(
-        "Cruza Pátio (eixo X) × Origem da Atividade efetiva (eixo Y — já com "
-        "a correção de responsabilidade aplicada) — a cor e o número em cada "
-        "célula mostram a quantidade de falhas daquela combinação. Ajuda a "
-        "achar não só ONDE, mas O QUE está acontecendo em cada pátio."
-    )
+    st.markdown("#### 🔥 Mapa de Calor — Pátio × Origem da Atividade (qtd de falhas)")
 
     if "patio" not in df.columns or "origem_efetiva" not in df.columns:
         st.info("Colunas de pátio/origem da atividade indisponíveis.")
