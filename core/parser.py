@@ -554,7 +554,8 @@ def processar_planilha(
     else:
         df["familia_cod"]    = "??"
         df["familia_defeito"] = "Outros"
-        df.setdefault("defeito_legivel", pd.Series("—", index=df.index))
+        if "defeito_legivel" not in df.columns:
+            df["defeito_legivel"] = "—"
 
     # Passo 10: Status amigável
     if "status_usuario" in df.columns:
