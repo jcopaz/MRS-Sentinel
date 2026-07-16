@@ -454,9 +454,10 @@ def _render_upload_rasf(gerencia: str):
     anti-duplicação dos uploads de notas (uploads_historico, disciplina='RASF').
     """
     from core.parser_rasf import carregar_rasf_xlsx
-    from database.queries_rasf import carregar_gatilhos_analise
+    from database.queries_rasf import carregar_gatilhos_analise, carregar_overrides_origem_categoria
 
     gatilhos_ativos = carregar_gatilhos_analise()
+    overrides_origem = carregar_overrides_origem_categoria()
 
     st.markdown("---")
     st.markdown("### 📁 Selecione o export RASF")
@@ -492,7 +493,9 @@ def _render_upload_rasf(gerencia: str):
     with st.spinner(f"Analisando **{arquivo.name}**..."):
         try:
             arquivo_bytes = io.BytesIO(arquivo.read())
-            df = carregar_rasf_xlsx(arquivo_bytes, gatilhos_analise=gatilhos_ativos)
+            df = carregar_rasf_xlsx(
+                arquivo_bytes, gatilhos_analise=gatilhos_ativos, overrides_origem=overrides_origem,
+            )
         except Exception as e:
             st.error(f"❌ Erro ao processar o RASF: {e}")
             return
@@ -542,6 +545,13 @@ def _render_upload_rasf(gerencia: str):
     c2.metric("Reincid. ativo", f"{int(df['reincidencia_ativo'].sum()):,}".replace(",", "."))
     c3.metric("Sem 6M classificado", f"{int(df['lacuna_rca'].sum()):,}".replace(",", "."))
     c4.metric("THP (h)", f"{df['thp_min'].sum()/60:,.0f}".replace(",", "."))
+
+    if "origem_categoria" in df.columns:
+        contagem_cat = df["origem_categoria"].value_counts()
+        st.caption(
+            "🏗️ Obras × Manutenção (via 'Origem da Atividade'): " +
+            " · ".join(f"**{cat}**: {int(n):,}".replace(",", ".") for cat, n in contagem_cat.items())
+        )
 
     st.dataframe(
         df[[c for c in ["data_nota", "numero_nota", "gerencia", "local_patio",

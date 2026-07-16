@@ -10,13 +10,18 @@
 # Entrada: DataFrame canônico produzido por core.parser_rasf / queries_rasf.
 # Uso:     render_inteligencia_ee(df, escopo="SP"|"VP"|"GLOBAL")
 #
-# 6 blocos:
+# 7 blocos:
 #   1. Painel de Prioridade  (KPIs + Pareto contagem × THP)
+#   1B. Obras × Manutenção   (classificação via "Origem da Atividade")
 #   2. Ranking de Reincidência por Ativo (TPLNR)
 #   3. Unifilar EE           (ativo × posição seq. no trecho, cor=score, anel reincidência)
 #   4. Backlog RCA / Gatilho (gatilho sem causa raiz)
 #   5. Análise 6M            (Ishikawa consolidado)
-#   6. Tendência YoY         (opcional — Base Congelada)
+#   6. Tendência mensal
+#
+# Filtros: Sistema, Origem Obras×Manutenção, Reincidência, Período (essenciais)
+#   + Responsável, Ativo, Pátio, Tipo Solicitação, Origem Atividade, Grupo do
+#   Ativo (expander "Mais filtros")
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
@@ -145,9 +150,36 @@ def _fmt_h(v) -> str:
 
 # region ====================== SESSÃO 2B: Filtros ==============================
 
+def _multiselect_coluna(df: pd.DataFrame, coluna: str, label: str, escopo: str, **kwargs) -> list | None:
+    """
+    Helper: multiselect padrão sobre uma coluna de texto do df.
+
+    Retorna None quando o filtro está no estado "sem filtro" (seleção vazia
+    OU igual à lista cheia de opções) — o chamador NÃO deve aplicar isin()
+    nesse caso. Isso é importante porque a lista de opções vem de
+    dropna().unique(): se aplicássemos isin() mesmo com "tudo selecionado",
+    linhas com o campo em branco seriam excluídas por padrão (ex.:
+    'responsavel' está vazio em 60% das falhas do RASF) — com 6+ filtros
+    desse tipo empilhados, o efeito composto derruba o total mesmo sem o
+    usuário tocar em nada. Só filtra de verdade quando o usuário restringe
+    ativamente a seleção.
+    """
+    opcoes = sorted(
+        v for v in df.get(coluna, pd.Series(dtype=object)).dropna().unique()
+        if str(v).strip()
+    )
+    sel = st.multiselect(label, opcoes, default=opcoes, key=f"ee_filtro_{coluna}_{escopo}", **kwargs)
+    if not sel or set(sel) == set(opcoes):
+        return None
+    return sel
+
+
 def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
     """
-    Filtros de atributo da aba: Responsável, Ativo (TPLNR), Pátio, Período.
+    Filtros da aba. Linha essencial sempre visível: Sistema, Categoria
+    (Obras/Manutenção), Reincidência, Período. Os demais (Responsável,
+    Ativo, Pátio, Tipo Solicitação, Origem da Atividade, Grupo do Ativo)
+    ficam num expander pra não poluir o topo da tela.
 
     Aplicados sobre o df ANTES de _enriquecer() — assim o score_ee e todas as
     agregações dos 6 blocos já refletem só o recorte filtrado. Mesmo padrão
@@ -158,44 +190,24 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
         return df
 
     st.markdown("##### 🔍 Filtros")
-    col_resp, col_ativo, col_patio, col_periodo = st.columns([1, 1, 1, 1.4])
+    col_sist, col_cat, col_reinc, col_periodo = st.columns([1, 1, 1, 1.4])
 
-    with col_resp:
-        opcoes_resp = sorted(
-            r for r in df.get("responsavel", pd.Series(dtype=object)).dropna().unique()
-            if str(r).strip()
-        )
-        resp_sel = st.multiselect(
-            "Responsável", opcoes_resp, default=opcoes_resp,
-            key=f"ee_filtro_resp_{escopo}",
-        )
-        if not resp_sel:
-            resp_sel = opcoes_resp
+    with col_sist:
+        sistema_sel = _multiselect_coluna(df, "sistema", "Sistema", escopo)
 
-    with col_ativo:
-        opcoes_ativo = sorted(
-            a for a in df.get("local_instalacao", pd.Series(dtype=object)).dropna().unique()
-            if str(a).strip()
+    with col_cat:
+        categoria_sel = _multiselect_coluna(
+            df, "origem_categoria", "Origem: Obras × Manutenção", escopo,
+            help="Derivado de 'Descrição da Origem da Atividade' — ver bloco "
+                 "🏗️ Obras × Manutenção logo abaixo pra entender a classificação.",
         )
-        ativo_sel = st.multiselect(
-            "Ativo (TPLNR)", opcoes_ativo, default=opcoes_ativo,
-            key=f"ee_filtro_ativo_{escopo}",
-            help="Local de Instalação — mesmo código usado no Ranking de Reincidência.",
-        )
-        if not ativo_sel:
-            ativo_sel = opcoes_ativo
 
-    with col_patio:
-        opcoes_patio = sorted(
-            p for p in df.get("local_patio", pd.Series(dtype=object)).dropna().unique()
-            if str(p).strip()
+    with col_reinc:
+        reincidencia_opt = st.radio(
+            "Reincidência (90d, ativo)", ["Todas", "Só reincidentes", "Só não reincidentes"],
+            index=0, key=f"ee_filtro_reincid_{escopo}",
+            help="Usa o campo 'Reincidência 90 dias ativo' já pré-calculado pelo RASF.",
         )
-        patio_sel = st.multiselect(
-            "Pátio", opcoes_patio, default=opcoes_patio,
-            key=f"ee_filtro_patio_{escopo}",
-        )
-        if not patio_sel:
-            patio_sel = opcoes_patio
 
     with col_periodo:
         data_max = date.today()  # SEMPRE hoje — nunca derivar dos dados
@@ -210,13 +222,43 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
             key=f"ee_filtro_periodo_{escopo}",
         )
 
+    with st.expander("🔎 Mais filtros — Responsável, Ativo, Pátio, Tipo, Origem, Grupo do Ativo"):
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            resp_sel = _multiselect_coluna(df, "responsavel", "Responsável", escopo)
+            tipo_sel = _multiselect_coluna(df, "desc_tipo_solicitacao", "Descrição Tipo Solicitação", escopo)
+        with col_b:
+            ativo_sel = _multiselect_coluna(
+                df, "local_instalacao", "Ativo (TPLNR)", escopo,
+                help="Local de Instalação — mesmo código usado no Ranking de Reincidência.",
+            )
+            origem_sel = _multiselect_coluna(df, "desc_origem_atividade", "Descrição da Origem da Atividade", escopo)
+        with col_c:
+            patio_sel = _multiselect_coluna(df, "local_patio", "Pátio", escopo)
+            grupo_sel = _multiselect_coluna(df, "grupo_ativo", "Grupo do Ativo", escopo)
+
     d = df.copy()
-    if "responsavel" in d.columns:
+    if sistema_sel is not None and "sistema" in d.columns:
+        d = d[d["sistema"].isin(sistema_sel)]
+    if categoria_sel is not None and "origem_categoria" in d.columns:
+        d = d[d["origem_categoria"].isin(categoria_sel)]
+    if "reincidencia_ativo" in d.columns:
+        if reincidencia_opt == "Só reincidentes":
+            d = d[d["reincidencia_ativo"]]
+        elif reincidencia_opt == "Só não reincidentes":
+            d = d[~d["reincidencia_ativo"]]
+    if resp_sel is not None and "responsavel" in d.columns:
         d = d[d["responsavel"].isin(resp_sel)]
-    if "local_instalacao" in d.columns:
+    if ativo_sel is not None and "local_instalacao" in d.columns:
         d = d[d["local_instalacao"].isin(ativo_sel)]
-    if "local_patio" in d.columns:
+    if patio_sel is not None and "local_patio" in d.columns:
         d = d[d["local_patio"].isin(patio_sel)]
+    if tipo_sel is not None and "desc_tipo_solicitacao" in d.columns:
+        d = d[d["desc_tipo_solicitacao"].isin(tipo_sel)]
+    if origem_sel is not None and "desc_origem_atividade" in d.columns:
+        d = d[d["desc_origem_atividade"].isin(origem_sel)]
+    if grupo_sel is not None and "grupo_ativo" in d.columns:
+        d = d[d["grupo_ativo"].isin(grupo_sel)]
     if "data_nota" in d.columns and isinstance(periodo, (tuple, list)) and len(periodo) == 2:
         col_data = pd.to_datetime(d["data_nota"], errors="coerce")
         d = d[(col_data.dt.date >= periodo[0]) & (col_data.dt.date <= periodo[1])]
@@ -314,6 +356,127 @@ def _bloco_prioridade(df: pd.DataFrame, escopo: str = ""):
         ],
     }
     st_echarts(opt, height="420px", key=f"ee_pareto_{escopo}")
+
+# endregion
+
+
+# region ====================== SESSÃO 3B: BLOCO 1B — Obras × Manutenção =======
+# Pedido do Julio (16/07/2026): a malha está em obras de remodelação — falha
+# originada de Obras pede estratégia de bloqueio diferente (comissionamento/
+# padrão de entrega) de falha de Manutenção tradicional (RCA/plano). Achado
+# nos dados reais: "Descrição da Origem da Atividade" já tem o valor
+# "PROJETOS E OBRAS" isolado — não precisou inventar heurística nenhuma, só
+# ler o que já existe (ver core.parser_rasf.classificar_origem_atividade).
+
+_CORES_ORIGEM_CATEGORIA = {
+    "Obras": "#7c3aed",
+    "Manutenção": COR_PRIMARIA,
+    "Não classificado": COR_WARN,
+    "Não informado": "#9ca3af",
+}
+
+
+def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 🏗️ Obras × Manutenção — como atacar")
+    st.caption(
+        "Classificação automática de 'Descrição da Origem da Atividade' "
+        "(regra: contém \"OBRA\" → **Obras**, contém \"MANUTEN\" → "
+        "**Manutenção**, resto → **Não classificado**). Falha de **Obras** "
+        "geralmente pede bloqueio na frente de trabalho (padrão de "
+        "comissionamento/entrega); falha de **Manutenção** pede RCA/plano "
+        "de manutenção tradicional — duas estratégias diferentes. "
+        "Categorização é ajustável sem deploy (`configuracoes`, chave "
+        "`rasf_origem_categoria_overrides`) — expanda abaixo pra ver o "
+        "detalhe e sugerir ajustes."
+    )
+
+    if "origem_categoria" not in df.columns:
+        st.info("Coluna de origem da atividade indisponível.")
+        return
+
+    g = (
+        df.groupby("origem_categoria")
+          .agg(
+              falhas=("origem_categoria", "size"),
+              thp_h=("thp_h", "sum"),
+              reincidencias=("reincidencia_ativo", "sum"),
+              backlog=("lacuna_rca", "sum"),
+          )
+          .reset_index()
+          .sort_values("falhas", ascending=False)
+    )
+    if g.empty:
+        st.info("Sem dados de origem no escopo atual.")
+        return
+
+    total = int(g["falhas"].sum())
+
+    cols = st.columns(len(g))
+    for col, (_, r) in zip(cols, g.iterrows()):
+        cat = str(r["origem_categoria"])
+        pct = 100 * r["falhas"] / total if total else 0
+        _kpi(
+            col, cat, f"{int(r['falhas']):,}".replace(",", "."),
+            _CORES_ORIGEM_CATEGORIA.get(cat, COR_PRIMARIA),
+            sub=f"{pct:.0f}% · {int(r['reincidencias'])} reincid. · {int(r['backlog'])} sem 6M",
+        )
+
+    if not ECHARTS_OK:
+        st.dataframe(g, use_container_width=True, hide_index=True)
+        return
+
+    categorias = g["origem_categoria"].astype(str).tolist()
+    falhas     = [int(v) for v in g["falhas"]]
+    thp        = [round(float(v), 1) for v in g["thp_h"]]
+    cores      = [_CORES_ORIGEM_CATEGORIA.get(c, COR_PRIMARIA) for c in categorias]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis", "axisPointer": {"type": "shadow"},
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
+            "textStyle": {"color": "#1f2937"},
+        },
+        "legend": {
+            "data": ["Falhas", "THP (h)"], "top": 0,
+            "textStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+        },
+        "grid": {"left": "3%", "right": "6%", "top": "18%", "bottom": "10%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": categorias,
+            "axisLabel": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+        },
+        "yAxis": [
+            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151"},
+             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+            {"type": "value", "name": "THP (h)", "position": "right",
+             "axisLabel": {"color": COR_THP}, "splitLine": {"show": False}},
+        ],
+        "series": [
+            {"name": "Falhas", "type": "bar",
+             "data": [{"value": v, "itemStyle": {"color": cores[i]}} for i, v in enumerate(falhas)],
+             "label": {"show": True, "position": "top", "color": "#1f2937", "fontWeight": "bold"},
+             "barWidth": "40%"},
+            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
+             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
+             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
+        ],
+    }
+    st_echarts(opt, height="360px", key=f"ee_obras_manut_{escopo}")
+
+    with st.expander("🔎 Ver quais valores de 'Origem da Atividade' caem em cada categoria"):
+        tab = (
+            df.groupby(["origem_categoria", "desc_origem_atividade"])
+              .size().reset_index(name="qtd")
+              .sort_values(["origem_categoria", "qtd"], ascending=[True, False])
+        )
+        st.dataframe(
+            tab.rename(columns={
+                "origem_categoria": "Categoria",
+                "desc_origem_atividade": "Origem da Atividade (RASF)",
+                "qtd": "Qtd falhas",
+            }),
+            use_container_width=True, hide_index=True,
+        )
 
 # endregion
 
@@ -891,6 +1054,8 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     st.markdown("---")
 
     _bloco_prioridade(df, escopo)
+    st.markdown("---")
+    _bloco_obras_manutencao(df, escopo)
     st.markdown("---")
     _bloco_reincidencia(df, escopo)
     st.markdown("---")

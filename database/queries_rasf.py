@@ -135,3 +135,33 @@ def carregar_gatilhos_analise() -> set[str]:
     except Exception:
         pass
     return set(GATILHOS_ANALISE_PADRAO)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_overrides_origem_categoria() -> dict[str, str]:
+    """
+    Lê de `configuracoes` (chave='rasf_origem_categoria_overrides') o mapa
+    de reclassificação exata Obras/Manutenção para valores de "Descrição
+    da Origem da Atividade" que a regra automática de substring (ver
+    core.parser_rasf.classificar_origem_atividade) não classifica bem
+    (ex.: "MECÂNICA", "TRILHO OXIDADO").
+
+    Falha graciosa: sem config ou erro de conexão, retorna {} (só a regra
+    automática se aplica).
+    """
+    try:
+        supabase = get_supabase()
+        resp = (
+            supabase.table("configuracoes")
+            .select("valor")
+            .is_("gerencia", "null")
+            .eq("chave", "rasf_origem_categoria_overrides")
+            .execute()
+        )
+        if resp.data:
+            valor = resp.data[0]["valor"]
+            if isinstance(valor, dict):
+                return {str(k): str(v) for k, v in valor.items()}
+    except Exception:
+        pass
+    return {}

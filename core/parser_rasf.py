@@ -105,6 +105,45 @@ MAPA_GERENCIA: dict[str, str] = {
 # que lê de `configuracoes` e cai neste padrão se não houver override).
 GATILHOS_ANALISE_PADRAO = {"Falha THP", "Falha Segurança", "Defeito THP"}
 
+# Categorização Obras × Manutenção a partir de "Descrição da Origem da
+# Atividade" — pedido do Julio (10/07/2026): a malha está em obras de
+# remodelação, então falha originada de Obras pede estratégia de bloqueio
+# diferente (padrão de comissionamento/entrega) de falha originada de
+# Manutenção tradicional (RCA/plano de manutenção).
+#
+# Regra por SUBSTRING (não lista fechada) — generaliza sozinha a valores
+# novos que apareçam em exports futuros, sem precisar de deploy:
+#   contém "OBRA"     → "Obras"
+#   contém "MANUTEN"   → "Manutenção"
+#   NaN/vazio          → "Não informado"
+#   qualquer outro     → "Não classificado" (ex.: Vandalismo, TI, Acidente,
+#                         Ação de Terceiros — causas externas/operacionais,
+#                         não é nem Obras nem Manutenção MRS)
+#
+# Casos ambíguos que a regra de substring não pega bem (ex.: "MECÂNICA",
+# "TRILHO OXIDADO") ficam em "Não classificado" por padrão — dá pra
+# refinar via overrides exatos em `configuracoes`
+# (chave='rasf_origem_categoria_overrides', ver database.queries_rasf).
+def classificar_origem_atividade(valor, overrides: dict[str, str] | None = None) -> str:
+    """Classifica 'Descrição da Origem da Atividade' em Obras/Manutenção/
+    Não classificado/Não informado. Overrides exatos (case-insensitive)
+    têm prioridade sobre a regra de substring."""
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return "Não informado"
+    v = str(valor).strip()
+    if not v or v == "-":
+        return "Não informado"
+    if overrides:
+        for chave, categoria in overrides.items():
+            if str(chave).strip().upper() == v.upper():
+                return categoria
+    vu = v.upper()
+    if "OBRA" in vu:
+        return "Obras"
+    if "MANUTEN" in vu:
+        return "Manutenção"
+    return "Não classificado"
+
 # 6M Nível 1 preenchido válido (exclui vazios e "sem análise")
 _M6_NAO_PREENCHIDO = {None, "", "-", "nan"}
 
@@ -165,6 +204,7 @@ def _consolidar_6m(row: pd.Series) -> str | None:
 def processar_rasf(
     df_raw: pd.DataFrame,
     gatilhos_analise: set[str] | None = None,
+    overrides_origem: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """
     Recebe o DataFrame bruto do export RASF (aba 'Export') e devolve um
@@ -182,6 +222,8 @@ def processar_rasf(
         mesmo que "validado" pelo fluxo formal do procedimento, que este
         export não carrega)
       - lacuna_rca        : bool (é gatilho MAS sem classificação) -> backlog
+      - origem_categoria  : "Obras" | "Manutenção" | "Não classificado" |
+        "Não informado" — ver classificar_origem_atividade()
 
     Args:
         gatilhos_analise: conjunto de valores de "(Eng) Gatilho" que
@@ -190,6 +232,10 @@ def processar_rasf(
             `configuracoes` (via database.queries_rasf) para refletir
             mudanças de regra sem precisar deploy — o PG-ENG-0088 prevê
             que essa regra muda por ciclo de metas.
+        overrides_origem: mapa exato {valor_origem: categoria} que tem
+            prioridade sobre a regra automática de substring em
+            classificar_origem_atividade(). Vem de `configuracoes`
+            (chave='rasf_origem_categoria_overrides').
     """
     if df_raw is None or df_raw.empty:
         return pd.DataFrame()
@@ -245,6 +291,14 @@ def processar_rasf(
     else:
         df["gatilho_analise"] = False
 
+    # Categoria Obras × Manutenção (a partir de "Descrição da Origem da Atividade")
+    if "desc_origem_atividade" in df.columns:
+        df["origem_categoria"] = df["desc_origem_atividade"].apply(
+            lambda v: classificar_origem_atividade(v, overrides_origem)
+        )
+    else:
+        df["origem_categoria"] = "Não informado"
+
     # 6M consolidado + preenchimento de causa raiz
     df["m6_nivel1"] = df.apply(_consolidar_6m, axis=1)
     tem_6m = df["m6_nivel1"].apply(lambda v: pd.notna(v) and str(v).strip() != "")
@@ -268,13 +322,16 @@ def carregar_rasf_xlsx(
     fonte,
     sheet_name: str = "Export",
     gatilhos_analise: set[str] | None = None,
+    overrides_origem: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """
     Lê o arquivo/buffer xlsx do RASF e devolve o DataFrame canônico.
     Aceita caminho (str), file-like (upload do Streamlit) ou BytesIO.
     """
     df_raw = pd.read_excel(fonte, sheet_name=sheet_name, engine="openpyxl")
-    return processar_rasf(df_raw, gatilhos_analise=gatilhos_analise)
+    return processar_rasf(
+        df_raw, gatilhos_analise=gatilhos_analise, overrides_origem=overrides_origem,
+    )
 
 # endregion
 
@@ -296,6 +353,7 @@ COLUNAS_RASF_EE = [
     "m6n1_mf", "m6n1_eng", "m6_nivel1", "arvore_falhas_mf",
     "componente_causador", "rca_preenchida", "lacuna_rca",
     "pendente", "disposicoes_reuniao", "responsavel", "item_sac",
+    "origem_categoria",
 ]
 
 

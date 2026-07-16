@@ -73,8 +73,16 @@ CREATE TABLE IF NOT EXISTS rasf_ee (
     responsavel             VARCHAR,
     item_sac                VARCHAR,
 
+    -- Categorização Obras × Manutenção (a partir de "Descrição da Origem
+    -- da Atividade") — ver core.parser_rasf.classificar_origem_atividade()
+    origem_categoria         VARCHAR,
+
     criado_em               TIMESTAMP DEFAULT NOW()
 );
+
+-- Coluna nova em tabela já existente (upgrade idempotente — CREATE TABLE
+-- IF NOT EXISTS acima não altera tabelas já criadas antes desta revisão).
+ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS origem_categoria VARCHAR;
 
 -- Índices para os filtros mais comuns da aba de inteligência
 CREATE INDEX IF NOT EXISTS idx_rasf_gerencia       ON rasf_ee(gerencia);
@@ -85,10 +93,12 @@ CREATE INDEX IF NOT EXISTS idx_rasf_sintoma        ON rasf_ee(anomalia_sintoma);
 CREATE INDEX IF NOT EXISTS idx_rasf_patio          ON rasf_ee(local_patio);
 CREATE INDEX IF NOT EXISTS idx_rasf_lacuna         ON rasf_ee(lacuna_rca);
 CREATE INDEX IF NOT EXISTS idx_rasf_reincid        ON rasf_ee(reincidencia_ativo);
+CREATE INDEX IF NOT EXISTS idx_rasf_origem_cat     ON rasf_ee(origem_categoria);
 
 COMMENT ON TABLE  rasf_ee IS 'Export RASF (Reunião de Análise Sistêmica de Falha) de Eletroeletrônica — camada RCA do PG-ENG-0088. Sprint 6.';
 COMMENT ON COLUMN rasf_ee.lacuna_rca IS 'TRUE quando a nota é Gatilho de Análise mas ainda não tem causa raiz (6M/Componente) — alimenta o Backlog RCA.';
 COMMENT ON COLUMN rasf_ee.thp_min IS 'Tempo de Trem Hora Parado (min) — usado para priorização por impacto operacional.';
+COMMENT ON COLUMN rasf_ee.origem_categoria IS 'Obras | Manutenção | Não classificado | Não informado — derivado de desc_origem_atividade, regra por substring + overrides configuráveis.';
 
 -- ============================================================
 -- RLS: desligado, mesmo modelo do resto do projeto
@@ -126,4 +136,20 @@ ALTER TABLE uploads_historico ADD CONSTRAINT uploads_historico_disciplina_check
 INSERT INTO configuracoes (gerencia, chave, valor)
 VALUES
     (NULL, 'rasf_gatilhos_analise', '["Falha THP", "Falha Segurança", "Defeito THP"]')
+ON CONFLICT (gerencia, chave) DO NOTHING;
+
+-- ============================================================
+-- CONFIGURAÇÃO: Overrides de Categoria Obras × Manutenção
+-- ============================================================
+-- classificar_origem_atividade() já classifica automaticamente por
+-- substring ("OBRA"→Obras, "MANUTEN"→Manutenção). Valores ambíguos (ex.:
+-- "MECÂNICA", "TRILHO OXIDADO", "VIA PERMANENTE") caem em
+-- "Não classificado" por padrão. Use este override pra reclassificar
+-- valores específicos sem precisar de deploy — edite o JSON abaixo direto
+-- no Supabase. Formato: {"valor exato do RASF": "categoria desejada"}.
+-- Categorias sugeridas: "Obras", "Manutenção" (ou crie outras livremente,
+-- a UI só agrupa pelo que vier aqui).
+INSERT INTO configuracoes (gerencia, chave, valor)
+VALUES
+    (NULL, 'rasf_origem_categoria_overrides', '{}')
 ON CONFLICT (gerencia, chave) DO NOTHING;
