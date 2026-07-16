@@ -320,7 +320,21 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
                      "Pendente = campo em branco (reunião ainda não decidiu).",
             )
         with col_b:
-            patio_sel = _multiselect_coluna(df, "local_patio", "Pátio", escopo)
+            centro_sel = _multiselect_coluna(
+                df, "centro_trab", "Coordenação (Centro de Trabalho)", escopo,
+                help="Filtra por centro de coordenação regional (ex.: CIPA, CIPG, "
+                     "CIJN, CFAN...) — escolha aqui primeiro pra encurtar a lista "
+                     "de Pátio logo abaixo.",
+            )
+            # Cascata: as opções de Pátio já vêm restritas à Coordenação
+            # escolhida acima — mesmo padrão de components/filtros.py
+            # (Centro de Trabalho → Ramal).
+            df_para_patio = (
+                df[df["centro_trab"].isin(centro_sel)]
+                if centro_sel is not None and "centro_trab" in df.columns
+                else df
+            )
+            patio_sel = _multiselect_coluna(df_para_patio, "local_patio", "Pátio", escopo)
             grupo_sel = _multiselect_coluna(df, "grupo_ativo", "Grupo do Ativo", escopo)
 
     d = df.copy()
@@ -336,6 +350,8 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
             d = d[d["gerador_thp"]]
         elif gerador_thp_opt == "Só sem THP":
             d = d[~d["gerador_thp"]]
+    if centro_sel is not None and "centro_trab" in d.columns:
+        d = d[d["centro_trab"].isin(centro_sel)]
     if patio_sel is not None and "local_patio" in d.columns:
         d = d[d["local_patio"].isin(patio_sel)]
     if tipo_sel is not None and "desc_tipo_solicitacao" in d.columns:

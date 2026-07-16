@@ -197,14 +197,21 @@ def origem_efetiva(desc_origem_atividade, origem_atividade_correta):
 # (consenso fechado); Não: pode caber revisão; em branco: ainda Pendente
 # (reunião não discutiu/decidiu esse item).
 def status_consenso_origem(valor) -> str:
-    """Classifica o status de consenso em 'Consenso' | 'Em revisão' | 'Pendente'."""
+    """
+    Classifica o status de consenso em 'Consenso' | 'Em revisão' | 'Pendente'.
+
+    Usa startswith (não igualdade exata) porque o RASF às vezes traz o valor
+    com complemento (ex.: 'Sim - Fechado', 'Não - aguardando validação') —
+    mesmo padrão já usado pelo campo 'Pendente?' do RASF (ver 'pendente' em
+    processar_rasf()), que também é um 'SIM'/'NÃO' com sufixo variável.
+    """
     v = _texto_valido(valor)
     if not v:
         return "Pendente"
     vu = v.upper()
-    if vu in {"SIM", "S", "TRUE", "1", "YES"}:
+    if vu.startswith("SIM") or vu in {"S", "TRUE", "1", "YES", "X"}:
         return "Consenso"
-    if vu in {"NÃO", "NAO", "N", "FALSE", "0", "NO"}:
+    if vu.startswith(("NÃO", "NAO")) or vu in {"N", "FALSE", "0", "NO"}:
         return "Em revisão"
     return "Pendente"
 
