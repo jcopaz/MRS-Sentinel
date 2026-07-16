@@ -33,7 +33,11 @@ CREATE TABLE IF NOT EXISTS rasf_ee (
     grupo_ativo             VARCHAR,
     sistema                 VARCHAR,                   -- SINALIZAÇÃO, ENERGIA, TELECOM...
     anomalia_sintoma        VARCHAR,                   -- Sintoma (Pareto)
-    desc_origem_atividade   VARCHAR,
+    desc_origem_atividade   VARCHAR,                   -- Origem bruta (coluna P) — referência de causa raiz
+    origem_atividade_correta VARCHAR,                  -- Correção feita em reunião (coluna AW), quando houver
+    origem_atividade_efetiva VARCHAR,                  -- desc_origem_atividade OU origem_atividade_correta, ver origem_efetiva()
+    consenso_origem         VARCHAR,                   -- Sim/Não/vazio bruto (coluna AV)
+    consenso_origem_status  VARCHAR,                   -- Consenso | Em revisão | Pendente — ver status_consenso_origem()
     texto_longo             TEXT,
 
     -- Reincidência (pré-calculada no RASF)
@@ -83,6 +87,10 @@ CREATE TABLE IF NOT EXISTS rasf_ee (
 -- Coluna nova em tabela já existente (upgrade idempotente — CREATE TABLE
 -- IF NOT EXISTS acima não altera tabelas já criadas antes desta revisão).
 ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS origem_categoria VARCHAR;
+ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS origem_atividade_correta VARCHAR;
+ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS origem_atividade_efetiva VARCHAR;
+ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS consenso_origem VARCHAR;
+ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS consenso_origem_status VARCHAR;
 
 -- Índices para os filtros mais comuns da aba de inteligência
 CREATE INDEX IF NOT EXISTS idx_rasf_gerencia       ON rasf_ee(gerencia);
@@ -94,11 +102,15 @@ CREATE INDEX IF NOT EXISTS idx_rasf_patio          ON rasf_ee(local_patio);
 CREATE INDEX IF NOT EXISTS idx_rasf_lacuna         ON rasf_ee(lacuna_rca);
 CREATE INDEX IF NOT EXISTS idx_rasf_reincid        ON rasf_ee(reincidencia_ativo);
 CREATE INDEX IF NOT EXISTS idx_rasf_origem_cat     ON rasf_ee(origem_categoria);
+CREATE INDEX IF NOT EXISTS idx_rasf_origem_efetiva ON rasf_ee(origem_atividade_efetiva);
+CREATE INDEX IF NOT EXISTS idx_rasf_consenso       ON rasf_ee(consenso_origem_status);
 
 COMMENT ON TABLE  rasf_ee IS 'Export RASF (Reunião de Análise Sistêmica de Falha) de Eletroeletrônica — camada RCA do PG-ENG-0088. Sprint 6.';
 COMMENT ON COLUMN rasf_ee.lacuna_rca IS 'TRUE quando a nota é Gatilho de Análise mas ainda não tem causa raiz (6M/Componente) — alimenta o Backlog RCA.';
 COMMENT ON COLUMN rasf_ee.thp_min IS 'Tempo de Trem Hora Parado (min) — usado para priorização por impacto operacional.';
-COMMENT ON COLUMN rasf_ee.origem_categoria IS 'Obras | Manutenção | Não classificado | Não informado — derivado de desc_origem_atividade, regra por substring + overrides configuráveis.';
+COMMENT ON COLUMN rasf_ee.origem_categoria IS 'Obras | Manutenção | Não classificado | Não informado — derivado de origem_atividade_efetiva, regra por substring + overrides configuráveis.';
+COMMENT ON COLUMN rasf_ee.origem_atividade_efetiva IS 'Referência de causa raiz/responsabilidade — desc_origem_atividade, MAS sobreposta por origem_atividade_correta quando esta foi preenchida em reunião com valor diferente (responsabilidade corrigida). Ver core.parser_rasf.origem_efetiva().';
+COMMENT ON COLUMN rasf_ee.consenso_origem_status IS 'Consenso (Sim — processo encerrado) | Em revisão (Não — pode caber revisão) | Pendente (em branco — reunião ainda não decidiu). Ver core.parser_rasf.status_consenso_origem().';
 
 -- ============================================================
 -- RLS: desligado, mesmo modelo do resto do projeto

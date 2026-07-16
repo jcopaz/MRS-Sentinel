@@ -169,6 +169,46 @@ def _sim_nao(valor) -> bool:
     return str(valor).strip().casefold() in {"sim", "s", "x", "true", "1", "yes"}
 
 
+def _texto_valido(v) -> str:
+    """Normaliza pra string vazia quando NaN/None/'-' — usado nas regras de
+    origem efetiva/consenso abaixo (evita 'nan' virando texto de verdade)."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    v = str(v).strip()
+    return "" if v in {"-", "nan"} else v
+
+
+# Regra de causa raiz/responsabilidade do RASF — pedido do Julio (16/07/2026):
+# "Descrição da Origem da Atividade" (coluna P) é a REFERÊNCIA de causa raiz/
+# responsabilidade. Mas se "Origem de Atividade Correta" (coluna AW) foi
+# preenchida em reunião com um valor DIFERENTE de P, a responsabilidade foi
+# corrigida — ela prevalece. Se P == correta (ou correta vazia), P já está
+# certo, mantém P.
+def origem_efetiva(desc_origem_atividade, origem_atividade_correta):
+    """Aplica a regra acima e devolve o valor efetivo de origem/responsabilidade."""
+    p = _texto_valido(desc_origem_atividade)
+    correta = _texto_valido(origem_atividade_correta)
+    if correta and correta.upper() != p.upper():
+        return origem_atividade_correta  # preserva a grafia original da correção
+    return desc_origem_atividade
+
+
+# "Consenso Origem de Atividade?" (coluna AV) — Sim: processo encerrado
+# (consenso fechado); Não: pode caber revisão; em branco: ainda Pendente
+# (reunião não discutiu/decidiu esse item).
+def status_consenso_origem(valor) -> str:
+    """Classifica o status de consenso em 'Consenso' | 'Em revisão' | 'Pendente'."""
+    v = _texto_valido(valor)
+    if not v:
+        return "Pendente"
+    vu = v.upper()
+    if vu in {"SIM", "S", "TRUE", "1", "YES"}:
+        return "Consenso"
+    if vu in {"NÃO", "NAO", "N", "FALSE", "0", "NO"}:
+        return "Em revisão"
+    return "Pendente"
+
+
 def _mapear_gerencia(valor) -> str | None:
     """GEE.SP -> SP, GEE.VP -> VP. Desconhecido/None -> None."""
     if valor is None:
@@ -292,9 +332,27 @@ def processar_rasf(
     else:
         df["gatilho_analise"] = False
 
-    # Categoria Obras × Manutenção (a partir de "Descrição da Origem da Atividade")
+    # Origem efetiva de responsabilidade — "Descrição da Origem da Atividade"
+    # é a referência, mas "Origem de Atividade Correta" sobrepõe quando a
+    # responsabilidade foi corrigida em reunião (ver origem_efetiva() acima).
     if "desc_origem_atividade" in df.columns:
-        df["origem_categoria"] = df["desc_origem_atividade"].apply(
+        df["origem_atividade_efetiva"] = df.apply(
+            lambda r: origem_efetiva(
+                r.get("desc_origem_atividade"), r.get("origem_atividade_correta")
+            ),
+            axis=1,
+        )
+    else:
+        df["origem_atividade_efetiva"] = None
+
+    # Status de consenso da origem (Sim=Consenso, Não=Em revisão, vazio=Pendente)
+    df["consenso_origem_status"] = df.get("consenso_origem").apply(status_consenso_origem) \
+        if "consenso_origem" in df.columns else "Pendente"
+
+    # Categoria Obras × Manutenção — a partir da origem EFETIVA (não da bruta),
+    # já que é ela que reflete a responsabilidade real após a reunião do RASF.
+    if "origem_atividade_efetiva" in df.columns:
+        df["origem_categoria"] = df["origem_atividade_efetiva"].apply(
             lambda v: classificar_origem_atividade(v, overrides_origem)
         )
     else:
@@ -345,7 +403,8 @@ COLUNAS_RASF_EE = [
     "gerencia", "disciplina", "centro_trab", "local_patio",
     "desc_tipo_solicitacao", "local_instalacao", "local_instalacao_desc",
     "num_equipamento", "grupo_ativo", "sistema", "anomalia_sintoma",
-    "desc_origem_atividade", "texto_longo",
+    "desc_origem_atividade", "origem_atividade_correta", "origem_atividade_efetiva",
+    "consenso_origem", "consenso_origem_status", "texto_longo",
     "ultima_data_ativo", "dias_ultima_falha_ativo", "reincidencia_ativo",
     "ultima_data_sintoma", "dias_ultima_falha_sintoma", "reincidencia_sintoma",
     "gerador_thp", "thp_min", "thp_num_eventos", "thp_min_133",

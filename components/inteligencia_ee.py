@@ -27,7 +27,15 @@
 #
 # Filtros (essenciais): Sistema, Reincidência, Gerador THP (coluna Z do
 #   RASF — marcada com "X"), Período (Data da nota), Descrição Tipo
-#   Solicitação, Descrição da Origem da Atividade, Pátio, Grupo do Ativo.
+#   Solicitação, Origem da Atividade (efetiva), Consenso Origem de
+#   Atividade, Pátio, Grupo do Ativo.
+#
+# Regra de causa raiz/responsabilidade (Julio, 16/07/2026): "Descrição da
+# Origem da Atividade" é a referência, MAS "Origem de Atividade Correta"
+# sobrepõe quando preenchida em reunião com valor diferente (responsabilidade
+# corrigida). Ver core.parser_rasf.origem_efetiva() e _preparar_origem()
+# abaixo — toda classificação/ranking/heatmap por origem usa o resultado
+# disso ('origem_efetiva'), nunca a coluna bruta.
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
@@ -58,6 +66,18 @@ except Exception:
 
     def ativo_curto(s):
         return str(s or "")
+
+try:
+    from core.parser_rasf import origem_efetiva as _calc_origem_efetiva, status_consenso_origem
+    PARSER_OK = True
+except Exception:
+    PARSER_OK = False
+
+    def _calc_origem_efetiva(desc_origem, correta):  # fallback defensivo
+        return desc_origem
+
+    def status_consenso_origem(_):
+        return "Pendente"
 
 COR_PRIMARIA = "#1e3a5f"
 COR_GOLD     = "#ffb000"
@@ -148,6 +168,46 @@ def _fmt_h(v) -> str:
     except Exception:
         return "0 h"
 
+
+def _preparar_origem(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aplica a regra de causa raiz/responsabilidade do RASF (Julio, 16/07/2026):
+    'Descrição da Origem da Atividade' é a referência, mas 'Origem de
+    Atividade Correta' sobrepõe quando foi preenchida em reunião com valor
+    diferente (responsabilidade corrigida). Resultado vai em 'origem_efetiva'
+    — TODA classificação/ranking/heatmap por origem deve usar essa coluna,
+    não a bruta.
+
+    Roda ANTES de _render_filtros() (sessão 2B) — o filtro de origem já
+    precisa dessa coluna calculada. Recalcula sempre client-side (em vez de
+    só confiar na coluna já persistida pelo parser) pra funcionar mesmo com
+    bases antigas, subidas antes desta regra existir.
+
+    Também deriva 'consenso_origem_status' (Consenso/Em revisão/Pendente) a
+    partir do bruto 'consenso_origem', com fallback 'Pendente' se a coluna
+    não existir (base antiga).
+    """
+    if df.empty:
+        return df
+    d = df.copy()
+
+    if "origem_atividade_correta" in d.columns and "desc_origem_atividade" in d.columns:
+        d["origem_efetiva"] = [
+            _calc_origem_efetiva(p, c)
+            for p, c in zip(d["desc_origem_atividade"], d["origem_atividade_correta"])
+        ]
+    else:
+        d["origem_efetiva"] = d.get("desc_origem_atividade")
+
+    if "consenso_origem" in d.columns:
+        d["consenso_origem_status"] = d["consenso_origem"].apply(status_consenso_origem)
+    elif "consenso_origem_status" in d.columns:
+        d["consenso_origem_status"] = d["consenso_origem_status"].fillna("Pendente")
+    else:
+        d["consenso_origem_status"] = "Pendente"
+
+    return d
+
 # endregion
 
 
@@ -181,8 +241,13 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
     """
     Filtros da aba — recorte pedido pelo Julio (16/07/2026): Sistema,
     Reincidência, Gerador THP, Período sempre visíveis; Descrição Tipo
-    Solicitação, Descrição da Origem da Atividade, Pátio e Grupo do Ativo
-    num expander pra não poluir o topo da tela.
+    Solicitação, Origem da Atividade (efetiva — já com a correção de
+    responsabilidade aplicada), Consenso, Pátio e Grupo do Ativo num
+    expander pra não poluir o topo da tela.
+
+    Recebe o df já passado por _preparar_origem() (chamada no início de
+    render_inteligencia_ee) — precisa das colunas 'origem_efetiva' e
+    'consenso_origem_status' calculadas ANTES de filtrar.
 
     Aplicados sobre o df ANTES de _enriquecer() — assim o score_ee e todas as
     agregações dos blocos já refletem só o recorte filtrado. Mesmo padrão
@@ -226,11 +291,22 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
             key=f"ee_filtro_periodo_{escopo}",
         )
 
-    with st.expander("🔎 Mais filtros — Tipo Solicitação, Origem da Atividade, Pátio, Grupo do Ativo"):
+    with st.expander("🔎 Mais filtros — Tipo Solicitação, Origem da Atividade, Consenso, Pátio, Grupo do Ativo"):
         col_a, col_b = st.columns(2)
         with col_a:
             tipo_sel = _multiselect_coluna(df, "desc_tipo_solicitacao", "Descrição Tipo Solicitação", escopo)
-            origem_sel = _multiselect_coluna(df, "desc_origem_atividade", "Descrição da Origem da Atividade", escopo)
+            origem_sel = _multiselect_coluna(
+                df, "origem_efetiva", "Origem da Atividade (efetiva)", escopo,
+                help="Já com a correção aplicada: usa 'Origem de Atividade Correta' "
+                     "quando ela diverge de 'Descrição da Origem da Atividade' — "
+                     "é a referência de causa raiz/responsabilidade após a reunião do RASF.",
+            )
+            consenso_sel = _multiselect_coluna(
+                df, "consenso_origem_status", "Consenso Origem de Atividade", escopo,
+                help="Consenso = 'Sim' no RASF (processo encerrado) · "
+                     "Em revisão = 'Não' (pode caber revisão) · "
+                     "Pendente = campo em branco (reunião ainda não decidiu).",
+            )
         with col_b:
             patio_sel = _multiselect_coluna(df, "local_patio", "Pátio", escopo)
             grupo_sel = _multiselect_coluna(df, "grupo_ativo", "Grupo do Ativo", escopo)
@@ -252,8 +328,10 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
         d = d[d["local_patio"].isin(patio_sel)]
     if tipo_sel is not None and "desc_tipo_solicitacao" in d.columns:
         d = d[d["desc_tipo_solicitacao"].isin(tipo_sel)]
-    if origem_sel is not None and "desc_origem_atividade" in d.columns:
-        d = d[d["desc_origem_atividade"].isin(origem_sel)]
+    if origem_sel is not None and "origem_efetiva" in d.columns:
+        d = d[d["origem_efetiva"].isin(origem_sel)]
+    if consenso_sel is not None and "consenso_origem_status" in d.columns:
+        d = d[d["consenso_origem_status"].isin(consenso_sel)]
     if grupo_sel is not None and "grupo_ativo" in d.columns:
         d = d[d["grupo_ativo"].isin(grupo_sel)]
     if "data_nota" in d.columns and isinstance(periodo, (tuple, list)) and len(periodo) == 2:
@@ -335,9 +413,10 @@ def _bloco_cards_resumo(df: pd.DataFrame, escopo: str = ""):
     else:
         _kpi(c4, "Sintoma mais crítico (THP)", "—", COR_CRIT)
 
-    # 5) Origem de atividade mais frequente
-    if "desc_origem_atividade" in df.columns:
-        grp_origem = df["desc_origem_atividade"].value_counts()
+    # 5) Origem de atividade mais frequente (efetiva — já com a correção de
+    # responsabilidade aplicada, ver _preparar_origem)
+    if "origem_efetiva" in df.columns:
+        grp_origem = df["origem_efetiva"].value_counts()
         if not grp_origem.empty:
             origem_top = grp_origem.idxmax()
             qtd_origem_top = int(grp_origem.max())
@@ -446,21 +525,23 @@ _TOP_ORIGENS_ATIVIDADE = 15
 def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🏗️ Obras × Manutenção — como atacar")
     st.caption(
-        "Quantidade de falhas e THP por 'Descrição da Origem da Atividade' "
-        "(RASF) — cada origem pede uma estratégia diferente: falha originada "
-        "de obra costuma pedir bloqueio na frente de trabalho (padrão de "
-        "comissionamento/entrega); falha de manutenção tradicional pede "
-        "RCA/plano de manutenção."
+        "Quantidade de falhas e THP por Origem da Atividade **efetiva** "
+        "(RASF) — 'Descrição da Origem da Atividade' é a referência, mas "
+        "sobreposta por 'Origem de Atividade Correta' quando a "
+        "responsabilidade foi corrigida em reunião. Cada origem pede uma "
+        "estratégia diferente: falha originada de obra costuma pedir "
+        "bloqueio na frente de trabalho (padrão de comissionamento/entrega); "
+        "falha de manutenção tradicional pede RCA/plano de manutenção."
     )
 
-    if "desc_origem_atividade" not in df.columns:
+    if "origem_efetiva" not in df.columns:
         st.info("Coluna de origem da atividade indisponível.")
         return
 
     g = (
-        df.groupby("desc_origem_atividade")
+        df.groupby("origem_efetiva")
           .agg(
-              falhas=("desc_origem_atividade", "size"),
+              falhas=("origem_efetiva", "size"),
               thp_h=("thp_h", "sum"),
               reincidencias=("reincidencia_ativo", "sum"),
               backlog=("lacuna_rca", "sum"),
@@ -479,7 +560,7 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
     c1, c2, c3 = st.columns(3)
     _kpi(c1, "Falhas no recorte", _fmt_int(total), COR_PRIMARIA)
     _kpi(c2, "Trem parado (THP)", _fmt_h(g["thp_h"].sum()), COR_THP)
-    _kpi(c3, "Origem principal", str(top1["desc_origem_atividade"])[:28],
+    _kpi(c3, "Origem principal", str(top1["origem_efetiva"])[:28],
          COR_CRIT, sub=f"{_fmt_int(top1['falhas'])} falhas · {pct_top1:.0f}% do total")
 
     g_chart = g.head(_TOP_ORIGENS_ATIVIDADE)
@@ -488,7 +569,7 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
         st.dataframe(g, use_container_width=True, hide_index=True)
         return
 
-    rotulos = g_chart["desc_origem_atividade"].astype(str).str.slice(0, 32).tolist()
+    rotulos = g_chart["origem_efetiva"].astype(str).str.slice(0, 32).tolist()
     falhas  = [int(v) for v in g_chart["falhas"]]
     thp     = [round(float(v), 1) for v in g_chart["thp_h"]]
 
@@ -533,7 +614,7 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
 
     with st.expander("🔎 Ver tabela completa por Origem da Atividade"):
         tab = g.rename(columns={
-            "desc_origem_atividade": "Origem da Atividade (RASF)",
+            "origem_efetiva": "Origem da Atividade (efetiva)",
             "falhas": "Falhas",
             "thp_h": "THP (h)",
             "reincidencias": "Reincid. 90d",
@@ -553,30 +634,30 @@ _TOP_ORIGENS_HEATMAP = 12  # linhas do heatmap (eixo Y) — evita poluir com ori
 def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🔥 Mapa de Calor — Pátio × Origem da Atividade")
     st.caption(
-        "Cruza Pátio (eixo X) × Descrição da Origem da Atividade (eixo Y) — "
-        "a cor e o número em cada célula mostram a quantidade de falhas "
-        "daquela combinação. Ajuda a achar não só ONDE, mas O QUE está "
-        "acontecendo em cada pátio."
+        "Cruza Pátio (eixo X) × Origem da Atividade efetiva (eixo Y — já com "
+        "a correção de responsabilidade aplicada) — a cor e o número em cada "
+        "célula mostram a quantidade de falhas daquela combinação. Ajuda a "
+        "achar não só ONDE, mas O QUE está acontecendo em cada pátio."
     )
 
-    if "patio" not in df.columns or "desc_origem_atividade" not in df.columns:
+    if "patio" not in df.columns or "origem_efetiva" not in df.columns:
         st.info("Colunas de pátio/origem da atividade indisponíveis.")
         return
 
-    d = df.dropna(subset=["patio", "desc_origem_atividade"]).copy()
+    d = df.dropna(subset=["patio", "origem_efetiva"]).copy()
     if d.empty:
         st.info("Sem dados de pátio/origem no escopo atual.")
         return
 
     patios = sorted(d["patio"].unique())
-    top_origens = d["desc_origem_atividade"].value_counts().head(_TOP_ORIGENS_HEATMAP).index.tolist()
-    d = d[d["desc_origem_atividade"].isin(top_origens)]
+    top_origens = d["origem_efetiva"].value_counts().head(_TOP_ORIGENS_HEATMAP).index.tolist()
+    d = d[d["origem_efetiva"].isin(top_origens)]
     if d.empty:
         st.info("Sem dados suficientes pra montar o mapa de calor.")
         return
 
     pivot = (
-        d.groupby(["patio", "desc_origem_atividade"])
+        d.groupby(["patio", "origem_efetiva"])
          .size().reset_index(name="falhas")
     )
 
@@ -586,7 +667,7 @@ def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
     origem_idx = {o: i for i, o in enumerate(top_origens)}
 
     dados_heatmap = [
-        [patio_idx[row["patio"]], origem_idx[row["desc_origem_atividade"]], int(row["falhas"])]
+        [patio_idx[row["patio"]], origem_idx[row["origem_efetiva"]], int(row["falhas"])]
         for _, row in pivot.iterrows()
     ]
     max_val = max((v[2] for v in dados_heatmap), default=1)
@@ -594,7 +675,7 @@ def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
     if not ECHARTS_OK:
         st.dataframe(
             pivot.rename(columns={
-                "patio": "Pátio", "desc_origem_atividade": "Origem da Atividade", "falhas": "Falhas",
+                "patio": "Pátio", "origem_efetiva": "Origem da Atividade (efetiva)", "falhas": "Falhas",
             }),
             use_container_width=True, hide_index=True,
         )
@@ -685,7 +766,7 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
               sistema=("sistema", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
               confiab=("impacta_confiabilidade", "sum"),
               classificacao=(
-                  "desc_origem_atividade",
+                  "origem_efetiva",
                   lambda s: s.dropna().mode().iloc[0] if not s.dropna().mode().empty else "—",
               ),
           )
@@ -1109,6 +1190,10 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
         f"base RASF (PG-ENG-0088)</div>",
         unsafe_allow_html=True,
     )
+
+    # Origem efetiva + status de consenso ANTES dos filtros — o filtro de
+    # origem/consenso já precisa dessas colunas calculadas.
+    df = _preparar_origem(df)
 
     # Filtros (Sistema, Reincidência, Período + expander) — aplicados ANTES
     # do enriquecimento, pra score_ee e todas as agregações já refletirem o
