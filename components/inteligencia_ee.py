@@ -1145,21 +1145,24 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = "", modo_todos: bool = True,
 
     # Leitura rápida ANTES do gráfico — pedido do Julio (16/07/2026): quem
     # abre a aba já vê o resumo sem precisar rolar a tela pra baixo do Unifilar.
+    # _kpi() (não st.metric) de propósito — st.metric corta texto longo com
+    # "..." sem quebrar linha, e o código do ativo (TPLNR) não cabe numa
+    # linha só. _kpi() já resolve isso (fonte menor + quebra de linha).
     if modo_todos:
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("🚂 Ativos (todos os trechos)", f"{len(g):,}".replace(",", "."))
+        _kpi(c1, "🚂 Ativos (todos os trechos)", f"{len(g):,}".replace(",", "."), COR_PRIMARIA)
         densidade = len(d) / max(len(g), 1)
-        c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
+        _kpi(c2, "📊 Densidade", f"{densidade:.1f} falhas/ativo", COR_PRIMARIA)
         top_row = g.sort_values("score", ascending=False).iloc[0]
-        c3.metric("🎯 Ativo mais crítico", ativo_curto(top_row["local_instalacao"]))
-        c4.metric("🚂 Trecho do ativo crítico", nome_ramal(top_row["ramal"], "completo"))
+        _kpi(c3, "🎯 Ativo mais crítico", ativo_curto(top_row["local_instalacao"]), COR_CRIT)
+        _kpi(c4, "🚂 Trecho do ativo crítico", nome_ramal(top_row["ramal"], "completo"), COR_PRIMARIA)
     else:
         c1, c2, c3 = st.columns(3)
-        c1.metric("🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."))
+        _kpi(c1, "🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."), COR_PRIMARIA)
         densidade = len(d) / max(len(g), 1)
-        c2.metric("📊 Densidade", f"{densidade:.1f} falhas/ativo")
+        _kpi(c2, "📊 Densidade", f"{densidade:.1f} falhas/ativo", COR_PRIMARIA)
         top_ativo = ativo_curto(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
-        c3.metric("🎯 Ativo mais crítico", top_ativo)
+        _kpi(c3, "🎯 Ativo mais crítico", top_ativo, COR_CRIT)
 
     fmax = float(g["falhas"].max() or 1)
 
@@ -1617,11 +1620,60 @@ def _bloco_tendencia(df: pd.DataFrame, escopo: str = ""):
     st_echarts(opt, height="500px", key=f"ee_tendencia_{escopo}")
 
 
+# Pedido do Julio (17/07/2026) — mesmo formato da tabela "Objeto/Perda/
+# Ação/Interferência" que a Engenharia usa na apresentação de Confiabilidade
+# EE à Diretoria. "Ação" mostra o Texto Longo Nota completo (coluna S) em
+# vez de tentar resumir automaticamente — extrair a ação de verdade exige
+# ler o texto corrido, uma regra automática arriscaria inventar errado
+# numa tabela usada pra RCA.
+_TOP_DETALHAMENTO_NOTAS = 50
+
+
+def _bloco_detalhamento_notas(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 📋 Detalhamento de Notas — Objeto × Perda × Ação")
+    st.caption(
+        "Nota a nota: Objeto (Parte de Objeto) · Perda (Problemas/Erro) · "
+        "Ação (Texto Longo Nota completo) · Disposições Reunião (RASF)."
+    )
+
+    cols_necessarias = {
+        "numero_nota": "Nota",
+        "texto_parte_objeto": "Objeto",
+        "texto_problema_erro": "Perda",
+        "texto_longo": "Ação",
+        "disposicoes_reuniao": "Disposições Reunião",
+    }
+    faltantes = [c for c in cols_necessarias if c not in df.columns]
+    if faltantes:
+        st.info(
+            "Colunas indisponíveis nesta base: " + ", ".join(faltantes) +
+            ". Rode a migração de schema mais recente e refaça o upload do RASF."
+        )
+        return
+
+    tab = df[["data_nota", *cols_necessarias.keys()]].dropna(subset=["numero_nota"]).copy()
+    if tab.empty:
+        st.info("Sem notas com número registrado no escopo atual.")
+        return
+
+    tab = tab.sort_values("data_nota", ascending=False)
+    total = len(tab)
+    tab = tab.head(_TOP_DETALHAMENTO_NOTAS).drop(columns=["data_nota"])
+    tab["numero_nota"] = tab["numero_nota"].astype(int)
+    tab = tab.rename(columns=cols_necessarias)
+
+    st.dataframe(tab, use_container_width=True, hide_index=True)
+    st.caption(f"Mostrando {min(total, _TOP_DETALHAMENTO_NOTAS)} de {total} notas (mais recentes primeiro).")
+
+
 def _bloco_analises_complementares(df: pd.DataFrame, escopo: str = ""):
-    """Expander recolhível com Tendência mensal + Análise 6M — pedido do
-    Julio (17/07/2026), ver comentário da região acima."""
-    with st.expander("📊 Análises complementares — Tendência mensal e 6M (Ishikawa)", expanded=False):
+    """Expander recolhível com Tendência mensal + Detalhamento de Notas +
+    Análise 6M — pedido do Julio (17/07/2026), ver comentário da região
+    acima."""
+    with st.expander("📊 Análises complementares — Tendência, Detalhamento e 6M (Ishikawa)", expanded=False):
         _bloco_tendencia(df, escopo)
+        st.markdown("---")
+        _bloco_detalhamento_notas(df, escopo)
         st.markdown("---")
         _bloco_6m(df, escopo)
 

@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS rasf_ee (
     origem_atividade_efetiva VARCHAR,                  -- desc_origem_atividade OU origem_atividade_correta, ver origem_efetiva()
     consenso_origem         VARCHAR,                   -- Sim/Não/vazio bruto (coluna AV)
     consenso_origem_status  VARCHAR,                   -- Sim | Não | Pendente — ver status_consenso_origem()
+    texto_parte_objeto      VARCHAR,                   -- Objeto (coluna Q) — tabela Detalhamento de Notas
+    texto_problema_erro     VARCHAR,                   -- Perda (coluna R) — tabela Detalhamento de Notas
     texto_longo             TEXT,
 
     -- Reincidência (pré-calculada no RASF)
@@ -91,6 +93,8 @@ ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS origem_atividade_correta VARCHAR;
 ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS origem_atividade_efetiva VARCHAR;
 ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS consenso_origem VARCHAR;
 ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS consenso_origem_status VARCHAR;
+ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS texto_parte_objeto VARCHAR;
+ALTER TABLE rasf_ee ADD COLUMN IF NOT EXISTS texto_problema_erro VARCHAR;
 
 -- Índices para os filtros mais comuns da aba de inteligência
 CREATE INDEX IF NOT EXISTS idx_rasf_gerencia       ON rasf_ee(gerencia);
