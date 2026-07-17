@@ -25,9 +25,9 @@ def _inject_sidebar_css():
     """CSS para estilizar a sidebar com identidade MRS."""
     st.markdown("""
     <style>
-    /* Fundo navy da sidebar */
+    /* Fundo preto da sidebar */
     [data-testid="stSidebar"] > div:first-child {
-        background: linear-gradient(180deg, #1e3a5f 0%, #16304f 60%, #0f2338 100%);
+        background: #000000;
         padding: 0;
     }
 

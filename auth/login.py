@@ -27,9 +27,9 @@ def _inject_login_css():
     /* Remove sidebar na tela de login */
     [data-testid="stSidebar"] { display: none !important; }
 
-    /* Fundo com gradiente suave */
+    /* Fundo preto */
     .stApp {
-        background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 50%, #dde6f0 100%);
+        background: #000000;
     }
 
     /* Remove padding padrão para centralizar melhor.
@@ -134,7 +134,7 @@ def _render_header():
     st.html("""
     <div style="text-align:center; margin-bottom: 2rem;">
         <div class="sentinel-gold-3d lg">SENTINEL</div>
-        <p style="color:#6b7280;font-size:0.95rem;margin:0.4rem 0 0;">
+        <p style="color:#ffffff;font-size:0.95rem;margin:0.4rem 0 0;">
             Plataforma de Inteligência de Manutenção da Malha</p>
         <div style="width:60px;height:3px;
             background:linear-gradient(90deg,#ffb000,#ffd04d);
@@ -231,7 +231,7 @@ def render_login():
 
     with st.form("form_login", clear_on_submit=False):
         st.markdown(
-            "<p style='color:#374151; font-weight:600; margin-bottom:0.3rem;'>E-mail corporativo</p>",
+            "<p style='color:#ffffff; font-weight:600; margin-bottom:0.3rem;'>E-mail corporativo</p>",
             unsafe_allow_html=True
         )
         email = st.text_input(
@@ -241,7 +241,7 @@ def render_login():
         )
 
         st.markdown(
-            "<p style='color:#374151; font-weight:600; margin-bottom:0.3rem; margin-top:0.8rem;'>Senha</p>",
+            "<p style='color:#ffffff; font-weight:600; margin-bottom:0.3rem; margin-top:0.8rem;'>Senha</p>",
             unsafe_allow_html=True
         )
         senha = st.text_input(
