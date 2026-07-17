@@ -2,10 +2,16 @@
 # A sidebar é a "espinha dorsal" da navegação. Persiste em todas as telas.
 # Contém: logo, usuário ativo, botões de gerência, card última atualização, logout.
 
+from pathlib import Path
+
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
 from auth.permissions import can_see_gerencia, can_admin_panel, can_upload
 from database.queries import log_acesso, contar_alertas_novos
+
+# Logo animado — raiz do repo (um nível acima de modules/), caminho absoluto
+# pra não depender do diretório de onde `streamlit run` foi disparado.
+LOGO_PATH = Path(__file__).resolve().parent.parent / "Sentinel_logo.gif"
 
 
 # region ====================== SESSÃO 1: CSS da Sidebar ======================
@@ -18,6 +24,11 @@ def _inject_sidebar_css():
     [data-testid="stSidebar"] > div:first-child {
         background: linear-gradient(180deg, #1e3a5f 0%, #16304f 60%, #0f2338 100%);
         padding: 0;
+    }
+
+    /* Logo animado no topo — respiro em relação à borda da sidebar */
+    [data-testid="stSidebar"] [data-testid="stImage"] {
+        padding: 1.2rem 1.4rem 0 1.4rem;
     }
 
     /* Todos os textos na sidebar ficam brancos */
@@ -54,6 +65,37 @@ def _inject_sidebar_css():
         border-color: rgba(255,255,255,0.12) !important;
         margin: 12px 0 !important;
     }
+
+    /* Texto "SENTINEL" em dourado 3D reluzente — logo abaixo do logo animado.
+       Seletor com prefixo [data-testid="stSidebar"] pra vencer em
+       especificidade a regra genérica "div{color:#fff!important}" acima. */
+    [data-testid="stSidebar"] .sentinel-gold-3d {
+        font-family: 'Arial Black', Arial, sans-serif;
+        font-weight: 900 !important;
+        letter-spacing: 0.14em;
+        text-align: center;
+        line-height: 1.1;
+        background: linear-gradient(180deg,
+            #fff6d0 0%, #ffe17a 18%, #d4af37 42%,
+            #b8860b 58%, #ffe17a 78%, #7a5218 100%) !important;
+        background-size: 100% 220%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent !important;
+        -webkit-text-fill-color: transparent;
+        text-shadow:
+            0 1px 0 #8a6314,
+            0 2px 0 #7a5610,
+            0 3px 1px rgba(0,0,0,.25),
+            0 5px 10px rgba(0,0,0,.30),
+            0 0 24px rgba(255,210,90,.45);
+        animation: sentinelShine 4s ease-in-out infinite;
+    }
+    [data-testid="stSidebar"] .sentinel-gold-3d.sm { font-size: 1.35rem; }
+    @keyframes sentinelShine {
+        0%, 100% { background-position: 0% 0%; }
+        50%      { background-position: 0% 100%; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -63,23 +105,20 @@ def _inject_sidebar_css():
 # region ====================== SESSÃO 2: Componentes da Sidebar ======================
 
 def _render_logo():
-    """Logo e nome do app no topo da sidebar."""
+    """Logo animado + nome do app no topo da sidebar."""
+    if LOGO_PATH.exists():
+        st.sidebar.image(str(LOGO_PATH), use_container_width=True)
+    else:
+        st.sidebar.markdown(
+            "<div style='text-align:center;color:#f87171;font-size:0.75rem;padding-top:1rem;'>"
+            "⚠️ Logo não encontrado</div>",
+            unsafe_allow_html=True,
+        )
+
     st.sidebar.markdown("""
-    <div style="padding: 1.5rem 1rem 1rem 1rem; text-align: center;">
-        <div style="
-            background: rgba(255,176,0,0.15);
-            border: 1px solid rgba(255,176,0,0.3);
-            border-radius: 14px;
-            width: 56px; height: 56px;
-            display: flex; align-items: center; justify-content: center;
-            margin: 0 auto 0.8rem auto;
-        ">
-            <span style="font-size:28px;">🚂</span>
-        </div>
-        <div style="font-size:1.3rem; font-weight:700; color:#ffffff; letter-spacing:-0.3px;">
-            MRS Sentinel
-        </div>
-        <div style="font-size:0.72rem; color:rgba(255,255,255,0.5); margin-top:2px; letter-spacing:0.3px;">
+    <div style="padding: 0.3rem 1rem 1rem 1rem; text-align: center;">
+        <div class="sentinel-gold-3d sm">SENTINEL</div>
+        <div style="font-size:0.72rem; color:rgba(255,255,255,0.5); margin-top:4px; letter-spacing:0.3px;">
             INTELIGÊNCIA DE MANUTENÇÃO
         </div>
     </div>

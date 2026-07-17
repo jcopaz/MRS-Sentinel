@@ -2,10 +2,16 @@
 # Design: tema claro com identidade visual MRS (azul-marinho + dourado)
 # Auth: Supabase Auth (email + senha) → busca perfil na tabela 'usuarios'
 
+from pathlib import Path
+
 import streamlit as st
 from database.client import get_supabase
 from database.queries import get_usuario_by_email, atualizar_ultimo_login, log_acesso
 from auth.session import set_usuario, set_pagina
+
+# Logo animado — raiz do repo (um nível acima de auth/), caminho absoluto pra
+# não depender do diretório de onde `streamlit run` foi disparado.
+LOGO_PATH = Path(__file__).resolve().parent.parent / "Sentinel_logo.gif"
 
 
 # region ====================== SESSÃO 1: CSS da Tela de Login ======================
@@ -59,6 +65,36 @@ def _inject_login_css():
         transform: translateY(-1px);
         box-shadow: 0 6px 20px rgba(30,58,95,0.35) !important;
     }
+
+    /* Texto "SENTINEL" em dourado 3D reluzente — logo abaixo do logo animado */
+    .sentinel-gold-3d {
+        font-family: 'Arial Black', Arial, sans-serif;
+        font-weight: 900;
+        letter-spacing: 0.14em;
+        text-align: center;
+        line-height: 1.1;
+        background: linear-gradient(180deg,
+            #fff6d0 0%, #ffe17a 18%, #d4af37 42%,
+            #b8860b 58%, #ffe17a 78%, #7a5218 100%);
+        background-size: 100% 220%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        -webkit-text-fill-color: transparent;
+        text-shadow:
+            0 1px 0 #8a6314,
+            0 2px 0 #7a5610,
+            0 3px 1px rgba(0,0,0,.25),
+            0 5px 10px rgba(0,0,0,.30),
+            0 0 24px rgba(255,210,90,.45);
+        animation: sentinelShine 4s ease-in-out infinite;
+    }
+    .sentinel-gold-3d.lg { font-size: 2.6rem; margin-top: -0.4rem; }
+    .sentinel-gold-3d.sm { font-size: 1.35rem; }
+    @keyframes sentinelShine {
+        0%, 100% { background-position: 0% 0%; }
+        50%      { background-position: 0% 100%; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -68,17 +104,21 @@ def _inject_login_css():
 # region ====================== SESSÃO 2: Componentes Visuais ======================
 
 def _render_header():
+    if LOGO_PATH.exists():
+        col_esq, col_meio, col_dir = st.columns([1, 1.3, 1])
+        with col_meio:
+            st.image(str(LOGO_PATH), use_container_width=True)
+    else:
+        st.markdown(
+            "<div style='text-align:center;color:#dc2626;font-size:0.85rem;'>"
+            "⚠️ Logo não encontrado (Sentinel_logo.gif)</div>",
+            unsafe_allow_html=True,
+        )
+
     st.html("""
     <div style="text-align:center; margin-bottom: 2rem;">
-        <div style="background:linear-gradient(135deg,#1e3a5f 0%,#2d5a8e 100%);
-            width:80px;height:80px;border-radius:20px;display:flex;
-            align-items:center;justify-content:center;
-            margin:0 auto 1.2rem auto;">
-            <span style="font-size:42px;">🚂</span>
-        </div>
-        <h1 style="font-size:2rem;font-weight:700;color:#1e3a5f;
-            margin:0 0 0.3rem 0;">MRS Sentinel</h1>
-        <p style="color:#6b7280;font-size:0.95rem;margin:0;">
+        <div class="sentinel-gold-3d lg">SENTINEL</div>
+        <p style="color:#6b7280;font-size:0.95rem;margin:0.4rem 0 0;">
             Plataforma de Inteligência de Manutenção da Malha</p>
         <div style="width:60px;height:3px;
             background:linear-gradient(90deg,#ffb000,#ffd04d);
