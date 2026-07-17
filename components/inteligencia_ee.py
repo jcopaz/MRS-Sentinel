@@ -743,18 +743,23 @@ def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
 def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### ♻️ Ranking de Reincidência por Ativo")
     st.caption(
-        "Ativos (coluna K do RASF — 'Local de instalação') que mais "
-        "reincidem. A reincidência 90 dias vem do próprio RASF. Foque o "
-        "topo: são os ativos que voltam a falhar."
+        "Ativos que mais reincidem, identificados pelo TPLNR (chave única do "
+        "RASF) e rotulados com a coluna K ('Local de instalação'). A "
+        "reincidência 90 dias vem do próprio RASF. Foque o topo: são os "
+        "ativos que voltam a falhar."
     )
 
-    # Coluna K do export RASF ("Local de instalação") — descrição do ativo,
-    # não o código TPLNR (coluna J). Pedido do Julio (16/07/2026): o ranking
-    # deve agrupar por essa coluna, não pelo código.
-    col_ativo = "local_instalacao_desc" if "local_instalacao_desc" in df.columns else "local_instalacao"
-    if col_ativo not in df.columns:
-        st.info("Coluna de ativo (Local de instalação) indisponível.")
+    # ⚠️ Agrupa por TPLNR (local_instalacao), não pela coluna K
+    # (local_instalacao_desc) — a coluna K é só um rótulo textual e NÃO é
+    # garantidamente única por ativo físico (dois TPLNR diferentes podem
+    # compartilhar a mesma descrição). Agrupar direto pela coluna K juntava
+    # ativos diferentes num só total, inflando falhas/reincidências e
+    # divergindo do Unifilar (que já usa TPLNR corretamente). A coluna K
+    # continua exibida — só não é mais a CHAVE de agrupamento.
+    if "local_instalacao" not in df.columns:
+        st.info("Coluna de ativo (TPLNR) indisponível.")
         return
+    tem_desc = "local_instalacao_desc" in df.columns
 
     col_n, col_ord = st.columns([1, 2])
     with col_n:
@@ -766,22 +771,28 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
             index=0, key=f"rank_reincid_ord_{escopo}",
         )
 
-    g = (
-        df.groupby(col_ativo)
-          .agg(
-              falhas=(col_ativo, "size"),
-              reincidencias=("reincidencia_ativo", "sum"),
-              thp_h=("thp_h", "sum"),
-              patio=("patio", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
-              sistema=("sistema", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
-              confiab=("impacta_confiabilidade", "sum"),
-              classificacao=(
-                  "origem_efetiva",
-                  lambda s: s.dropna().mode().iloc[0] if not s.dropna().mode().empty else "—",
-              ),
-          )
-          .reset_index()
+    agg_kwargs = dict(
+        falhas=("local_instalacao", "size"),
+        reincidencias=("reincidencia_ativo", "sum"),
+        thp_h=("thp_h", "sum"),
+        patio=("patio", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
+        sistema=("sistema", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
+        confiab=("impacta_confiabilidade", "sum"),
+        classificacao=(
+            "origem_efetiva",
+            lambda s: s.dropna().mode().iloc[0] if not s.dropna().mode().empty else "—",
+        ),
     )
+    if tem_desc:
+        agg_kwargs["local_desc"] = (
+            "local_instalacao_desc",
+            lambda s: s.dropna().iloc[0] if s.notna().any() else "—",
+        )
+
+    g = df.groupby("local_instalacao").agg(**agg_kwargs).reset_index()
+    if not tem_desc:
+        g["local_desc"] = g["local_instalacao"]
+
     g["reincidencias"] = g["reincidencias"].astype(int)
     g["confiab"] = g["confiab"].astype(int)
 
@@ -797,7 +808,7 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
         return
 
     tabela = g.rename(columns={
-        col_ativo: "Local de Instalação",
+        "local_desc": "Local de Instalação",
         "patio": "Pátio",
         "sistema": "Sistema",
         "falhas": "Falhas",
