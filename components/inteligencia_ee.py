@@ -637,6 +637,7 @@ def _grafico_falhas_thp_quebra(
 
 # region ====================== SESSÃO 3: BLOCO 2 — Pareto de Sintomas x THP ====
 
+@st.fragment
 def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 📊 Pareto de Sintomas — Falhas × THP por Sintoma")
 
@@ -696,6 +697,7 @@ def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
 _TOP_ORIGENS_ATIVIDADE = 15
 
 
+@st.fragment
 def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🏗️ Obras × Manutenção — Falhas × THP por Origem da Atividade")
 
@@ -867,6 +869,7 @@ def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
 _TOP_OFENSORES_THP = 10
 
 
+@st.fragment
 def _bloco_ofensores_thp(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🔥 Maiores Ofensores de THP — Ativo × Causa Predominante")
     st.caption(
@@ -957,6 +960,7 @@ def _bloco_ofensores_thp(df: pd.DataFrame, escopo: str = ""):
 
 # region ====================== SESSÃO 5: BLOCO 4 — Ranking Reincidência ========
 
+@st.fragment
 def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### ♻️ Ranking de Reincidência por Ativo")
     st.caption(
@@ -1410,6 +1414,7 @@ def _unifilar_fallback(df: pd.DataFrame):
 _TOP_GRUPOS_ATIVO = 15
 
 
+@st.fragment
 def _bloco_grupos_ativo(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🔧 Ranking de Grupos de Ativo — Falhas × THP")
 
@@ -1669,6 +1674,7 @@ _TOP_OBJETOS_ARVORE = 5
 _TOP_PERDAS_ARVORE = 4
 
 
+@st.fragment
 def _bloco_arvore_falhas(df: pd.DataFrame, escopo: str = ""):
     st.markdown("#### 🌳 Árvore de Falhas — Grupo do Ativo × Objeto × Perda")
     st.caption(
