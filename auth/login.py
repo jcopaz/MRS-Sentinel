@@ -28,8 +28,15 @@ def _inject_login_css():
         background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 50%, #dde6f0 100%);
     }
 
-    /* Remove padding padrão para centralizar melhor */
-    .main .block-container {
+    /* Remove padding padrão para centralizar melhor.
+       ⚠️ ".main .block-container" é seletor de versões antigas do Streamlit
+       — a partir do 1.5x o container principal usa data-testid
+       "stMainBlockContainer" (sem a classe "main" como ancestral). Sem essa
+       segunda regra, nada aqui era aplicado e a tela renderizava em largura
+       total, "descentralizando" a logo (que fica alinhada à esquerda por
+       padrão) em relação ao texto (centralizado via text-align próprio). */
+    .main .block-container,
+    [data-testid="stMainBlockContainer"] {
         padding-top: 4rem !important;
         max-width: 460px !important;
         margin: 0 auto !important;
@@ -67,8 +74,11 @@ def _inject_login_css():
         box-shadow: 0 6px 20px rgba(30,58,95,0.35) !important;
     }
 
-    /* Logo animado centralizado (sem esticar — tamanho fixo, igual à sidebar) */
-    .main [data-testid="stImage"] {
+    /* Logo animado centralizado (sem esticar — tamanho fixo, igual à sidebar).
+       Mesmo motivo do bloco acima: ".main" não existe mais como ancestral,
+       daí o [data-testid="stMainBlockContainer"] como alternativa. */
+    .main [data-testid="stImage"],
+    [data-testid="stMainBlockContainer"] [data-testid="stImage"] {
         display: flex;
         justify-content: center;
     }

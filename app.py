@@ -68,7 +68,12 @@ def _inject_global_css():
     }
 
     /* ── Área de conteúdo principal ──────────────────────────────── */
-    .main .block-container {
+    /* ⚠️ ".main .block-container" é seletor de versões antigas do
+       Streamlit — a partir do 1.5x o container principal usa data-testid
+       "stMainBlockContainer" (sem a classe "main" como ancestral). Mantém
+       os dois seletores pra funcionar em qualquer versão instalada. */
+    .main .block-container,
+    [data-testid="stMainBlockContainer"] {
         padding-top:    1.5rem;
         padding-bottom: 3rem;
         max-width:      1400px;
