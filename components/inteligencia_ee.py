@@ -408,94 +408,6 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
 # endregion
 
 
-# region ====================== SESSÃO 2C: BLOCO 0 — Cards Resumo ==============
-
-def _bloco_cards_resumo(df: pd.DataFrame, escopo: str = ""):
-    st.markdown("#### 📌 Resumo Executivo")
-    st.caption(
-        "Panorama rápido do recorte filtrado — pra achar de cara qual ativo "
-        "mais falha, qual mais para trem, qual sintoma mais crítico e qual "
-        "origem de atividade predomina."
-    )
-
-    if df.empty or "local_instalacao" not in df.columns:
-        st.info("Sem dados suficientes pra montar o resumo.")
-        return
-
-    col_ativo = "local_instalacao"
-    c1, c2, c3, c4, c5 = st.columns(5)
-
-    # 1) Ativo com mais falhas + tipo de falha predominante nele
-    grp_falhas = df.groupby(col_ativo).size()
-    if not grp_falhas.empty:
-        ativo_top = grp_falhas.idxmax()
-        falhas_top = int(grp_falhas.max())
-        sub_df = df[df[col_ativo] == ativo_top]
-        tipo_moda = (
-            sub_df["tipo_falha"].dropna().mode()
-            if "tipo_falha" in sub_df.columns else pd.Series(dtype=object)
-        )
-        tipo_txt = str(tipo_moda.iloc[0]) if not tipo_moda.empty else "—"
-        _kpi(c1, "Ativo com mais falhas", ativo_curto(ativo_top), COR_PRIMARIA,
-             sub=f"{_fmt_int(falhas_top)} falhas · tipo mais comum: {tipo_txt}")
-    else:
-        _kpi(c1, "Ativo com mais falhas", "—", COR_PRIMARIA)
-
-    # 2) Ativo com maior THP
-    grp_thp = df.groupby(col_ativo)["thp_h"].sum()
-    if not grp_thp.empty and grp_thp.max() > 0:
-        ativo_thp_top = grp_thp.idxmax()
-        thp_top = float(grp_thp.max())
-        falhas_desse = int(grp_falhas.get(ativo_thp_top, 0))
-        _kpi(c2, "Ativo com maior THP", ativo_curto(ativo_thp_top), COR_THP,
-             sub=f"{_fmt_h(thp_top)} · {_fmt_int(falhas_desse)} falhas")
-    else:
-        _kpi(c2, "Ativo com maior THP", "—", COR_THP)
-
-    # 3) Ativo mais reincidente
-    if "reincidencia_ativo" in df.columns:
-        grp_reincid = df.groupby(col_ativo)["reincidencia_ativo"].sum()
-        if not grp_reincid.empty and grp_reincid.max() > 0:
-            ativo_reincid_top = grp_reincid.idxmax()
-            reincid_top = int(grp_reincid.max())
-            _kpi(c3, "Ativo mais reincidente", ativo_curto(ativo_reincid_top), COR_CRONICO,
-                 sub=f"{_fmt_int(reincid_top)} reincidências (90d)")
-        else:
-            _kpi(c3, "Ativo mais reincidente", "—", COR_CRONICO)
-    else:
-        _kpi(c3, "Ativo mais reincidente", "—", COR_CRONICO)
-
-    # 4) Sintoma mais crítico por THP (complementa o Pareto, que ordena por contagem)
-    if "anomalia_sintoma" in df.columns:
-        grp_sint_thp = df.groupby("anomalia_sintoma")["thp_h"].sum()
-        if not grp_sint_thp.empty and grp_sint_thp.max() > 0:
-            sintoma_top = grp_sint_thp.idxmax()
-            thp_sint_top = float(grp_sint_thp.max())
-            _kpi(c4, "Sintoma mais crítico (THP)", _trunc_palavra(sintoma_top), COR_CRIT,
-                 sub=f"{_fmt_h(thp_sint_top)} de trem parado")
-        else:
-            _kpi(c4, "Sintoma mais crítico (THP)", "—", COR_CRIT)
-    else:
-        _kpi(c4, "Sintoma mais crítico (THP)", "—", COR_CRIT)
-
-    # 5) Origem de atividade mais frequente (efetiva — já com a correção de
-    # responsabilidade aplicada, ver _preparar_origem)
-    if "origem_efetiva" in df.columns:
-        grp_origem = df["origem_efetiva"].value_counts()
-        if not grp_origem.empty:
-            origem_top = grp_origem.idxmax()
-            qtd_origem_top = int(grp_origem.max())
-            pct_origem = 100 * qtd_origem_top / len(df) if len(df) else 0
-            _kpi(c5, "Origem mais frequente", _trunc_palavra(origem_top), COR_WARN,
-                 sub=f"{_fmt_int(qtd_origem_top)} falhas · {pct_origem:.0f}% do total")
-        else:
-            _kpi(c5, "Origem mais frequente", "—", COR_WARN)
-    else:
-        _kpi(c5, "Origem mais frequente", "—", COR_WARN)
-
-# endregion
-
-
 # region ====================== SESSÃO 2D: Gráfico Barra+Linha c/ Quebra =======
 # Helper compartilhado por Obras×Manutenção, Grupos de Ativo, Maiores
 # Ofensores de THP e Pareto de Sintomas — pedido do Julio (17/07/2026): os
@@ -1220,26 +1132,54 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = "", modo_todos: bool = True,
     g["reincidencias"] = g["reincidencias"].astype(int)
     g["cronico"] = g["reincidencias"] >= 3  # já é por ativo — sinal direto do RASF
 
-    # Leitura rápida ANTES do gráfico — pedido do Julio (16/07/2026): quem
-    # abre a aba já vê o resumo sem precisar rolar a tela pra baixo do Unifilar.
-    # _kpi() (não st.metric) de propósito — st.metric corta texto longo com
-    # "..." sem quebrar linha, e o código do ativo (TPLNR) não cabe numa
-    # linha só. _kpi() já resolve isso (fonte menor + quebra de linha).
-    if modo_todos:
-        c1, c2, c3, c4 = st.columns(4)
-        _kpi(c1, "🚂 Ativos (todos os trechos)", f"{len(g):,}".replace(",", "."), COR_PRIMARIA)
-        densidade = len(d) / max(len(g), 1)
-        _kpi(c2, "📊 Densidade", f"{densidade:.1f} falhas/ativo", COR_PRIMARIA)
-        top_row = g.sort_values("score", ascending=False).iloc[0]
-        _kpi(c3, "🎯 Ativo mais crítico", ativo_curto(top_row["local_instalacao"]), COR_CRIT)
-        _kpi(c4, "🚂 Trecho do ativo crítico", nome_ramal(top_row["ramal"], "completo"), COR_PRIMARIA)
+    # Leitura rápida ANTES do gráfico — pedido do Julio (16/07/2026), com o
+    # extinto "Resumo Executivo" mesclado aqui em 17/07/2026: quem abre a
+    # aba já vê o panorama completo (8 cards, 2 linhas de 4) sem precisar
+    # rolar a tela. _kpi() (não st.metric) de propósito — st.metric corta
+    # texto longo com "..." sem quebrar linha, e o código do ativo (TPLNR)
+    # não cabe numa linha só. _kpi() já resolve isso (fonte menor + quebra
+    # de linha).
+    rotulo_ativos = "🚂 Ativos (Todos os Trechos)" if modo_todos else "🚂 Ativos no Trecho"
+    densidade = len(d) / max(len(g), 1)
+    top_row = g.sort_values("score", ascending=False).iloc[0]
+    ativo_critico = ativo_curto(top_row["local_instalacao"])
+
+    grp_thp = df.groupby("local_instalacao")["thp_h"].sum() if "local_instalacao" in df.columns else pd.Series(dtype=float)
+    grp_reincid = (
+        df.groupby("local_instalacao")["reincidencia_ativo"].sum()
+        if "reincidencia_ativo" in df.columns and "local_instalacao" in df.columns else pd.Series(dtype=float)
+    )
+    grp_sint_thp = df.groupby("anomalia_sintoma")["thp_h"].sum() if "anomalia_sintoma" in df.columns else pd.Series(dtype=float)
+    grp_origem = df["origem_efetiva"].value_counts() if "origem_efetiva" in df.columns else pd.Series(dtype=int)
+
+    linha1 = st.columns(4)
+    _kpi(linha1[0], "🔢 Qtd. Falhas Totais", f"{len(df):,}".replace(",", "."), COR_PRIMARIA)
+    _kpi(linha1[1], rotulo_ativos, f"{len(g):,}".replace(",", "."), COR_PRIMARIA)
+    _kpi(linha1[2], "📊 Densidade", f"{densidade:.1f} falhas/ativo", COR_PRIMARIA)
+    if not grp_thp.empty and grp_thp.max() > 0:
+        _kpi(linha1[3], "⏱️ Ativo com Maior THP", ativo_curto(grp_thp.idxmax()), COR_THP,
+             sub=_fmt_h(float(grp_thp.max())))
     else:
-        c1, c2, c3 = st.columns(3)
-        _kpi(c1, "🚂 Ativos no trecho", f"{len(g):,}".replace(",", "."), COR_PRIMARIA)
-        densidade = len(d) / max(len(g), 1)
-        _kpi(c2, "📊 Densidade", f"{densidade:.1f} falhas/ativo", COR_PRIMARIA)
-        top_ativo = ativo_curto(g.sort_values("score", ascending=False).iloc[0]["local_instalacao"]) if len(g) else "—"
-        _kpi(c3, "🎯 Ativo mais crítico", top_ativo, COR_CRIT)
+        _kpi(linha1[3], "⏱️ Ativo com Maior THP", "—", COR_THP)
+
+    linha2 = st.columns(4)
+    if not grp_sint_thp.empty and grp_sint_thp.max() > 0:
+        _kpi(linha2[0], "🚨 Sintoma Mais Crítico (THP)", _trunc_palavra(grp_sint_thp.idxmax()), COR_CRIT,
+             sub=_fmt_h(float(grp_sint_thp.max())))
+    else:
+        _kpi(linha2[0], "🚨 Sintoma Mais Crítico (THP)", "—", COR_CRIT)
+    _kpi(linha2[1], "🎯 Ativo Mais Crítico", ativo_critico, COR_CRIT)
+    if not grp_origem.empty:
+        pct_origem = 100 * grp_origem.max() / len(df) if len(df) else 0
+        _kpi(linha2[2], "🏗️ Origem Mais Frequente", _trunc_palavra(grp_origem.idxmax()), COR_WARN,
+             sub=f"{pct_origem:.0f}% do total")
+    else:
+        _kpi(linha2[2], "🏗️ Origem Mais Frequente", "—", COR_WARN)
+    if not grp_reincid.empty and grp_reincid.max() > 0:
+        _kpi(linha2[3], "♻️ Ativo Mais Reincidente", ativo_curto(grp_reincid.idxmax()), COR_CRONICO,
+             sub=f"{int(grp_reincid.max())} reincidências (90d)")
+    else:
+        _kpi(linha2[3], "♻️ Ativo Mais Reincidente", "—", COR_CRONICO)
 
     fmax = float(g["falhas"].max() or 1)
 
@@ -1892,8 +1832,6 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     # (filtros da Árvore de Falhas, tabelas AgGrid) sem abrir outro expander
     # de nível superior dentro daqui.
     with st.expander("🗺️ Visão Macro", expanded=True):
-        _bloco_cards_resumo(df, escopo)
-        st.markdown("---")
         _bloco_unifilar(df, escopo, modo_todos=modo_todos_trecho,
                          ramal_view=ramal_trecho, ramais_disp=ramais_disp)
         st.markdown("---")
