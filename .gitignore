@@ -43,3 +43,6 @@ logs/
 
 # ── Contexto local do agente (não versionar) ─────────────
 agente/
+
+# ── Arquivos compactados locais (backups, exports) ───────
+*.zip
