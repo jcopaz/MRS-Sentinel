@@ -1620,6 +1620,106 @@ def _bloco_tendencia(df: pd.DataFrame, escopo: str = ""):
     st_echarts(opt, height="500px", key=f"ee_tendencia_{escopo}")
 
 
+# Pedido do Julio (17/07/2026) — drill-down Grupo do Ativo → Objeto → Perda,
+# mesmo espírito da árvore "MCH → Condição de via → Desnivelamento" do
+# material que a Engenharia apresenta à Diretoria. Limita ramos por nível
+# (top grupos / objetos / perdas) pra árvore não virar uma bagunça ilegível
+# quando o recorte tem muita variedade.
+_TOP_GRUPOS_ARVORE = 8
+_TOP_OBJETOS_ARVORE = 5
+_TOP_PERDAS_ARVORE = 4
+
+
+def _bloco_arvore_falhas(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 🌳 Árvore de Falhas — Grupo do Ativo × Objeto × Perda")
+    st.caption(
+        "Drill-down hierárquico: Grupo do Ativo → Objeto (Parte de Objeto) → "
+        "Perda (Problemas/Erro). Só os ramos mais frequentes de cada nível "
+        "aparecem, pra manter a árvore legível."
+    )
+
+    cols_necessarias = ["grupo_ativo", "texto_parte_objeto", "texto_problema_erro"]
+    faltantes = [c for c in cols_necessarias if c not in df.columns]
+    if faltantes:
+        st.info(
+            "Colunas indisponíveis nesta base: " + ", ".join(faltantes) +
+            ". Rode a migração de schema mais recente e refaça o upload do RASF."
+        )
+        return
+
+    d = df.dropna(subset=["grupo_ativo"]).copy()
+    if d.empty:
+        st.info("Sem dados de grupo do ativo no escopo atual.")
+        return
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    top_grupos = d["grupo_ativo"].value_counts().head(_TOP_GRUPOS_ARVORE).index.tolist()
+    d = d[d["grupo_ativo"].isin(top_grupos)]
+
+    def _filhos_perda(sub: pd.DataFrame) -> list:
+        vc = sub["texto_problema_erro"].dropna().value_counts().head(_TOP_PERDAS_ARVORE)
+        return [{"name": f"{_trunc_palavra(nome, 30)} ({int(n)})", "value": int(n)} for nome, n in vc.items()]
+
+    def _filhos_objeto(sub: pd.DataFrame) -> list:
+        filhos = []
+        vc = sub["texto_parte_objeto"].dropna().value_counts().head(_TOP_OBJETOS_ARVORE)
+        for nome, n in vc.items():
+            no = {"name": f"{_trunc_palavra(nome, 30)} ({int(n)})", "value": int(n)}
+            netos = _filhos_perda(sub[sub["texto_parte_objeto"] == nome])
+            if netos:
+                no["children"] = netos
+            filhos.append(no)
+        return filhos
+
+    filhos_raiz = []
+    for grupo in top_grupos:
+        sub_grupo = d[d["grupo_ativo"] == grupo]
+        no = {"name": f"{grupo} ({len(sub_grupo)})", "value": len(sub_grupo)}
+        filhos = _filhos_objeto(sub_grupo)
+        if filhos:
+            no["children"] = filhos
+        filhos_raiz.append(no)
+
+    if not filhos_raiz:
+        st.info("Sem dados suficientes para montar a árvore.")
+        return
+
+    opt = {
+        "tooltip": {
+            "trigger": "item", "triggerOn": "mousemove",
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
+            "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
+        },
+        "series": [{
+            "type": "tree",
+            "data": [{"name": "Falhas", "children": filhos_raiz}],
+            "orient": "LR",
+            "top": "3%", "left": "8%", "bottom": "3%", "right": "24%",
+            "symbol": "circle", "symbolSize": 11,
+            "itemStyle": {"color": COR_PRIMARIA, "borderColor": COR_PRIMARIA},
+            "lineStyle": {"color": "#9ca3af", "width": 1.5, "curveness": 0.5},
+            "label": {
+                "position": "left", "verticalAlign": "middle", "align": "right",
+                "fontSize": 13, "color": "#1f2937", "fontWeight": "bold",
+            },
+            "leaves": {
+                "label": {"position": "right", "verticalAlign": "middle", "align": "left",
+                          "fontSize": 13, "fontWeight": "normal"},
+            },
+            "emphasis": {"focus": "descendant"},
+            "expandAndCollapse": True,
+            "initialTreeDepth": 3,
+            "animationDuration": 400,
+            "animationDurationUpdate": 400,
+        }],
+    }
+    st_echarts(opt, height="620px", key=f"ee_arvore_falhas_{escopo}")
+
+
 # Pedido do Julio (17/07/2026) — mesmo formato da tabela "Objeto/Perda/
 # Ação/Interferência" que a Engenharia usa na apresentação de Confiabilidade
 # EE à Diretoria. "Ação" mostra o Texto Longo Nota completo (coluna S) em
@@ -1667,11 +1767,13 @@ def _bloco_detalhamento_notas(df: pd.DataFrame, escopo: str = ""):
 
 
 def _bloco_analises_complementares(df: pd.DataFrame, escopo: str = ""):
-    """Expander recolhível com Tendência mensal + Detalhamento de Notas +
-    Análise 6M — pedido do Julio (17/07/2026), ver comentário da região
-    acima."""
-    with st.expander("📊 Análises complementares — Tendência, Detalhamento e 6M (Ishikawa)", expanded=False):
+    """Expander recolhível com Tendência mensal + Árvore de Falhas +
+    Detalhamento de Notas + Análise 6M — pedido do Julio (17/07/2026), ver
+    comentário da região acima."""
+    with st.expander("📊 Análises complementares — Tendência, Árvore de Falhas, Detalhamento e 6M (Ishikawa)", expanded=False):
         _bloco_tendencia(df, escopo)
+        st.markdown("---")
+        _bloco_arvore_falhas(df, escopo)
         st.markdown("---")
         _bloco_detalhamento_notas(df, escopo)
         st.markdown("---")
