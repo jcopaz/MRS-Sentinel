@@ -83,34 +83,28 @@ def _inject_login_css():
         justify-content: center;
     }
 
-    /* Texto "SENTINEL" em dourado 3D reluzente — cor sólida + sombra em
-       camadas (relevo) + brilho pulsante. Sem background-clip: em alguns
-       navegadores/contextos ele não recorta certo e pinta um retângulo
-       sólido atrás do texto em vez de recortar só as letras. */
+    /* Texto "SENTINEL" em dourado 3D reluzente — cor sólida + relevo nítido
+       (sombras SEM blur, só deslocadas — nada de "0 0 Xpx", que é o que cria
+       o halo/glow espalhado atrás da palavra). O brilho vem só de um pulso
+       de brightness() no próprio texto, não de sombra difusa. */
     .sentinel-gold-3d {
         font-family: 'Arial Black', Arial, sans-serif;
         font-weight: 900;
         letter-spacing: 0.14em;
         text-align: center;
         line-height: 1.1;
-        color: #ffd54a;
-        animation: sentinelGlow 2.6s ease-in-out infinite alternate;
+        color: #e8a920;
+        text-shadow:
+            0 1px 0 #8a6314,
+            0 2px 0 #7a5610,
+            0 3px 2px rgba(0,0,0,.30);
+        animation: sentinelShimmer 2.8s ease-in-out infinite;
     }
     .sentinel-gold-3d.lg { font-size: 2.6rem; margin-top: -0.4rem; }
     .sentinel-gold-3d.sm { font-size: 1.35rem; }
-    @keyframes sentinelGlow {
-        0% {
-            text-shadow:
-                0 1px 0 #8a6314, 0 2px 0 #7a5610,
-                0 3px 1px rgba(0,0,0,.25), 0 5px 10px rgba(0,0,0,.30),
-                0 0 12px rgba(255,213,74,.45), 0 0 24px rgba(255,193,7,.25);
-        }
-        100% {
-            text-shadow:
-                0 1px 0 #8a6314, 0 2px 0 #7a5610,
-                0 3px 1px rgba(0,0,0,.25), 0 5px 10px rgba(0,0,0,.30),
-                0 0 22px rgba(255,224,130,.85), 0 0 44px rgba(255,193,7,.55);
-        }
+    @keyframes sentinelShimmer {
+        0%, 100% { filter: brightness(1); }
+        50%      { filter: brightness(1.22); }
     }
     </style>
     """, unsafe_allow_html=True)
