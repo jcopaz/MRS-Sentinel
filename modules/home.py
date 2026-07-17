@@ -12,6 +12,7 @@ from database.queries import log_acesso, contar_alertas_novos
 # Logo animado — raiz do repo (um nível acima de modules/), caminho absoluto
 # pra não depender do diretório de onde `streamlit run` foi disparado.
 LOGO_PATH = Path(__file__).resolve().parent.parent / "Sentinel_logo.gif"
+LOGO_WIDTH = 200  # px — mesmo tamanho usado na tela de Login (auth/login.py)
 
 
 # region ====================== SESSÃO 1: CSS da Sidebar ======================
@@ -26,9 +27,11 @@ def _inject_sidebar_css():
         padding: 0;
     }
 
-    /* Logo animado no topo — respiro em relação à borda da sidebar */
+    /* Logo animado no topo — centralizado, tamanho fixo (igual à tela de Login) */
     [data-testid="stSidebar"] [data-testid="stImage"] {
-        padding: 1.2rem 1.4rem 0 1.4rem;
+        display: flex;
+        justify-content: center;
+        padding: 1.2rem 0 0 0;
     }
 
     /* Todos os textos na sidebar ficam brancos */
@@ -66,35 +69,35 @@ def _inject_sidebar_css():
         margin: 12px 0 !important;
     }
 
-    /* Texto "SENTINEL" em dourado 3D reluzente — logo abaixo do logo animado.
-       Seletor com prefixo [data-testid="stSidebar"] pra vencer em
-       especificidade a regra genérica "div{color:#fff!important}" acima. */
+    /* Texto "SENTINEL" em dourado 3D reluzente — cor sólida + sombra em
+       camadas (relevo) + brilho pulsante. Sem background-clip: em alguns
+       navegadores/contextos ele não recorta certo e pinta um retângulo
+       sólido atrás do texto em vez de recortar só as letras. Seletor com
+       prefixo [data-testid="stSidebar"] pra vencer em especificidade a
+       regra genérica "div{color:#fff!important}" acima. */
     [data-testid="stSidebar"] .sentinel-gold-3d {
         font-family: 'Arial Black', Arial, sans-serif;
         font-weight: 900 !important;
         letter-spacing: 0.14em;
         text-align: center;
         line-height: 1.1;
-        background: linear-gradient(180deg,
-            #fff6d0 0%, #ffe17a 18%, #d4af37 42%,
-            #b8860b 58%, #ffe17a 78%, #7a5218 100%) !important;
-        background-size: 100% 220%;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent !important;
-        -webkit-text-fill-color: transparent;
-        text-shadow:
-            0 1px 0 #8a6314,
-            0 2px 0 #7a5610,
-            0 3px 1px rgba(0,0,0,.25),
-            0 5px 10px rgba(0,0,0,.30),
-            0 0 24px rgba(255,210,90,.45);
-        animation: sentinelShine 4s ease-in-out infinite;
+        color: #ffd54a !important;
+        animation: sentinelGlow 2.6s ease-in-out infinite alternate;
     }
     [data-testid="stSidebar"] .sentinel-gold-3d.sm { font-size: 1.35rem; }
-    @keyframes sentinelShine {
-        0%, 100% { background-position: 0% 0%; }
-        50%      { background-position: 0% 100%; }
+    @keyframes sentinelGlow {
+        0% {
+            text-shadow:
+                0 1px 0 #8a6314, 0 2px 0 #7a5610,
+                0 3px 1px rgba(0,0,0,.25), 0 5px 10px rgba(0,0,0,.30),
+                0 0 12px rgba(255,213,74,.45), 0 0 24px rgba(255,193,7,.25);
+        }
+        100% {
+            text-shadow:
+                0 1px 0 #8a6314, 0 2px 0 #7a5610,
+                0 3px 1px rgba(0,0,0,.25), 0 5px 10px rgba(0,0,0,.30),
+                0 0 22px rgba(255,224,130,.85), 0 0 44px rgba(255,193,7,.55);
+        }
     }
     </style>
     """, unsafe_allow_html=True)
@@ -107,7 +110,7 @@ def _inject_sidebar_css():
 def _render_logo():
     """Logo animado + nome do app no topo da sidebar."""
     if LOGO_PATH.exists():
-        st.sidebar.image(str(LOGO_PATH), use_container_width=True)
+        st.sidebar.image(str(LOGO_PATH), width=LOGO_WIDTH)
     else:
         st.sidebar.markdown(
             "<div style='text-align:center;color:#f87171;font-size:0.75rem;padding-top:1rem;'>"

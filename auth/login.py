@@ -12,6 +12,7 @@ from auth.session import set_usuario, set_pagina
 # Logo animado — raiz do repo (um nível acima de auth/), caminho absoluto pra
 # não depender do diretório de onde `streamlit run` foi disparado.
 LOGO_PATH = Path(__file__).resolve().parent.parent / "Sentinel_logo.gif"
+LOGO_WIDTH = 200  # px — mesmo tamanho usado na sidebar (modules/home.py)
 
 
 # region ====================== SESSÃO 1: CSS da Tela de Login ======================
@@ -66,34 +67,40 @@ def _inject_login_css():
         box-shadow: 0 6px 20px rgba(30,58,95,0.35) !important;
     }
 
-    /* Texto "SENTINEL" em dourado 3D reluzente — logo abaixo do logo animado */
+    /* Logo animado centralizado (sem esticar — tamanho fixo, igual à sidebar) */
+    .main [data-testid="stImage"] {
+        display: flex;
+        justify-content: center;
+    }
+
+    /* Texto "SENTINEL" em dourado 3D reluzente — cor sólida + sombra em
+       camadas (relevo) + brilho pulsante. Sem background-clip: em alguns
+       navegadores/contextos ele não recorta certo e pinta um retângulo
+       sólido atrás do texto em vez de recortar só as letras. */
     .sentinel-gold-3d {
         font-family: 'Arial Black', Arial, sans-serif;
         font-weight: 900;
         letter-spacing: 0.14em;
         text-align: center;
         line-height: 1.1;
-        background: linear-gradient(180deg,
-            #fff6d0 0%, #ffe17a 18%, #d4af37 42%,
-            #b8860b 58%, #ffe17a 78%, #7a5218 100%);
-        background-size: 100% 220%;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        -webkit-text-fill-color: transparent;
-        text-shadow:
-            0 1px 0 #8a6314,
-            0 2px 0 #7a5610,
-            0 3px 1px rgba(0,0,0,.25),
-            0 5px 10px rgba(0,0,0,.30),
-            0 0 24px rgba(255,210,90,.45);
-        animation: sentinelShine 4s ease-in-out infinite;
+        color: #ffd54a;
+        animation: sentinelGlow 2.6s ease-in-out infinite alternate;
     }
     .sentinel-gold-3d.lg { font-size: 2.6rem; margin-top: -0.4rem; }
     .sentinel-gold-3d.sm { font-size: 1.35rem; }
-    @keyframes sentinelShine {
-        0%, 100% { background-position: 0% 0%; }
-        50%      { background-position: 0% 100%; }
+    @keyframes sentinelGlow {
+        0% {
+            text-shadow:
+                0 1px 0 #8a6314, 0 2px 0 #7a5610,
+                0 3px 1px rgba(0,0,0,.25), 0 5px 10px rgba(0,0,0,.30),
+                0 0 12px rgba(255,213,74,.45), 0 0 24px rgba(255,193,7,.25);
+        }
+        100% {
+            text-shadow:
+                0 1px 0 #8a6314, 0 2px 0 #7a5610,
+                0 3px 1px rgba(0,0,0,.25), 0 5px 10px rgba(0,0,0,.30),
+                0 0 22px rgba(255,224,130,.85), 0 0 44px rgba(255,193,7,.55);
+        }
     }
     </style>
     """, unsafe_allow_html=True)
@@ -105,9 +112,7 @@ def _inject_login_css():
 
 def _render_header():
     if LOGO_PATH.exists():
-        col_esq, col_meio, col_dir = st.columns([1, 1.3, 1])
-        with col_meio:
-            st.image(str(LOGO_PATH), use_container_width=True)
+        st.image(str(LOGO_PATH), width=LOGO_WIDTH)
     else:
         st.markdown(
             "<div style='text-align:center;color:#dc2626;font-size:0.85rem;'>"
