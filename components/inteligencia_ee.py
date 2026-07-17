@@ -757,6 +757,125 @@ def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
 # endregion
 
 
+# region ====================== SESSÃO 4C: Maiores Ofensores de THP ============
+# Pedido do Julio (17/07/2026): nenhum gráfico da aba rankeava explicitamente
+# por THP (todos ordenavam por contagem de falhas, só mostrando o THP como
+# informação secundária). Este bloco inverte a prioridade — ranking direto
+# de trem-parado por ativo, com a causa predominante (Classificação/origem
+# efetiva) e o sintoma predominante ao lado, pra responder "quem mais
+# derruba a malha e por quê" numa tacada só.
+
+_TOP_OFENSORES_THP = 10
+
+
+def _bloco_ofensores_thp(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 🔥 Maiores Ofensores de THP — Ativo × Causa Predominante")
+    st.caption(
+        "Ranking por trem-parado (THP), não por contagem de falhas — "
+        "responde quem mais derruba a malha, não só quem mais aparece."
+    )
+
+    if "local_instalacao" not in df.columns:
+        st.info("Coluna de ativo (TPLNR) indisponível.")
+        return
+
+    def _moda(s):
+        s = s.dropna()
+        m = s.mode()
+        return m.iloc[0] if not m.empty else "—"
+
+    g = (
+        df.groupby("local_instalacao")
+          .agg(
+              thp_h=("thp_h", "sum"),
+              falhas=("local_instalacao", "size"),
+              reincidencias=("reincidencia_ativo", "sum"),
+              patio=("patio", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
+              sistema=("sistema", lambda s: s.dropna().iloc[0] if s.notna().any() else "—"),
+              classificacao=("origem_efetiva", _moda),
+              sintoma_principal=("anomalia_sintoma", _moda),
+          )
+          .reset_index()
+    )
+    g = g[g["thp_h"] > 0].sort_values("thp_h", ascending=False)
+    if g.empty:
+        st.info("Sem falhas com THP registrado no escopo atual.")
+        return
+
+    g["reincidencias"] = g["reincidencias"].astype(int)
+    total_thp = df["thp_h"].sum()
+    g_chart = g.head(_TOP_OFENSORES_THP)
+
+    if not ECHARTS_OK:
+        st.dataframe(g, use_container_width=True, hide_index=True)
+        return
+
+    rotulos = [ativo_curto(a) for a in g_chart["local_instalacao"]]
+    thp     = [round(float(v), 1) for v in g_chart["thp_h"]]
+    falhas  = [int(v) for v in g_chart["falhas"]]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis", "axisPointer": {"type": "shadow"},
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
+        },
+        "legend": {
+            "data": ["THP (h)", "Falhas"], "top": 0,
+            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
+        },
+        "grid": {"left": "3%", "right": "6%", "top": "12%", "bottom": "28%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": rotulos,
+            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
+        },
+        "yAxis": [
+            {"type": "value", "name": "THP (h)", "axisLabel": {"color": COR_CRIT, "fontSize": 13},
+             "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+            {"type": "value", "name": "Falhas", "position": "right",
+             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"show": False}},
+        ],
+        "series": [
+            {"name": "THP (h)", "type": "bar", "data": thp,
+             "itemStyle": {"color": COR_CRIT, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
+             "label": {
+                 "show": True, "position": "top", "color": "#1f2937",
+                 "fontSize": 13, "fontWeight": "bold",
+                 "formatter": JsCode(
+                     f"function(p){{return p.value + 'h (' + (p.value/{total_thp or 1}*100).toFixed(0) + '%)';}}"
+                 ),
+             }},
+            {"name": "Falhas", "type": "line", "yAxisIndex": 1, "data": falhas,
+             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
+             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
+        ],
+    }
+    st_echarts(opt, height="600px", key=f"ee_ofensores_thp_{escopo}")
+
+    tabela = g.head(_TOP_OFENSORES_THP).rename(columns={
+        "local_instalacao": "Ativo",
+        "patio": "Pátio",
+        "sistema": "Sistema",
+        "classificacao": "Classificação (causa)",
+        "sintoma_principal": "Sintoma predominante",
+        "falhas": "Falhas",
+        "reincidencias": "Reincid. 90d",
+        "thp_h": "THP (h)",
+    })
+    tabela["Ativo"] = tabela["Ativo"].apply(ativo_curto)
+    tabela["THP (h)"] = tabela["THP (h)"].round(0).astype(int)
+    st.dataframe(
+        tabela[["Ativo", "Pátio", "Sistema", "Classificação (causa)",
+                "Sintoma predominante", "Falhas", "Reincid. 90d", "THP (h)"]],
+        use_container_width=True, hide_index=True,
+    )
+
+# endregion
+
+
 # region ====================== SESSÃO 5: BLOCO 4 — Ranking Reincidência ========
 
 def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
@@ -1565,6 +1684,8 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     st.markdown("---")
     _bloco_unifilar(df, escopo, modo_todos=modo_todos_trecho,
                      ramal_view=ramal_trecho, ramais_disp=ramais_disp)
+    st.markdown("---")
+    _bloco_ofensores_thp(df, escopo)
     st.markdown("---")
     _bloco_grupos_ativo(df, escopo)
     st.markdown("---")
