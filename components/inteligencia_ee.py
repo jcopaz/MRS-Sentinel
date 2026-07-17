@@ -497,30 +497,32 @@ def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
             "trigger": "axis", "axisPointer": {"type": "shadow"},
             "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
             "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
-            "textStyle": {"color": "#1f2937", "fontSize": 12},
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
         },
         "legend": {
             "data": ["Nº de falhas", "THP (h)"], "top": 0,
-            "textStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
         },
-        "grid": {"left": "3%", "right": "6%", "top": "15%", "bottom": "24%", "containLabel": True},
+        "grid": {"left": "3%", "right": "6%", "top": "12%", "bottom": "26%", "containLabel": True},
         "xAxis": {
             "type": "category", "data": labels,
-            "axisLabel": {"color": "#374151", "fontSize": 10, "rotate": 40, "interval": 0},
+            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
             "axisLine": {"lineStyle": {"color": "#9ca3af"}},
         },
         "yAxis": [
-            {"type": "value", "name": "Nº de falhas", "axisLabel": {"color": "#374151"},
+            {"type": "value", "name": "Nº de falhas", "axisLabel": {"color": "#374151", "fontSize": 13},
+             "nameTextStyle": {"fontSize": 13},
              "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
             {"type": "value", "name": "THP (h)", "position": "right",
-             "axisLabel": {"color": COR_THP}, "splitLine": {"show": False}},
+             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"show": False}},
         ],
         "series": [
             {"name": "Nº de falhas", "type": "bar", "data": qtd,
              "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
              "label": {
                  "show": True, "position": "top", "color": "#1f2937",
-                 "fontSize": 10, "fontWeight": "bold",
+                 "fontSize": 13, "fontWeight": "bold",
                  "formatter": JsCode(
                      f"function(p){{return p.value + ' (' + (p.value/{total_falhas}*100).toFixed(0) + '%)';}}"
                  ),
@@ -530,7 +532,7 @@ def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
              "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
         ],
     }
-    st_echarts(opt, height="420px", key=f"ee_pareto_{escopo}")
+    st_echarts(opt, height="600px", key=f"ee_pareto_{escopo}")
 
 # endregion
 
@@ -593,30 +595,32 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
         "tooltip": {
             "trigger": "axis", "axisPointer": {"type": "shadow"},
             "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
-            "textStyle": {"color": "#1f2937"},
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
         },
         "legend": {
             "data": ["Falhas", "THP (h)"], "top": 0,
-            "textStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
         },
-        "grid": {"left": "3%", "right": "6%", "top": "15%", "bottom": "26%", "containLabel": True},
+        "grid": {"left": "3%", "right": "6%", "top": "12%", "bottom": "28%", "containLabel": True},
         "xAxis": {
             "type": "category", "data": rotulos,
-            "axisLabel": {"color": "#374151", "fontSize": 10, "rotate": 40, "interval": 0},
+            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
             "axisLine": {"lineStyle": {"color": "#9ca3af"}},
         },
         "yAxis": [
-            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151"},
+            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151", "fontSize": 13},
+             "nameTextStyle": {"fontSize": 13},
              "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
             {"type": "value", "name": "THP (h)", "position": "right",
-             "axisLabel": {"color": COR_THP}, "splitLine": {"show": False}},
+             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"show": False}},
         ],
         "series": [
             {"name": "Falhas", "type": "bar", "data": falhas,
              "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
              "label": {
                  "show": True, "position": "top", "color": "#1f2937",
-                 "fontSize": 10, "fontWeight": "bold",
+                 "fontSize": 13, "fontWeight": "bold",
                  "formatter": JsCode(
                      f"function(p){{return p.value + ' (' + (p.value/{total or 1}*100).toFixed(0) + '%)';}}"
                  ),
@@ -626,7 +630,7 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
              "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
         ],
     }
-    st_echarts(opt, height="420px", key=f"ee_obras_manut_{escopo}")
+    st_echarts(opt, height="600px", key=f"ee_obras_manut_{escopo}")
 
     with st.expander("🔎 Ver tabela completa por Origem da Atividade"):
         tab = g.rename(columns={
@@ -706,33 +710,33 @@ def _bloco_heatmap_patio_origem(df: pd.DataFrame, escopo: str = ""):
             "position": "top",
             "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
             "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
-            "textStyle": {"color": "#1f2937", "fontSize": 12},
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
             "formatter": tooltip_fmt,
         },
         "grid": {"left": "3%", "right": "4%", "top": "5%", "bottom": "26%", "containLabel": True},
         "xAxis": {
             "type": "category", "data": patio_labels,
-            "axisLabel": {"color": "#374151", "fontSize": 10, "rotate": 40, "interval": 0},
+            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
             "splitArea": {"show": True},
         },
         "yAxis": {
             "type": "category", "data": origem_labels,
-            "axisLabel": {"color": "#374151", "fontSize": 10},
+            "axisLabel": {"color": "#374151", "fontSize": 13},
             "splitArea": {"show": True},
         },
         "visualMap": {
             "min": 0, "max": max_val, "calculable": True, "orient": "horizontal",
             "left": "center", "bottom": 0,
             "inRange": {"color": ["#eef2ff", COR_PRIMARIA, COR_CRIT]},
-            "textStyle": {"color": "#1f2937"},
+            "textStyle": {"color": "#1f2937", "fontSize": 13},
         },
         "series": [{
             "type": "heatmap", "data": dados_heatmap,
-            "label": {"show": True, "color": "#1f2937", "fontSize": 10},
+            "label": {"show": True, "color": "#1f2937", "fontSize": 13, "fontWeight": "bold"},
             "emphasis": {"itemStyle": {"shadowBlur": 10, "shadowColor": "rgba(0,0,0,0.3)"}},
         }],
     }
-    altura = max(360, 34 * len(origem_labels) + 160)
+    altura = max(460, 46 * len(origem_labels) + 200)
     st_echarts(opt, height=f"{altura}px", key=f"ee_heatmap_patio_origem_{escopo}")
 
 # endregion
@@ -1110,7 +1114,7 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = "", modo_todos: bool = True,
             "lineStyle": {"color": "#9ca3af", "type": "dashed", "width": 1},
             "label": {
                 "formatter": "{b}", "position": "insideEndTop",
-                "color": "#374151", "fontSize": 10, "fontWeight": "bold",
+                "color": "#374151", "fontSize": 12, "fontWeight": "bold",
                 "rotate": 90, "distance": [4, 4],
             },
             "data": [
@@ -1128,16 +1132,16 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = "", modo_todos: bool = True,
             "backgroundColor": "rgba(255,255,255,0.98)",
             "borderColor": COR_PRIMARIA, "borderWidth": 2, "padding": [10, 14],
             "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;max-width:320px;",
-            "textStyle": {"color": "#1f2937", "fontSize": 12},
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
             "formatter": tooltip,
         },
-        "grid": {"left": 50, "right": 90, "top": 20, "bottom": 75, "containLabel": True},
+        "grid": {"left": 60, "right": 90, "top": 20, "bottom": 75, "containLabel": True},
         "xAxis": {
             "type": "value", "name": eixo_nome,
             "nameLocation": "middle", "nameGap": 32,
-            "nameTextStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+            "nameTextStyle": {"color": "#374151", "fontSize": 13, "fontWeight": "bold"},
             "axisLine": {"lineStyle": {"color": "#9ca3af"}},
-            "axisLabel": {"color": "#374151", "fontSize": 11},
+            "axisLabel": {"color": "#374151", "fontSize": 13},
             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}},
         },
         "yAxis": {"type": "value", "name": "Score", "min": 0, "max": 1, "show": False},
@@ -1147,7 +1151,7 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = "", modo_todos: bool = True,
             "orient": "horizontal", "left": "center", "bottom": 0,
             "text": ["🔴 Crítico (1,0)", "🟢 Normal (0,0)"],
             "calculable": True, "precision": 2, "showLabel": True,
-            "textStyle": {"color": "#1f2937", "fontSize": 11},
+            "textStyle": {"color": "#1f2937", "fontSize": 13},
             "inRange": {"color": [COR_OK, COR_WARN, COR_CRIT]},
         },
         "dataZoom": [
@@ -1159,7 +1163,7 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = "", modo_todos: bool = True,
         "series": series,
     }
     chart_key = f"ee_unifilar_{escopo}_{'TODOS' if modo_todos else ramal_view}"
-    st_echarts(options=option, height="460px", key=chart_key)
+    st_echarts(options=option, height="560px", key=chart_key)
 
 
 def _percentil_score(pts, q):
