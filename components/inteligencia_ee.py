@@ -10,29 +10,44 @@
 # Entrada: DataFrame canônico produzido por core.parser_rasf / queries_rasf.
 # Uso:     render_inteligencia_ee(df, escopo="SP"|"VP"|"GLOBAL")
 #
-# Blocos (recorte pedido pelo Julio — 16/07/2026, cards+heatmap em 16/07/2026):
-#   -1. Exportar Relatório   (HTML autônomo do recorte filtrado — ver
-#                             components/relatorio_ee.py)
-#   0. Cards Resumo          (ativo c/ mais falhas, ativo c/ maior THP, ativo
-#                             mais reincidente, sintoma mais crítico por THP,
-#                             origem de atividade mais frequente)
-#   1. Unifilar EE           (ativo × posição seq. no trecho, cor=score, anel
-#                             reincidência, tamanho=qtd de falhas)
-#   2. Pareto de Sintomas    (contagem × THP, barras com % de representatividade)
-#   3. Obras × Manutenção    (qtd de falhas / THP por "Descrição da Origem da
-#                             Atividade" RASF, sem agrupar em categoria; barras
-#                             com % de representatividade)
-#   3B. Heatmap Pátio×Origem  (Pátio × Descrição da Origem da Atividade ×
-#                             quantidade de falhas)
-#   4. Ranking de Reincidência por Ativo (agrupado pela coluna K do RASF —
-#                             "Local de instalação", não o código TPLNR)
-#   1B. Ranking Grupos de Ativo (17/07/2026, logo após o Unifilar — mesmo
-#                             recorte que a Engenharia usa na apresentação
-#                             de Confiabilidade EE à Diretoria)
-#   5. Análises complementares (17/07/2026, expander recolhido no fim da
-#                             aba): Tendência mensal + Análise 6M — cortadas
-#                             em 16/07 e revividas depois de ver que o
-#                             material da Diretoria usa os dois recortes.
+# Estrutura em 3 seções recolhíveis (reorganização pedida pelo Julio,
+# 17/07/2026 — "linha de raciocínio": panorama → composição → nota a nota):
+#
+#   🗺️ Visão Macro (expandida por padrão)
+#     - Cards Resumo        (ativo c/ mais falhas, maior THP, mais
+#                            reincidente, sintoma mais crítico, origem mais
+#                            frequente)
+#     - Mapa de Falhas — Ativos por Trecho (ex-"Unifilar EE"; posição seq.
+#                            no trecho, cor=score, anel=reincidência,
+#                            tamanho=qtd de falhas)
+#     - Heatmap Pátio×Origem (Pátio × Descrição da Origem da Atividade ×
+#                            quantidade de falhas)
+#     - Tendência mensal
+#
+#   🔍 Visão Micro (recolhida por padrão) — os 4 gráficos abaixo têm uma
+#     caixa "Quebrar barras por:" que troca a barra sólida por empilhada
+#     numa dimensão secundária (Sintoma/Objeto/Problema, e também Tipo de
+#     Falha no caso do Ofensores de THP) — ver _grafico_falhas_thp_quebra().
+#     Abre sempre em "Sem quebra".
+#     - Obras × Manutenção  (Falhas × THP por Origem da Atividade efetiva)
+#     - Ranking Grupos de Ativo (Falhas × THP)
+#     - Maiores Ofensores de THP (ranking por THP, não por contagem — ver
+#                            tabela filtrável abaixo do gráfico)
+#     - Pareto de Sintomas  (Falhas × THP por Sintoma)
+#
+#   🔎 Detalhamento (recolhida por padrão)
+#     - Ranking de Reincidência por Ativo (agrupado pela coluna K do RASF
+#                            — "Local de instalação", não o TPLNR; tabela
+#                            filtrável)
+#     - Árvore de Falhas    (drill-down Grupo do Ativo × Objeto × Perda,
+#                            com filtros de Grupo do Ativo/Objeto)
+#     - Detalhamento de Notas (Nota × Objeto × Perda × Ação × Disposições
+#                            Reunião; tabela filtrável)
+#     - Análise 6M          (Ishikawa consolidado)
+#
+# Tabelas "filtráveis" usam streamlit-aggrid (_tabela_filtravel()) — filtro
+# de coluna nativo estilo Excel; cai pra st.dataframe comum se o pacote não
+# estiver instalado.
 #
 # Filtros (essenciais): Sistema, Reincidência, Gerador THP (coluna Z do
 #   RASF — marcada com "X"), Período (Data da nota), Descrição Tipo
@@ -60,6 +75,12 @@ try:
     ECHARTS_OK = True
 except ImportError:
     ECHARTS_OK = False
+
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder
+    AGGRID_OK = True
+except ImportError:
+    AGGRID_OK = False
 
 try:
     from core.glossarios import decodificar_tplnr, nome_ramal, ativo_curto
@@ -475,6 +496,145 @@ def _bloco_cards_resumo(df: pd.DataFrame, escopo: str = ""):
 # endregion
 
 
+# region ====================== SESSÃO 2D: Gráfico Barra+Linha c/ Quebra =======
+# Helper compartilhado por Obras×Manutenção, Grupos de Ativo, Maiores
+# Ofensores de THP e Pareto de Sintomas — pedido do Julio (17/07/2026): os
+# quatro ganham uma caixa de seleção pra trocar a barra sólida por uma
+# empilhada (Sintoma/Objeto/Problema/Tipo de Falha, conforme o gráfico).
+# Abre sempre em "Sem quebra" (igual já era antes) — quem quiser a
+# composição escolhe na caixa.
+
+_CORES_QUEBRA_ESPECIAIS = {
+    "Crítica": "#dc2626", "Alto Impacto": "#f59e0b", "Médio Impacto": "#fbbf24",
+    "Baixo Impacto": "#16a34a", "Não informado": "#9ca3af", "Outros": "#9ca3af",
+}
+_PALETA_QUEBRA = ["#1e3a5f", "#0ea5e9", "#f59e0b", "#7c3aed", "#dc2626", "#16a34a", "#be185d"]
+
+
+def _grafico_falhas_thp_quebra(
+    df: pd.DataFrame, x_col: str, x_values: list, rotulos: list,
+    bar_vals: list, line_vals: list, bar_name: str, line_name: str,
+    cor_bar: str, cor_line: str, escopo: str, key_base: str,
+    opcoes_quebra: dict | None = None, metric_quebra_col: str | None = None,
+    top_n_quebra: int = 6, unidade_bar: str = "", altura: str = "600px",
+    total_geral: float | None = None,
+):
+    """
+    Renderiza um ECharts bar+line, com caixa de seleção opcional pra trocar
+    a barra sólida por uma empilhada por alguma dimensão secundária.
+
+    Args:
+        x_values:   valores brutos do eixo X (já rankeados/top-N pelo
+                    chamador), define a ordem de exibição.
+        rotulos:    rótulos formatados do eixo X, mesma ordem de x_values.
+        bar_vals/line_vals: métricas já agregadas, mesma ordem de x_values.
+        opcoes_quebra: {"Sintoma": "anomalia_sintoma", ...} — None/vazio
+                    desliga a caixa de seleção (gráfico sempre sólido).
+        metric_quebra_col: coluna numérica pra somar na quebra (ex.:
+                    "thp_h"); None soma contagem de linhas (falhas).
+        unidade_bar: sufixo no rótulo do total (ex.: "h" pra THP, "" pra
+                    contagem de falhas).
+        total_geral: denominador do % de cada barra — total do RECORTE
+                    inteiro (não só das barras exibidas no Top N). Se None,
+                    cai pra soma das barras exibidas.
+    """
+    total_bar = total_geral if total_geral is not None else (sum(bar_vals) or 1)
+    total_bar = total_bar or 1
+    escolha = "Sem quebra (total)"
+    if opcoes_quebra:
+        escolha = st.selectbox(
+            "Quebrar barras por:", ["Sem quebra (total)"] + list(opcoes_quebra.keys()),
+            index=0, key=f"{key_base}_quebra_{escopo}",
+        )
+
+    if escolha == "Sem quebra (total)":
+        series_bar = [{
+            "name": bar_name, "type": "bar", "data": bar_vals,
+            "itemStyle": {"color": cor_bar, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
+            "label": {
+                "show": True, "position": "top", "color": "#1f2937",
+                "fontSize": 13, "fontWeight": "bold",
+                "formatter": JsCode(
+                    f"function(p){{return p.value + '{unidade_bar}' + ' (' + (p.value/{total_bar}*100).toFixed(0) + '%)';}}"
+                ),
+            },
+        }]
+        legend_data = [bar_name, line_name]
+    else:
+        col_quebra = opcoes_quebra[escolha]
+        d = df[df[x_col].isin(x_values)].copy()
+        d[col_quebra] = d[col_quebra].where(d[col_quebra].notna(), "Não informado")
+        if metric_quebra_col:
+            pivot = d.groupby([x_col, col_quebra])[metric_quebra_col].sum().unstack(fill_value=0.0)
+        else:
+            pivot = d.groupby([x_col, col_quebra]).size().unstack(fill_value=0)
+        pivot = pivot.reindex(x_values, fill_value=0)
+
+        totais_col = pivot.sum(axis=0).sort_values(ascending=False)
+        top_cats = totais_col.head(top_n_quebra).index.tolist()
+        outras = [c for c in pivot.columns if c not in top_cats]
+        if outras:
+            pivot["Outros"] = pivot[outras].sum(axis=1)
+        categorias_finais = top_cats + (["Outros"] if outras else [])
+
+        series_bar = []
+        for i, cat in enumerate(categorias_finais):
+            vals = [round(float(v), 1) for v in pivot[cat]]
+            cor_cat = _CORES_QUEBRA_ESPECIAIS.get(str(cat), _PALETA_QUEBRA[i % len(_PALETA_QUEBRA)])
+            serie = {
+                "name": str(cat), "type": "bar", "stack": "principal", "data": vals,
+                "itemStyle": {"color": cor_cat}, "barWidth": "55%",
+            }
+            if i == len(categorias_finais) - 1:
+                serie["label"] = {
+                    "show": True, "position": "top", "color": "#1f2937",
+                    "fontSize": 13, "fontWeight": "bold",
+                    "formatter": JsCode(f"""
+                        function(p){{
+                            var totais = {json.dumps(bar_vals)};
+                            var t = totais[p.dataIndex];
+                            return t + '{unidade_bar}' + ' (' + (t/{total_bar}*100).toFixed(0) + '%)';
+                        }}
+                    """),
+                }
+            series_bar.append(serie)
+        legend_data = categorias_finais + [line_name]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis", "axisPointer": {"type": "shadow"},
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
+        },
+        "legend": {
+            "data": legend_data, "top": 0, "type": "scroll",
+            "textStyle": {"color": "#374151", "fontSize": 13, "fontWeight": "bold"},
+        },
+        "grid": {"left": "3%", "right": "6%", "top": "14%", "bottom": "28%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": rotulos,
+            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
+        },
+        "yAxis": [
+            {"type": "value", "name": bar_name, "axisLabel": {"color": cor_bar, "fontSize": 13},
+             "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+            {"type": "value", "name": line_name, "position": "right",
+             "axisLabel": {"color": cor_line, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"show": False}},
+        ],
+        "series": series_bar + [
+            {"name": line_name, "type": "line", "yAxisIndex": 1, "data": line_vals,
+             "smooth": True, "lineStyle": {"color": cor_line, "width": 3},
+             "itemStyle": {"color": cor_line}, "symbol": "circle", "symbolSize": 8},
+        ],
+    }
+    st_echarts(opt, height=altura, key=f"{key_base}_{escopo}")
+
+# endregion
+
+
 # region ====================== SESSÃO 3: BLOCO 2 — Pareto de Sintomas x THP ====
 
 def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
@@ -502,52 +662,24 @@ def _bloco_pareto_sintomas(df: pd.DataFrame, escopo: str = ""):
         st.dataframe(g[["anomalia_sintoma", "qtd", "thp_h"]], use_container_width=True, hide_index=True)
         return
 
-    labels = g["rotulo"].tolist()
-    qtd    = [int(v) for v in g["qtd"]]
-    thp    = [round(float(v), 1) for v in g["thp_h"]]
-    total_falhas = len(df) or 1  # denominador do % — total do escopo filtrado, não só o top 12
+    opcoes_quebra = {}
+    if "local_instalacao_desc" in df.columns:
+        opcoes_quebra["Ativos"] = "local_instalacao_desc"
+    if "texto_parte_objeto" in df.columns:
+        opcoes_quebra["Objeto"] = "texto_parte_objeto"
+    if "texto_problema_erro" in df.columns:
+        opcoes_quebra["Problema"] = "texto_problema_erro"
 
-    opt = {
-        "tooltip": {
-            "trigger": "axis", "axisPointer": {"type": "shadow"},
-            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
-            "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
-            "textStyle": {"color": "#1f2937", "fontSize": 14},
-        },
-        "legend": {
-            "data": ["Nº de falhas", "THP (h)"], "top": 0,
-            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
-        },
-        "grid": {"left": "3%", "right": "6%", "top": "12%", "bottom": "26%", "containLabel": True},
-        "xAxis": {
-            "type": "category", "data": labels,
-            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
-            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
-        },
-        "yAxis": [
-            {"type": "value", "name": "Nº de falhas", "axisLabel": {"color": "#374151", "fontSize": 13},
-             "nameTextStyle": {"fontSize": 13},
-             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
-            {"type": "value", "name": "THP (h)", "position": "right",
-             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
-             "splitLine": {"show": False}},
-        ],
-        "series": [
-            {"name": "Nº de falhas", "type": "bar", "data": qtd,
-             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
-             "label": {
-                 "show": True, "position": "top", "color": "#1f2937",
-                 "fontSize": 13, "fontWeight": "bold",
-                 "formatter": JsCode(
-                     f"function(p){{return p.value + ' (' + (p.value/{total_falhas}*100).toFixed(0) + '%)';}}"
-                 ),
-             }},
-            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
-             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
-             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
-        ],
-    }
-    st_echarts(opt, height="600px", key=f"ee_pareto_{escopo}")
+    _grafico_falhas_thp_quebra(
+        df=df, x_col="anomalia_sintoma",
+        x_values=g["anomalia_sintoma"].tolist(), rotulos=g["rotulo"].tolist(),
+        bar_vals=[int(v) for v in g["qtd"]], line_vals=[round(float(v), 1) for v in g["thp_h"]],
+        bar_name="Nº de falhas", line_name="THP (h)",
+        cor_bar=COR_PRIMARIA, cor_line=COR_THP,
+        escopo=escopo, key_base="ee_pareto",
+        opcoes_quebra=opcoes_quebra, metric_quebra_col=None,
+        total_geral=len(df),  # % sobre o recorte inteiro, não só o top 12 exibido
+    )
 
 # endregion
 
@@ -606,57 +738,24 @@ def _bloco_obras_manutencao(df: pd.DataFrame, escopo: str = ""):
     falhas  = [int(v) for v in g_chart["falhas"]]
     thp     = [round(float(v), 1) for v in g_chart["thp_h"]]
 
-    opt = {
-        "tooltip": {
-            "trigger": "axis", "axisPointer": {"type": "shadow"},
-            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
-            "textStyle": {"color": "#1f2937", "fontSize": 14},
-        },
-        "legend": {
-            "data": ["Falhas", "THP (h)"], "top": 0,
-            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
-        },
-        "grid": {"left": "3%", "right": "6%", "top": "12%", "bottom": "28%", "containLabel": True},
-        "xAxis": {
-            "type": "category", "data": rotulos,
-            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
-            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
-        },
-        "yAxis": [
-            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151", "fontSize": 13},
-             "nameTextStyle": {"fontSize": 13},
-             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
-            {"type": "value", "name": "THP (h)", "position": "right",
-             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
-             "splitLine": {"show": False}},
-        ],
-        "series": [
-            {"name": "Falhas", "type": "bar", "data": falhas,
-             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
-             "label": {
-                 "show": True, "position": "top", "color": "#1f2937",
-                 "fontSize": 13, "fontWeight": "bold",
-                 "formatter": JsCode(
-                     f"function(p){{return p.value + ' (' + (p.value/{total or 1}*100).toFixed(0) + '%)';}}"
-                 ),
-             }},
-            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
-             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
-             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
-        ],
-    }
-    st_echarts(opt, height="600px", key=f"ee_obras_manut_{escopo}")
+    opcoes_quebra = {}
+    if "anomalia_sintoma" in df.columns:
+        opcoes_quebra["Sintoma"] = "anomalia_sintoma"
+    if "texto_parte_objeto" in df.columns:
+        opcoes_quebra["Objeto"] = "texto_parte_objeto"
+    if "texto_problema_erro" in df.columns:
+        opcoes_quebra["Problema"] = "texto_problema_erro"
 
-    with st.expander("🔎 Ver tabela completa por Origem da Atividade"):
-        tab = g.rename(columns={
-            "origem_efetiva": "Origem da Atividade (efetiva)",
-            "falhas": "Falhas",
-            "thp_h": "THP (h)",
-            "reincidencias": "Reincid. 90d",
-            "backlog": "Backlog RCA",
-        })
-        tab["THP (h)"] = tab["THP (h)"].round(0).astype(int)
-        st.dataframe(tab, use_container_width=True, hide_index=True)
+    _grafico_falhas_thp_quebra(
+        df=df, x_col="origem_efetiva",
+        x_values=g_chart["origem_efetiva"].tolist(), rotulos=rotulos,
+        bar_vals=falhas, line_vals=thp,
+        bar_name="Falhas", line_name="THP (h)",
+        cor_bar=COR_PRIMARIA, cor_line=COR_THP,
+        escopo=escopo, key_base="ee_obras_manut",
+        opcoes_quebra=opcoes_quebra, metric_quebra_col=None,
+        total_geral=total,
+    )
 
 # endregion
 
@@ -814,84 +913,26 @@ def _bloco_ofensores_thp(df: pd.DataFrame, escopo: str = ""):
     thp     = [round(float(v), 1) for v in g_chart["thp_h"]]
     falhas  = [int(v) for v in g_chart["falhas"]]
 
-    # Barra empilhada por Tipo de falha (Crítica/Alto/Médio/Baixo Impacto) —
-    # pedido do Julio (17/07/2026): a barra sólida escondia a composição de
-    # cada ativo; agora cada segmento mostra quanto THP veio de cada tipo,
-    # com a legenda listando os tipos em vez de só "THP (h)".
-    ativos_top = g_chart["local_instalacao"].tolist()
-    d_tipo = df[df["local_instalacao"].isin(ativos_top)].copy()
-    d_tipo["tipo_falha"] = d_tipo.get("tipo_falha")
-    d_tipo["tipo_falha"] = d_tipo["tipo_falha"].where(d_tipo["tipo_falha"].notna(), "Não informado")
-    pivot_tipo = (
-        d_tipo.groupby(["local_instalacao", "tipo_falha"])["thp_h"]
-              .sum().unstack(fill_value=0.0)
-              .reindex(ativos_top)
+    opcoes_quebra = {}
+    if "tipo_falha" in df.columns:
+        opcoes_quebra["Tipo de Falha"] = "tipo_falha"
+    if "anomalia_sintoma" in df.columns:
+        opcoes_quebra["Sintoma"] = "anomalia_sintoma"
+    if "texto_parte_objeto" in df.columns:
+        opcoes_quebra["Objeto"] = "texto_parte_objeto"
+    if "texto_problema_erro" in df.columns:
+        opcoes_quebra["Problema"] = "texto_problema_erro"
+
+    _grafico_falhas_thp_quebra(
+        df=df, x_col="local_instalacao",
+        x_values=g_chart["local_instalacao"].tolist(), rotulos=rotulos,
+        bar_vals=thp, line_vals=falhas,
+        bar_name="THP (h)", line_name="Falhas",
+        cor_bar=COR_CRIT, cor_line=COR_THP,
+        escopo=escopo, key_base="ee_ofensores_thp",
+        opcoes_quebra=opcoes_quebra, metric_quebra_col="thp_h",
+        unidade_bar="h", total_geral=total_thp, altura="620px",
     )
-    ordem_tipos = [t for t in _PESO_TIPO_FALHA if t in pivot_tipo.columns]
-    ordem_tipos += [t for t in pivot_tipo.columns if t not in ordem_tipos]
-
-    cores_tipo = {
-        "Crítica": COR_CRIT, "Alto Impacto": COR_WARN,
-        "Médio Impacto": "#fbbf24", "Baixo Impacto": COR_OK,
-        "Não informado": "#9ca3af",
-    }
-
-    series_thp = []
-    for i, tipo in enumerate(ordem_tipos):
-        valores = [round(float(v), 1) for v in pivot_tipo[tipo]]
-        serie = {
-            "name": tipo, "type": "bar", "stack": "thp", "data": valores,
-            "itemStyle": {"color": cores_tipo.get(tipo, "#9ca3af")},
-            "barWidth": "55%",
-        }
-        if i == len(ordem_tipos) - 1:
-            # Rótulo do total (soma da pilha) só no topo do último segmento —
-            # os totais/percentuais já vêm calculados por ativo (mesma
-            # ordem de g_chart), embutidos como array no JS.
-            serie["label"] = {
-                "show": True, "position": "top", "color": "#1f2937",
-                "fontSize": 13, "fontWeight": "bold",
-                "formatter": JsCode(f"""
-                    function(p){{
-                        var totais = {json.dumps(thp)};
-                        var t = totais[p.dataIndex];
-                        return t + 'h (' + (t/{total_thp or 1}*100).toFixed(0) + '%)';
-                    }}
-                """),
-            }
-        series_thp.append(serie)
-
-    opt = {
-        "tooltip": {
-            "trigger": "axis", "axisPointer": {"type": "shadow"},
-            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
-            "textStyle": {"color": "#1f2937", "fontSize": 14},
-        },
-        "legend": {
-            "data": ordem_tipos + ["Falhas"], "top": 0, "type": "scroll",
-            "textStyle": {"color": "#374151", "fontSize": 13, "fontWeight": "bold"},
-        },
-        "grid": {"left": "3%", "right": "6%", "top": "14%", "bottom": "28%", "containLabel": True},
-        "xAxis": {
-            "type": "category", "data": rotulos,
-            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
-            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
-        },
-        "yAxis": [
-            {"type": "value", "name": "THP (h)", "axisLabel": {"color": COR_CRIT, "fontSize": 13},
-             "nameTextStyle": {"fontSize": 13},
-             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
-            {"type": "value", "name": "Falhas", "position": "right",
-             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
-             "splitLine": {"show": False}},
-        ],
-        "series": series_thp + [
-            {"name": "Falhas", "type": "line", "yAxisIndex": 1, "data": falhas,
-             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
-             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
-        ],
-    }
-    st_echarts(opt, height="620px", key=f"ee_ofensores_thp_{escopo}")
 
     tabela = g.head(_TOP_OFENSORES_THP).rename(columns={
         "local_instalacao": "Ativo",
@@ -905,10 +946,10 @@ def _bloco_ofensores_thp(df: pd.DataFrame, escopo: str = ""):
     })
     tabela["Ativo"] = tabela["Ativo"].apply(ativo_curto)
     tabela["THP (h)"] = tabela["THP (h)"].round(0).astype(int)
-    st.dataframe(
+    _tabela_filtravel(
         tabela[["Ativo", "Pátio", "Sistema", "Classificação (causa)",
                 "Sintoma predominante", "Falhas", "Reincid. 90d", "THP (h)"]],
-        use_container_width=True, hide_index=True,
+        key=f"ee_tab_ofensores_thp_{escopo}",
     )
 
 # endregion
@@ -995,16 +1036,10 @@ def _bloco_reincidencia(df: pd.DataFrame, escopo: str = ""):
     })
     tabela["THP (h)"] = tabela["THP (h)"].round(0).astype(int)
 
-    st.dataframe(
+    _tabela_filtravel(
         tabela[["Local de Instalação", "Pátio", "Sistema", "Classificação", "Falhas",
                 "Reincid. 90d", "THP (h)", "Impacta confiab."]],
-        use_container_width=True, hide_index=True,
-        column_config={
-            "Reincid. 90d": st.column_config.ProgressColumn(
-                "Reincid. 90d", format="%d",
-                min_value=0, max_value=int(g["reincidencias"].max() or 1),
-            ),
-        },
+        key=f"ee_tab_reincidencia_{escopo}", altura=460,
     )
 
 # endregion
@@ -1092,7 +1127,7 @@ def _selecionar_trecho(df: pd.DataFrame, escopo: str):
 
 def _bloco_unifilar(df: pd.DataFrame, escopo: str = "", modo_todos: bool = True,
                      ramal_view=None, ramais_disp=None):
-    st.markdown("#### 🗺️ Unifilar EE — ativos por trecho")
+    st.markdown("#### 🗺️ Mapa de Falhas — Ativos por Trecho")
     st.caption(
         "⚠️ Eixo X = posição sequencial no trecho (não é KM real) · "
         "Tamanho = qtd de falhas · Cor = score de prioridade · "
@@ -1403,46 +1438,24 @@ def _bloco_grupos_ativo(df: pd.DataFrame, escopo: str = ""):
     falhas  = [int(v) for v in g_chart["falhas"]]
     thp     = [round(float(v), 1) for v in g_chart["thp_h"]]
 
-    opt = {
-        "tooltip": {
-            "trigger": "axis", "axisPointer": {"type": "shadow"},
-            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
-            "textStyle": {"color": "#1f2937", "fontSize": 14},
-        },
-        "legend": {
-            "data": ["Falhas", "THP (h)"], "top": 0,
-            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
-        },
-        "grid": {"left": "3%", "right": "6%", "top": "12%", "bottom": "26%", "containLabel": True},
-        "xAxis": {
-            "type": "category", "data": rotulos,
-            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
-            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
-        },
-        "yAxis": [
-            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151", "fontSize": 13},
-             "nameTextStyle": {"fontSize": 13},
-             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
-            {"type": "value", "name": "THP (h)", "position": "right",
-             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
-             "splitLine": {"show": False}},
-        ],
-        "series": [
-            {"name": "Falhas", "type": "bar", "data": falhas,
-             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
-             "label": {
-                 "show": True, "position": "top", "color": "#1f2937",
-                 "fontSize": 13, "fontWeight": "bold",
-                 "formatter": JsCode(
-                     f"function(p){{return p.value + ' (' + (p.value/{total or 1}*100).toFixed(0) + '%)';}}"
-                 ),
-             }},
-            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
-             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
-             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
-        ],
-    }
-    st_echarts(opt, height="600px", key=f"ee_grupos_ativo_{escopo}")
+    opcoes_quebra = {}
+    if "anomalia_sintoma" in df.columns:
+        opcoes_quebra["Sintoma"] = "anomalia_sintoma"
+    if "texto_parte_objeto" in df.columns:
+        opcoes_quebra["Objeto"] = "texto_parte_objeto"
+    if "texto_problema_erro" in df.columns:
+        opcoes_quebra["Problema"] = "texto_problema_erro"
+
+    _grafico_falhas_thp_quebra(
+        df=df, x_col="grupo_ativo",
+        x_values=g_chart["grupo_ativo"].tolist(), rotulos=rotulos,
+        bar_vals=falhas, line_vals=thp,
+        bar_name="Falhas", line_name="THP (h)",
+        cor_bar=COR_PRIMARIA, cor_line=COR_THP,
+        escopo=escopo, key_base="ee_grupos_ativo",
+        opcoes_quebra=opcoes_quebra, metric_quebra_col=None,
+        total_geral=total,
+    )
 
 # endregion
 
@@ -1472,43 +1485,31 @@ def _kpi(col, label, valor, cor, sub=""):
             unsafe_allow_html=True,
         )
 
-# endregion
 
-
-# region ====================== SESSÃO 7B: Exportar Relatório ==================
-
-def _bloco_exportar_relatorio(df: pd.DataFrame, escopo: str):
+def _tabela_filtravel(df: pd.DataFrame, key: str, altura: int = 420):
     """
-    Gera um HTML autônomo (components/relatorio_ee.py) com o resumo do
-    recorte JÁ FILTRADO na tela — mesmos números que o usuário está vendo.
-    Fica em session_state pra o botão de download sobreviver ao rerun do
-    Streamlit sem precisar gerar de novo a cada interação.
+    Tabela com filtro por coluna nativo (estilo Excel) via streamlit-aggrid
+    — pedido do Julio (17/07/2026) pras tabelas de Ofensores de THP, Ranking
+    de Reincidência e Detalhamento de Notas. Cai pra st.dataframe comum
+    (sem filtro de coluna) se o pacote não estiver instalado.
     """
-    st.markdown("#### 📄 Exportar Relatório")
-    st.caption(
-        "Gera um .html autônomo com o resumo do recorte filtrado acima "
-        "(Resumo Executivo, Pareto, Obras × Manutenção, Mapa de Calor e "
-        "Ranking) — abre em qualquer navegador, sem precisar do sistema."
+    if df.empty:
+        st.info("Sem dados para exibir.")
+        return
+
+    if not AGGRID_OK:
+        st.caption("💡 streamlit-aggrid não instalado — exibindo tabela sem filtro de coluna.")
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        return
+
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_default_column(filterable=True, sortable=True, resizable=True, floatingFilter=True)
+    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
+    grid_options = gb.build()
+    AgGrid(
+        df, gridOptions=grid_options, height=altura,
+        theme="streamlit", update_mode="NO_UPDATE", key=key,
     )
-
-    key_html = f"ee_relatorio_html_{escopo}"
-    col_gerar, col_baixar = st.columns([1, 2])
-
-    with col_gerar:
-        if st.button("🧾 Gerar relatório", key=f"ee_gerar_relatorio_{escopo}", use_container_width=True):
-            from components.relatorio_ee import gerar_relatorio_html
-            st.session_state[key_html] = gerar_relatorio_html(df, escopo)
-
-    with col_baixar:
-        if key_html in st.session_state:
-            st.download_button(
-                "⬇️ Baixar relatório (.html)",
-                data=st.session_state[key_html].encode("utf-8"),
-                file_name=f"relatorio_ee_{escopo}_{date.today().isoformat()}.html",
-                mime="text/html",
-                key=f"ee_download_relatorio_{escopo}",
-                use_container_width=True,
-            )
 
 # endregion
 
@@ -1690,6 +1691,27 @@ def _bloco_arvore_falhas(df: pd.DataFrame, escopo: str = ""):
         st.info("Sem dados de grupo do ativo no escopo atual.")
         return
 
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        opcoes_grupo = sorted(d["grupo_ativo"].dropna().unique())
+        sel_grupo = st.multiselect(
+            "Filtrar por Grupo do Ativo", opcoes_grupo, default=opcoes_grupo,
+            key=f"ee_arvore_filtro_grupo_{escopo}",
+        )
+    with col_f2:
+        opcoes_objeto = sorted(d["texto_parte_objeto"].dropna().unique())
+        sel_objeto = st.multiselect(
+            "Filtrar por Objeto", opcoes_objeto, default=opcoes_objeto,
+            key=f"ee_arvore_filtro_objeto_{escopo}",
+        )
+    if sel_grupo and set(sel_grupo) != set(opcoes_grupo):
+        d = d[d["grupo_ativo"].isin(sel_grupo)]
+    if sel_objeto and set(sel_objeto) != set(opcoes_objeto):
+        d = d[d["texto_parte_objeto"].isin(sel_objeto)]
+    if d.empty:
+        st.info("Sem dados para os filtros selecionados.")
+        return
+
     if not ECHARTS_OK:
         st.warning("streamlit-echarts não instalado.")
         return
@@ -1800,22 +1822,9 @@ def _bloco_detalhamento_notas(df: pd.DataFrame, escopo: str = ""):
     tab["numero_nota"] = tab["numero_nota"].astype(int)
     tab = tab.rename(columns=cols_necessarias)
 
-    st.dataframe(tab, use_container_width=True, hide_index=True)
+    _tabela_filtravel(tab, key=f"ee_tab_detalhamento_{escopo}", altura=460)
     st.caption(f"Mostrando {min(total, _TOP_DETALHAMENTO_NOTAS)} de {total} notas (mais recentes primeiro).")
 
-
-def _bloco_analises_complementares(df: pd.DataFrame, escopo: str = ""):
-    """Expander recolhível com Tendência mensal + Árvore de Falhas +
-    Detalhamento de Notas + Análise 6M — pedido do Julio (17/07/2026), ver
-    comentário da região acima."""
-    with st.expander("📊 Análises complementares — Tendência, Árvore de Falhas, Detalhamento e 6M (Ishikawa)", expanded=False):
-        _bloco_tendencia(df, escopo)
-        st.markdown("---")
-        _bloco_arvore_falhas(df, escopo)
-        st.markdown("---")
-        _bloco_detalhamento_notas(df, escopo)
-        st.markdown("---")
-        _bloco_6m(df, escopo)
 
 # endregion
 
@@ -1870,25 +1879,40 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
         return
     st.markdown("---")
 
-    _bloco_exportar_relatorio(df, escopo)
+    # Reorganização pedida pelo Julio (17/07/2026) em 3 seções recolhíveis —
+    # Visão Macro (panorama), Visão Micro (composição/quebra por dimensão) e
+    # Detalhamento (nota a nota). Expanders do Streamlit não podem aninhar,
+    # então cada bloco chama sua própria st.markdown/st.expander interno
+    # (filtros da Árvore de Falhas, tabelas AgGrid) sem abrir outro expander
+    # de nível superior dentro daqui.
+    with st.expander("🗺️ Visão Macro", expanded=True):
+        _bloco_cards_resumo(df, escopo)
+        st.markdown("---")
+        _bloco_unifilar(df, escopo, modo_todos=modo_todos_trecho,
+                         ramal_view=ramal_trecho, ramais_disp=ramais_disp)
+        st.markdown("---")
+        _bloco_heatmap_patio_origem(df, escopo)
+        st.markdown("---")
+        _bloco_tendencia(df, escopo)
     st.markdown("---")
-    _bloco_cards_resumo(df, escopo)
+
+    with st.expander("🔍 Visão Micro", expanded=False):
+        _bloco_obras_manutencao(df, escopo)
+        st.markdown("---")
+        _bloco_grupos_ativo(df, escopo)
+        st.markdown("---")
+        _bloco_ofensores_thp(df, escopo)
+        st.markdown("---")
+        _bloco_pareto_sintomas(df, escopo)
     st.markdown("---")
-    _bloco_unifilar(df, escopo, modo_todos=modo_todos_trecho,
-                     ramal_view=ramal_trecho, ramais_disp=ramais_disp)
-    st.markdown("---")
-    _bloco_ofensores_thp(df, escopo)
-    st.markdown("---")
-    _bloco_grupos_ativo(df, escopo)
-    st.markdown("---")
-    _bloco_pareto_sintomas(df, escopo)
-    st.markdown("---")
-    _bloco_obras_manutencao(df, escopo)
-    st.markdown("---")
-    _bloco_heatmap_patio_origem(df, escopo)
-    st.markdown("---")
-    _bloco_reincidencia(df, escopo)
-    st.markdown("---")
-    _bloco_analises_complementares(df, escopo)
+
+    with st.expander("🔎 Detalhamento", expanded=False):
+        _bloco_reincidencia(df, escopo)
+        st.markdown("---")
+        _bloco_arvore_falhas(df, escopo)
+        st.markdown("---")
+        _bloco_detalhamento_notas(df, escopo)
+        st.markdown("---")
+        _bloco_6m(df, escopo)
 
 # endregion
