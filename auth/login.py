@@ -12,7 +12,7 @@ from auth.session import set_usuario, set_pagina
 # Logo animado — raiz do repo (um nível acima de auth/), caminho absoluto pra
 # não depender do diretório de onde `streamlit run` foi disparado.
 LOGO_PATH = Path(__file__).resolve().parent.parent / "Sentinel_logo.gif"
-LOGO_WIDTH = 200  # px — mesmo tamanho usado na sidebar (modules/home.py)
+LOGO_WIDTH = 240  # px — mesmo tamanho usado na sidebar (modules/home.py)
 
 
 # region ====================== SESSÃO 1: CSS da Tela de Login ======================
@@ -75,12 +75,18 @@ def _inject_login_css():
     }
 
     /* Logo animado centralizado (sem esticar — tamanho fixo, igual à sidebar).
-       Mesmo motivo do bloco acima: ".main" não existe mais como ancestral,
-       daí o [data-testid="stMainBlockContainer"] como alternativa. */
-    .main [data-testid="stImage"],
-    [data-testid="stMainBlockContainer"] [data-testid="stImage"] {
-        display: flex;
-        justify-content: center;
+       ⚠️ "display:flex;justify-content:center" no wrapper NÃO centraliza
+       aqui porque o wrapper [data-testid="stImage"] já nasce do tamanho
+       exato da imagem (fit-content) — não sobra espaço dentro dele pra
+       centralizar nada. A técnica que funciona de verdade: forçar o
+       wrapper a 100% da largura do container e centralizar o <img> dentro
+       dele via margin:auto. */
+    [data-testid="stImage"] {
+        width: 100% !important;
+    }
+    [data-testid="stImage"] img {
+        display: block;
+        margin: 0 auto !important;
     }
 
     /* Texto "SENTINEL" em dourado 3D reluzente — cor sólida + relevo nítido

@@ -12,7 +12,7 @@ from database.queries import log_acesso, contar_alertas_novos
 # Logo animado — raiz do repo (um nível acima de modules/), caminho absoluto
 # pra não depender do diretório de onde `streamlit run` foi disparado.
 LOGO_PATH = Path(__file__).resolve().parent.parent / "Sentinel_logo.gif"
-LOGO_WIDTH = 200  # px — mesmo tamanho usado na tela de Login (auth/login.py)
+LOGO_WIDTH = 240  # px — mesmo tamanho usado na tela de Login (auth/login.py)
 
 
 # region ====================== SESSÃO 1: CSS da Sidebar ======================
@@ -27,11 +27,19 @@ def _inject_sidebar_css():
         padding: 0;
     }
 
-    /* Logo animado no topo — centralizado, tamanho fixo (igual à tela de Login) */
+    /* Logo animado no topo — centralizado, tamanho fixo (igual à tela de Login).
+       ⚠️ "display:flex;justify-content:center" no wrapper NÃO centraliza
+       aqui porque [data-testid="stImage"] já nasce do tamanho exato da
+       imagem (fit-content) — não sobra espaço dentro dele pra centralizar
+       nada. Técnica que funciona: wrapper a 100% da largura + <img> com
+       margin:auto dentro dele. */
     [data-testid="stSidebar"] [data-testid="stImage"] {
-        display: flex;
-        justify-content: center;
+        width: 100% !important;
         padding: 1.2rem 0 0 0;
+    }
+    [data-testid="stSidebar"] [data-testid="stImage"] img {
+        display: block;
+        margin: 0 auto !important;
     }
 
     /* Todos os textos na sidebar ficam brancos */
