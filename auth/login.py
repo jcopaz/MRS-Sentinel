@@ -27,9 +27,9 @@ def _inject_login_css():
     /* Remove sidebar na tela de login */
     [data-testid="stSidebar"] { display: none !important; }
 
-    /* Fundo preto */
+    /* Fundo escuro */
     .stApp {
-        background: #000000;
+        background: #1b2130;
     }
 
     /* Remove padding padrão para centralizar melhor.
