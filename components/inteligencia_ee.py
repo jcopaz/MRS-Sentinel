@@ -814,6 +814,53 @@ def _bloco_ofensores_thp(df: pd.DataFrame, escopo: str = ""):
     thp     = [round(float(v), 1) for v in g_chart["thp_h"]]
     falhas  = [int(v) for v in g_chart["falhas"]]
 
+    # Barra empilhada por Tipo de falha (Crítica/Alto/Médio/Baixo Impacto) —
+    # pedido do Julio (17/07/2026): a barra sólida escondia a composição de
+    # cada ativo; agora cada segmento mostra quanto THP veio de cada tipo,
+    # com a legenda listando os tipos em vez de só "THP (h)".
+    ativos_top = g_chart["local_instalacao"].tolist()
+    d_tipo = df[df["local_instalacao"].isin(ativos_top)].copy()
+    d_tipo["tipo_falha"] = d_tipo.get("tipo_falha")
+    d_tipo["tipo_falha"] = d_tipo["tipo_falha"].where(d_tipo["tipo_falha"].notna(), "Não informado")
+    pivot_tipo = (
+        d_tipo.groupby(["local_instalacao", "tipo_falha"])["thp_h"]
+              .sum().unstack(fill_value=0.0)
+              .reindex(ativos_top)
+    )
+    ordem_tipos = [t for t in _PESO_TIPO_FALHA if t in pivot_tipo.columns]
+    ordem_tipos += [t for t in pivot_tipo.columns if t not in ordem_tipos]
+
+    cores_tipo = {
+        "Crítica": COR_CRIT, "Alto Impacto": COR_WARN,
+        "Médio Impacto": "#fbbf24", "Baixo Impacto": COR_OK,
+        "Não informado": "#9ca3af",
+    }
+
+    series_thp = []
+    for i, tipo in enumerate(ordem_tipos):
+        valores = [round(float(v), 1) for v in pivot_tipo[tipo]]
+        serie = {
+            "name": tipo, "type": "bar", "stack": "thp", "data": valores,
+            "itemStyle": {"color": cores_tipo.get(tipo, "#9ca3af")},
+            "barWidth": "55%",
+        }
+        if i == len(ordem_tipos) - 1:
+            # Rótulo do total (soma da pilha) só no topo do último segmento —
+            # os totais/percentuais já vêm calculados por ativo (mesma
+            # ordem de g_chart), embutidos como array no JS.
+            serie["label"] = {
+                "show": True, "position": "top", "color": "#1f2937",
+                "fontSize": 13, "fontWeight": "bold",
+                "formatter": JsCode(f"""
+                    function(p){{
+                        var totais = {json.dumps(thp)};
+                        var t = totais[p.dataIndex];
+                        return t + 'h (' + (t/{total_thp or 1}*100).toFixed(0) + '%)';
+                    }}
+                """),
+            }
+        series_thp.append(serie)
+
     opt = {
         "tooltip": {
             "trigger": "axis", "axisPointer": {"type": "shadow"},
@@ -821,10 +868,10 @@ def _bloco_ofensores_thp(df: pd.DataFrame, escopo: str = ""):
             "textStyle": {"color": "#1f2937", "fontSize": 14},
         },
         "legend": {
-            "data": ["THP (h)", "Falhas"], "top": 0,
-            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
+            "data": ordem_tipos + ["Falhas"], "top": 0, "type": "scroll",
+            "textStyle": {"color": "#374151", "fontSize": 13, "fontWeight": "bold"},
         },
-        "grid": {"left": "3%", "right": "6%", "top": "12%", "bottom": "28%", "containLabel": True},
+        "grid": {"left": "3%", "right": "6%", "top": "14%", "bottom": "28%", "containLabel": True},
         "xAxis": {
             "type": "category", "data": rotulos,
             "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
@@ -838,22 +885,13 @@ def _bloco_ofensores_thp(df: pd.DataFrame, escopo: str = ""):
              "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
              "splitLine": {"show": False}},
         ],
-        "series": [
-            {"name": "THP (h)", "type": "bar", "data": thp,
-             "itemStyle": {"color": COR_CRIT, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
-             "label": {
-                 "show": True, "position": "top", "color": "#1f2937",
-                 "fontSize": 13, "fontWeight": "bold",
-                 "formatter": JsCode(
-                     f"function(p){{return p.value + 'h (' + (p.value/{total_thp or 1}*100).toFixed(0) + '%)';}}"
-                 ),
-             }},
+        "series": series_thp + [
             {"name": "Falhas", "type": "line", "yAxisIndex": 1, "data": falhas,
              "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
              "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
         ],
     }
-    st_echarts(opt, height="600px", key=f"ee_ofensores_thp_{escopo}")
+    st_echarts(opt, height="620px", key=f"ee_ofensores_thp_{escopo}")
 
     tabela = g.head(_TOP_OFENSORES_THP).rename(columns={
         "local_instalacao": "Ativo",
