@@ -9,9 +9,13 @@ from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pag
 from auth.permissions import can_see_gerencia, can_admin_panel, can_upload
 from database.queries import log_acesso, contar_alertas_novos
 
-# Logo animado — raiz do repo (um nível acima de modules/), caminho absoluto
-# pra não depender do diretório de onde `streamlit run` foi disparado.
-LOGO_PATH = Path(__file__).resolve().parent.parent / "Sentinel_logo.gif"
+# Logo animado — mp4 em vez de gif (mesmo conteúdo, muito mais leve: H.264
+# comprime bem melhor que a paleta do GIF). Servido via static file serving
+# do Streamlit (ver .streamlit/config.toml -> enableStaticServing) a partir
+# de static/, pasta irmã de app.py na raiz do repo — por isso dois caminhos:
+# um absoluto (checagem de existência em disco) e um relativo (URL do <video>).
+LOGO_VIDEO_PATH = Path(__file__).resolve().parent.parent / "static" / "Sentinel_logo.mp4"
+LOGO_VIDEO_URL = "app/static/Sentinel_logo.mp4"
 LOGO_WIDTH = 240  # px — mesmo tamanho usado na tela de Login (auth/login.py)
 
 
@@ -27,19 +31,13 @@ def _inject_sidebar_css():
         padding: 0;
     }
 
-    /* Logo animado no topo — centralizado, tamanho fixo (igual à tela de Login).
-       ⚠️ "display:flex;justify-content:center" no wrapper NÃO centraliza
-       aqui porque [data-testid="stImage"] já nasce do tamanho exato da
-       imagem (fit-content) — não sobra espaço dentro dele pra centralizar
-       nada. Técnica que funciona: wrapper a 100% da largura + <img> com
-       margin:auto dentro dele. */
-    [data-testid="stSidebar"] [data-testid="stImage"] {
-        width: 100% !important;
+    /* Logo em vídeo — centralizado direto no HTML (ver _render_logo), não
+       precisa de regra aqui: é um <div style="text-align:center"> escrito à
+       mão, sem depender de testid interno do Streamlit (que muda de versão
+       pra versão — foi o que quebrou a centralização do st.image antes).
+       Só o respiro em relação à borda da sidebar continua aqui. */
+    [data-testid="stSidebar"] .sentinel-logo-wrap {
         padding: 1.2rem 0 0 0;
-    }
-    [data-testid="stSidebar"] [data-testid="stImage"] img {
-        display: block;
-        margin: 0 auto !important;
     }
 
     /* Todos os textos na sidebar ficam brancos */
@@ -111,12 +109,19 @@ def _inject_sidebar_css():
 
 def _render_logo():
     """Logo animado + nome do app no topo da sidebar."""
-    if LOGO_PATH.exists():
-        st.sidebar.image(str(LOGO_PATH), width=LOGO_WIDTH)
+    if LOGO_VIDEO_PATH.exists():
+        st.sidebar.html(f"""
+        <div class="sentinel-logo-wrap" style="text-align:center;">
+            <video autoplay loop muted playsinline
+                style="width:{LOGO_WIDTH}px;max-width:100%;display:inline-block;">
+                <source src="{LOGO_VIDEO_URL}" type="video/mp4">
+            </video>
+        </div>
+        """)
     else:
         st.sidebar.markdown(
             "<div style='text-align:center;color:#f87171;font-size:0.75rem;padding-top:1rem;'>"
-            "⚠️ Logo não encontrado</div>",
+            "⚠️ Logo não encontrado (static/Sentinel_logo.mp4)</div>",
             unsafe_allow_html=True,
         )
 

@@ -9,6 +9,7 @@ font                = "sans serif"
 
 [server]
 maxUploadSize       = 50          # MB — limite para planilhas SAP
+enableStaticServing = true        # serve ./static/ em /app/static/ — usado pelo logo em vídeo (Sentinel_logo.mp4)
 
 [browser]
 gatherUsageStats    = false       # Privacidade corporativa

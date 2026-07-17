@@ -9,9 +9,13 @@ from database.client import get_supabase
 from database.queries import get_usuario_by_email, atualizar_ultimo_login, log_acesso
 from auth.session import set_usuario, set_pagina
 
-# Logo animado — raiz do repo (um nível acima de auth/), caminho absoluto pra
-# não depender do diretório de onde `streamlit run` foi disparado.
-LOGO_PATH = Path(__file__).resolve().parent.parent / "Sentinel_logo.gif"
+# Logo animado — mp4 em vez de gif (mesmo conteúdo, muito mais leve: H.264
+# comprime bem melhor que a paleta do GIF). Servido via static file serving
+# do Streamlit (ver .streamlit/config.toml -> enableStaticServing) a partir
+# de static/, pasta irmã de app.py na raiz do repo — por isso dois caminhos:
+# um absoluto (checagem de existência em disco) e um relativo (URL do <video>).
+LOGO_VIDEO_PATH = Path(__file__).resolve().parent.parent / "static" / "Sentinel_logo.mp4"
+LOGO_VIDEO_URL = "app/static/Sentinel_logo.mp4"
 LOGO_WIDTH = 240  # px — mesmo tamanho usado na sidebar (modules/home.py)
 
 
@@ -74,20 +78,10 @@ def _inject_login_css():
         box-shadow: 0 6px 20px rgba(30,58,95,0.35) !important;
     }
 
-    /* Logo animado centralizado (sem esticar — tamanho fixo, igual à sidebar).
-       ⚠️ "display:flex;justify-content:center" no wrapper NÃO centraliza
-       aqui porque o wrapper [data-testid="stImage"] já nasce do tamanho
-       exato da imagem (fit-content) — não sobra espaço dentro dele pra
-       centralizar nada. A técnica que funciona de verdade: forçar o
-       wrapper a 100% da largura do container e centralizar o <img> dentro
-       dele via margin:auto. */
-    [data-testid="stImage"] {
-        width: 100% !important;
-    }
-    [data-testid="stImage"] img {
-        display: block;
-        margin: 0 auto !important;
-    }
+    /* Logo em vídeo — centralizado direto no HTML (ver _render_header), não
+       precisa de regra aqui: é um <div style="text-align:center"> escrito à
+       mão, sem depender de testid interno do Streamlit (que muda de versão
+       pra versão — foi o que quebrou a centralização do st.image antes). */
 
     /* Texto "SENTINEL" em dourado 3D reluzente — cor sólida + relevo nítido
        (sombras SEM blur, só deslocadas — nada de "0 0 Xpx", que é o que cria
@@ -121,12 +115,19 @@ def _inject_login_css():
 # region ====================== SESSÃO 2: Componentes Visuais ======================
 
 def _render_header():
-    if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), width=LOGO_WIDTH)
+    if LOGO_VIDEO_PATH.exists():
+        st.html(f"""
+        <div style="text-align:center;">
+            <video autoplay loop muted playsinline
+                style="width:{LOGO_WIDTH}px;max-width:100%;display:inline-block;">
+                <source src="{LOGO_VIDEO_URL}" type="video/mp4">
+            </video>
+        </div>
+        """)
     else:
         st.markdown(
             "<div style='text-align:center;color:#dc2626;font-size:0.85rem;'>"
-            "⚠️ Logo não encontrado (Sentinel_logo.gif)</div>",
+            "⚠️ Logo não encontrado (static/Sentinel_logo.mp4)</div>",
             unsafe_allow_html=True,
         )
 
