@@ -11,6 +11,8 @@
 # Uso:     render_inteligencia_ee(df, escopo="SP"|"VP"|"GLOBAL")
 #
 # Blocos (recorte pedido pelo Julio — 16/07/2026, cards+heatmap em 16/07/2026):
+#   -1. Exportar Relatório   (HTML autônomo do recorte filtrado — ver
+#                             components/relatorio_ee.py)
 #   0. Cards Resumo          (ativo c/ mais falhas, ativo c/ maior THP, ativo
 #                             mais reincidente, sintoma mais crítico por THP,
 #                             origem de atividade mais frequente)
@@ -1175,6 +1177,44 @@ def _kpi(col, label, valor, cor, sub=""):
 # endregion
 
 
+# region ====================== SESSÃO 7B: Exportar Relatório ==================
+
+def _bloco_exportar_relatorio(df: pd.DataFrame, escopo: str):
+    """
+    Gera um HTML autônomo (components/relatorio_ee.py) com o resumo do
+    recorte JÁ FILTRADO na tela — mesmos números que o usuário está vendo.
+    Fica em session_state pra o botão de download sobreviver ao rerun do
+    Streamlit sem precisar gerar de novo a cada interação.
+    """
+    st.markdown("#### 📄 Exportar Relatório")
+    st.caption(
+        "Gera um .html autônomo com o resumo do recorte filtrado acima "
+        "(Resumo Executivo, Pareto, Obras × Manutenção, Mapa de Calor e "
+        "Ranking) — abre em qualquer navegador, sem precisar do sistema."
+    )
+
+    key_html = f"ee_relatorio_html_{escopo}"
+    col_gerar, col_baixar = st.columns([1, 2])
+
+    with col_gerar:
+        if st.button("🧾 Gerar relatório", key=f"ee_gerar_relatorio_{escopo}", use_container_width=True):
+            from components.relatorio_ee import gerar_relatorio_html
+            st.session_state[key_html] = gerar_relatorio_html(df, escopo)
+
+    with col_baixar:
+        if key_html in st.session_state:
+            st.download_button(
+                "⬇️ Baixar relatório (.html)",
+                data=st.session_state[key_html].encode("utf-8"),
+                file_name=f"relatorio_ee_{escopo}_{date.today().isoformat()}.html",
+                mime="text/html",
+                key=f"ee_download_relatorio_{escopo}",
+                use_container_width=True,
+            )
+
+# endregion
+
+
 # region ====================== SESSÃO 8: Entrada pública ======================
 
 def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
@@ -1217,6 +1257,8 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     df = _enriquecer(df)
     st.markdown("---")
 
+    _bloco_exportar_relatorio(df, escopo)
+    st.markdown("---")
     _bloco_cards_resumo(df, escopo)
     st.markdown("---")
     _bloco_unifilar(df, escopo)
