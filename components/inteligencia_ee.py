@@ -862,13 +862,65 @@ _GAP_TRECHOS = 3  # espaço (em posições) entre um trecho e o próximo no modo
 _OPCAO_TODOS = "🌐 Todos os trechos (visão geral)"
 
 
-def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
+def _selecionar_trecho(df: pd.DataFrame, escopo: str):
+    """
+    Seletor de Trecho COMPARTILHADO — pedido do Julio (16/07/2026): a
+    escolha de trecho não pode valer só pro gráfico do Unifilar, tem que
+    filtrar TODOS os blocos da aba (Cards Resumo, Pareto, Obras ×
+    Manutenção, Heatmap, Ranking, Exportar Relatório). Por isso roda uma
+    vez só, ANTES de qualquer bloco, e devolve o df já restrito.
+
+    Returns:
+        (df_filtrado, modo_todos, ramal_view, ramais_disp)
+        df_filtrado: df inteiro (modo "Todos"/sem ramal decodificável) ou
+                     só as linhas do ramal escolhido.
+    """
+    if "ramal" not in df.columns or df["ramal"].dropna().empty:
+        return df, True, None, []
+
+    df_u = df.dropna(subset=["ramal"])
+    ramais_disp = sorted(df_u["ramal"].unique())
+    if not ramais_disp:
+        return df, True, None, []
+
+    modo_todos = True
+    ramal_view = ramais_disp[0]
+
+    if len(ramais_disp) == 1:
+        modo_todos = False
+        st.markdown(
+            f"<div style='padding:8px 12px;background:{COR_PRIMARIA};color:#fff;"
+            f"border-radius:8px;text-align:center;margin-bottom:10px;'>"
+            f"🚂 Trecho: <b>{nome_ramal(ramal_view, 'completo')}</b></div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        opcoes_label = [_OPCAO_TODOS] + [
+            f"{nome_ramal(r, 'completo')} ({len(df_u[df_u['ramal'] == r]):,})".replace(",", ".")
+            for r in ramais_disp
+        ]
+        escolha = st.radio(
+            "🚂 Trecho:", opcoes_label, horizontal=True, key=f"ee_unif_ramal_{escopo}",
+            help="Filtra TODOS os gráficos e tabelas da aba por trecho — "
+                 "\"Todos os trechos\" mostra a malha inteira de uma vez.",
+        )
+        if escolha == _OPCAO_TODOS:
+            modo_todos = True
+        else:
+            modo_todos = False
+            ramal_view = ramais_disp[opcoes_label.index(escolha) - 1]
+
+    df_filtrado = df if modo_todos else df[df["ramal"] == ramal_view]
+    return df_filtrado, modo_todos, ramal_view, ramais_disp
+
+
+def _bloco_unifilar(df: pd.DataFrame, escopo: str = "", modo_todos: bool = True,
+                     ramal_view=None, ramais_disp=None):
     st.markdown("#### 🗺️ Unifilar EE — ativos por trecho")
     st.caption(
         "⚠️ Eixo X = posição sequencial no trecho (não é KM real) · "
         "Tamanho = qtd de falhas · Cor = score de prioridade · "
-        "🟣 Anel roxo = ativo reincidente (≥3 em 90d). "
-        f"Selecione **\"{_OPCAO_TODOS}\"** pra ver a malha inteira de uma vez."
+        "🟣 Anel roxo = ativo reincidente (≥3 em 90d)."
     )
 
     if not ECHARTS_OK:
@@ -883,32 +935,7 @@ def _bloco_unifilar(df: pd.DataFrame, escopo: str = ""):
         return
 
     df_u = df.dropna(subset=["ramal", "local_instalacao"]).copy()
-    ramais_disp = sorted(df_u["ramal"].unique())
-
-    modo_todos = False
-    ramal_view = ramais_disp[0] if ramais_disp else None
-
-    if len(ramais_disp) == 1:
-        st.markdown(
-            f"<div style='padding:8px 12px;background:{COR_PRIMARIA};color:#fff;"
-            f"border-radius:8px;text-align:center;margin-bottom:10px;'>"
-            f"🚂 Visualizando: <b>{nome_ramal(ramal_view, 'completo')}</b></div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        opcoes_label = [_OPCAO_TODOS] + [
-            f"{nome_ramal(r, 'completo')} ({len(df_u[df_u['ramal'] == r]):,})".replace(",", ".")
-            for r in ramais_disp
-        ]
-        escolha = st.radio(
-            "🚂 Trecho:", opcoes_label, horizontal=True, key=f"ee_unif_ramal_{escopo}",
-            help="\"Todos os trechos\" concatena tudo num único gráfico — "
-                 "ótimo pra comparar criticidade entre trechos.",
-        )
-        if escolha == _OPCAO_TODOS:
-            modo_todos = True
-        else:
-            ramal_view = ramais_disp[opcoes_label.index(escolha) - 1]
+    ramais_disp = ramais_disp or sorted(df_u["ramal"].unique())
 
     # Posição sequencial por ativo, ordenada por pátio → TPLNR (mesmo espírito
     # de _criar_km_sequencial() do Unifilar VP/EE, só que granularidade por
@@ -1268,11 +1295,20 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     df = _enriquecer(df)
     st.markdown("---")
 
+    # Seletor de Trecho COMPARTILHADO — a escolha aqui filtra todos os
+    # blocos abaixo, não só o Unifilar (pedido do Julio, 16/07/2026).
+    df, modo_todos_trecho, ramal_trecho, ramais_disp = _selecionar_trecho(df, escopo)
+    if df.empty:
+        st.info("ℹ️ Nenhuma falha encontrada no trecho selecionado.")
+        return
+    st.markdown("---")
+
     _bloco_exportar_relatorio(df, escopo)
     st.markdown("---")
     _bloco_cards_resumo(df, escopo)
     st.markdown("---")
-    _bloco_unifilar(df, escopo)
+    _bloco_unifilar(df, escopo, modo_todos=modo_todos_trecho,
+                     ramal_view=ramal_trecho, ramais_disp=ramais_disp)
     st.markdown("---")
     _bloco_pareto_sintomas(df, escopo)
     st.markdown("---")
