@@ -26,6 +26,13 @@
 #                             quantidade de falhas)
 #   4. Ranking de Reincidência por Ativo (agrupado pela coluna K do RASF —
 #                             "Local de instalação", não o código TPLNR)
+#   1B. Ranking Grupos de Ativo (17/07/2026, logo após o Unifilar — mesmo
+#                             recorte que a Engenharia usa na apresentação
+#                             de Confiabilidade EE à Diretoria)
+#   5. Análises complementares (17/07/2026, expander recolhido no fim da
+#                             aba): Tendência mensal + Análise 6M — cortadas
+#                             em 16/07 e revividas depois de ver que o
+#                             material da Diretoria usa os dois recortes.
 #
 # Filtros (essenciais): Sistema, Reincidência, Gerador THP (coluna Z do
 #   RASF — marcada com "X"), Período (Data da nota), Descrição Tipo
@@ -99,6 +106,14 @@ _PESO_TIPO_FALHA = {
     "Alto Impacto":  0.80,
     "Médio Impacto": 0.50,
     "Baixo Impacto": 0.25,
+}
+
+# Meses em português (idêntico ao padrão de components/heatmap.py e
+# components/visao_gerencial.py) — todo gráfico com data usa isso, nunca
+# formatação de data nativa do ECharts/navegador (que sai em inglês).
+MESES_PT_ABREV = {
+    1: "jan", 2: "fev", 3: "mar", 4: "abr", 5: "mai", 6: "jun",
+    7: "jul", 8: "ago", 9: "set", 10: "out", 11: "nov", 12: "dez",
 }
 
 # endregion
@@ -1191,6 +1206,87 @@ def _unifilar_fallback(df: pd.DataFrame):
 # endregion
 
 
+# region ====================== SESSÃO 6B: Ranking Grupos de Ativo ==============
+# Pedido do Julio (17/07/2026) — inspirado no material que a Engenharia
+# apresenta à Diretoria ("Confiabilidade Eletroeletrônica"), que sempre traz
+# um recorte por "Grupos de ativo" (CDV, Máq Chave, Microprocessada,
+# Sensor...). Mesmo padrão visual de barras + THP dos demais blocos.
+
+_TOP_GRUPOS_ATIVO = 15
+
+
+def _bloco_grupos_ativo(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 🔧 Ranking de Grupos de Ativo — Falhas × THP")
+
+    if "grupo_ativo" not in df.columns:
+        st.info("Coluna de grupo do ativo indisponível.")
+        return
+
+    g = (
+        df.groupby("grupo_ativo")
+          .agg(falhas=("grupo_ativo", "size"), thp_h=("thp_h", "sum"))
+          .reset_index()
+          .sort_values("falhas", ascending=False)
+    )
+    if g.empty:
+        st.info("Sem dados de grupo do ativo no escopo atual.")
+        return
+
+    total = int(g["falhas"].sum())
+    g_chart = g.head(_TOP_GRUPOS_ATIVO)
+
+    if not ECHARTS_OK:
+        st.dataframe(g, use_container_width=True, hide_index=True)
+        return
+
+    rotulos = g_chart["grupo_ativo"].astype(str).str.slice(0, 32).tolist()
+    falhas  = [int(v) for v in g_chart["falhas"]]
+    thp     = [round(float(v), 1) for v in g_chart["thp_h"]]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis", "axisPointer": {"type": "shadow"},
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
+        },
+        "legend": {
+            "data": ["Falhas", "THP (h)"], "top": 0,
+            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
+        },
+        "grid": {"left": "3%", "right": "6%", "top": "12%", "bottom": "26%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": rotulos,
+            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 40, "interval": 0},
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
+        },
+        "yAxis": [
+            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151", "fontSize": 13},
+             "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+            {"type": "value", "name": "THP (h)", "position": "right",
+             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"show": False}},
+        ],
+        "series": [
+            {"name": "Falhas", "type": "bar", "data": falhas,
+             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}, "barWidth": "55%",
+             "label": {
+                 "show": True, "position": "top", "color": "#1f2937",
+                 "fontSize": 13, "fontWeight": "bold",
+                 "formatter": JsCode(
+                     f"function(p){{return p.value + ' (' + (p.value/{total or 1}*100).toFixed(0) + '%)';}}"
+                 ),
+             }},
+            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
+             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
+             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 8},
+        ],
+    }
+    st_echarts(opt, height="600px", key=f"ee_grupos_ativo_{escopo}")
+
+# endregion
+
+
 # region ====================== SESSÃO 7: KPI helper ============================
 
 def _kpi(col, label, valor, cor, sub=""):
@@ -1257,6 +1353,162 @@ def _bloco_exportar_relatorio(df: pd.DataFrame, escopo: str):
 # endregion
 
 
+# region ====================== SESSÃO 7C: Análises Complementares ==============
+# Tendência mensal e Análise 6M — cortadas na simplificação de 16/07/2026,
+# revividas em 17/07/2026 depois que o material que a Engenharia apresenta
+# à Diretoria ("Confiabilidade Eletroeletrônica") mostrou que os dois cortes
+# fazem falta (comparativo mensal e Ishikawa por 6M). Ficam dentro de um
+# expander recolhido por padrão, no fim da aba, pra não voltar a poluir o
+# topo — quem quiser, abre.
+
+def _bloco_6m(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 🐟 Análise 6M — Ishikawa consolidado")
+    st.caption(
+        "Distribuição das causas raiz já classificadas (Eng > Manutenção). "
+        "Responde: é gente, material, método ou máquina? — direciona o bloqueio."
+    )
+
+    if "m6_nivel1" not in df.columns:
+        st.info("Campo 6M indisponível.")
+        return
+
+    classificados = df[df["m6_nivel1"].notna() & (df["m6_nivel1"].astype(str).str.strip() != "")]
+    if classificados.empty:
+        st.warning("Nenhuma falha com 6M classificado no escopo atual.")
+        return
+
+    total = len(df)
+    cob = 100 * len(classificados) / total if total else 0
+    st.markdown(
+        f"<div style='color:#6b7280;font-size:0.9rem;margin-bottom:6px;'>"
+        f"🔎 {len(classificados):,} de {total:,} falhas classificadas "
+        f"({cob:.0f}%) — as demais aguardam análise.</div>".replace(",", "."),
+        unsafe_allow_html=True,
+    )
+
+    g = (classificados.groupby("m6_nivel1")
+         .agg(qtd=("m6_nivel1", "size"), thp_h=("thp_h", "sum"))
+         .reset_index().sort_values("qtd", ascending=True))
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        st.dataframe(g, use_container_width=True, hide_index=True)
+        return
+
+    categorias = g["m6_nivel1"].astype(str).tolist()
+    valores    = [int(v) for v in g["qtd"]]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis", "axisPointer": {"type": "shadow"},
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
+            "formatter": "<b>{b}</b><br/>Falhas: <b>{c}</b>",
+        },
+        "grid": {"left": "3%", "right": "10%", "top": "5%", "bottom": "5%", "containLabel": True},
+        "xAxis": {"type": "value", "name": "Nº de falhas", "axisLabel": {"color": "#374151", "fontSize": 13},
+                  "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+        "yAxis": {
+            "type": "category", "data": categorias,
+            "axisLabel": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
+        },
+        "series": [{
+            "type": "bar", "data": valores,
+            "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [0, 4, 4, 0]},
+            "label": {"show": True, "position": "right", "color": "#1f2937",
+                      "fontSize": 13, "fontWeight": "bold"},
+            "barWidth": "55%",
+        }],
+    }
+    altura = max(360, 50 * len(categorias) + 100)
+    st_echarts(opt, height=f"{altura}px", key=f"ee_6m_{escopo}")
+
+
+def _bloco_tendencia(df: pd.DataFrame, escopo: str = ""):
+    st.markdown("#### 📈 Tendência mensal")
+    st.caption("Evolução do volume de falhas e do THP ao longo do tempo.")
+
+    if "data_nota" not in df.columns:
+        st.info("Coluna de data indisponível.")
+        return
+
+    d = df.copy()
+    d["data_nota"] = pd.to_datetime(d["data_nota"], errors="coerce")
+    d = d.dropna(subset=["data_nota"])
+    if d.empty:
+        st.info("Sem datas válidas no escopo atual.")
+        return
+
+    d["mes"] = d["data_nota"].dt.to_period("M").dt.to_timestamp()
+    g = (d.groupby("mes")
+           .agg(falhas=("mes", "size"), thp_h=("thp_h", "sum"),
+                reincid=("reincidencia_ativo", "sum"))
+           .reset_index().sort_values("mes"))
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        st.dataframe(g, use_container_width=True, hide_index=True)
+        return
+
+    # Rótulos em PT-BR ("jan/25") — nunca formatação nativa (sai em inglês).
+    rotulos = [f"{MESES_PT_ABREV[m.month]}/{str(m.year)[-2:]}" for m in g["mes"]]
+    falhas  = [int(v) for v in g["falhas"]]
+    thp     = [round(float(v), 1) for v in g["thp_h"]]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis",
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA, "borderWidth": 2,
+            "padding": [10, 14], "extraCssText": "box-shadow:0 6px 20px rgba(0,0,0,0.15);border-radius:10px;",
+            "textStyle": {"color": "#1f2937", "fontSize": 14},
+            "axisPointer": {"type": "line", "lineStyle": {"color": COR_PRIMARIA, "type": "dashed"}},
+        },
+        "legend": {
+            "data": ["Falhas", "THP (h)"], "top": 0,
+            "textStyle": {"color": "#374151", "fontSize": 14, "fontWeight": "bold"},
+        },
+        "grid": {"left": "3%", "right": "6%", "top": "15%", "bottom": "20%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": rotulos,
+            "axisLabel": {"color": "#374151", "fontSize": 13, "rotate": 35 if len(rotulos) > 10 else 0},
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}}, "boundaryGap": True,
+        },
+        "yAxis": [
+            {"type": "value", "name": "Falhas", "axisLabel": {"color": "#374151", "fontSize": 13},
+             "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+            {"type": "value", "name": "THP (h)", "position": "right",
+             "axisLabel": {"color": COR_THP, "fontSize": 13}, "nameTextStyle": {"fontSize": 13},
+             "splitLine": {"show": False}},
+        ],
+        "dataZoom": [
+            {"type": "slider", "show": True, "bottom": 5, "height": 18,
+             "borderColor": "#d1d5db", "fillerColor": "rgba(30,58,95,0.15)",
+             "handleStyle": {"color": COR_PRIMARIA}},
+            {"type": "inside"},
+        ],
+        "series": [
+            {"name": "Falhas", "type": "bar", "data": falhas,
+             "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}},
+            {"name": "THP (h)", "type": "line", "yAxisIndex": 1, "data": thp,
+             "smooth": True, "lineStyle": {"color": COR_THP, "width": 3},
+             "itemStyle": {"color": COR_THP}, "symbol": "circle", "symbolSize": 7},
+        ],
+    }
+    st_echarts(opt, height="500px", key=f"ee_tendencia_{escopo}")
+
+
+def _bloco_analises_complementares(df: pd.DataFrame, escopo: str = ""):
+    """Expander recolhível com Tendência mensal + Análise 6M — pedido do
+    Julio (17/07/2026), ver comentário da região acima."""
+    with st.expander("📊 Análises complementares — Tendência mensal e 6M (Ishikawa)", expanded=False):
+        _bloco_tendencia(df, escopo)
+        st.markdown("---")
+        _bloco_6m(df, escopo)
+
+# endregion
+
+
 # region ====================== SESSÃO 8: Entrada pública ======================
 
 def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
@@ -1314,6 +1566,8 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     _bloco_unifilar(df, escopo, modo_todos=modo_todos_trecho,
                      ramal_view=ramal_trecho, ramais_disp=ramais_disp)
     st.markdown("---")
+    _bloco_grupos_ativo(df, escopo)
+    st.markdown("---")
     _bloco_pareto_sintomas(df, escopo)
     st.markdown("---")
     _bloco_obras_manutencao(df, escopo)
@@ -1321,5 +1575,7 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     _bloco_heatmap_patio_origem(df, escopo)
     st.markdown("---")
     _bloco_reincidencia(df, escopo)
+    st.markdown("---")
+    _bloco_analises_complementares(df, escopo)
 
 # endregion
