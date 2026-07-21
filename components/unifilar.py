@@ -829,23 +829,38 @@ render_unifilar_dual = render_unifilar
 #        empilhar por: Família Defeito | Prioridade | Tipo de Inspeção
 
 _CORES_PRIORIDADE = {
-    "1-Muito alta": COR_CRIT,
-    "2-Alta":       COR_WARN,
-    "3-Média":      "#eab308",
-    "4-Baixa":      COR_OK,
+    "1-Muito alta": "#dc2626",   # Vermelho
+    "2-Alta":       "#f97316",   # Laranja
+    "3-Média":      "#3b82f6",   # Azul
+    "4-Baixa":      "#16a34a",   # Verde
 }
 
 
+# Paleta categórica (hues bem separados, não um degradê) p/ segmentos de
+# empilhamento sem mapeamento fixo de cor (ex.: Tipo de Inspeção, Família
+# Defeito) — degradê anterior deixava tons vizinhos (ex. dourado × marrom)
+# quase idênticos e confundia a leitura das barras empilhadas.
+_PALETA_CATEGORICA = [
+    "#1e3a5f",  # azul-marinho MRS
+    "#dc2626",  # vermelho
+    "#16a34a",  # verde
+    "#f59e0b",  # âmbar
+    "#7c3aed",  # roxo
+    "#0891b2",  # ciano
+    "#db2777",  # rosa/magenta
+    "#65a30d",  # verde-oliva
+    "#ea580c",  # laranja queimado
+    "#0284c7",  # azul-céu
+    "#a16207",  # marrom-dourado
+    "#4f46e5",  # índigo
+]
+_COR_OUTROS = "#9ca3af"  # cinza — sempre reservada p/ o segmento "Outros"
+
+
 def _gradiente_stack(idx: int, total: int) -> str:
-    """Paleta cíclica (azul MRS → dourado) p/ segmentos de empilhamento
-    sem mapeamento fixo de cor (ex.: Tipo de Inspeção, Família Defeito)."""
-    if total <= 1:
-        return COR_PRIMARIA
-    ratio = idx / (total - 1)
-    r = int(30 + (245 - 30) * ratio)
-    g = int(58 + (158 - 58) * ratio)
-    b = int(95 + (11 - 95) * ratio)
-    return f"rgb({r},{g},{b})"
+    """Cor do segmento `idx` (de `total`) num empilhamento sem mapeamento
+    fixo — cicla pela paleta categórica em vez de interpolar um degradê."""
+    return _PALETA_CATEGORICA[idx % len(_PALETA_CATEGORICA)]
 
 
 def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None,
@@ -898,13 +913,22 @@ def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None
 
         series = []
         for i, cs in enumerate(cols_stack):
-            cor = _CORES_PRIORIDADE.get(cs) or _gradiente_stack(i, len(cols_stack))
+            if cs == "Outros" and outros:
+                cor = _COR_OUTROS
+            else:
+                cor = _CORES_PRIORIDADE.get(cs) or _gradiente_stack(i, len(cols_stack))
             series.append({
                 "name": str(cs), "type": "bar", "stack": "total",
                 "data": [int(pivot.loc[c, cs]) for c in ordem_cat],
                 "itemStyle": {"color": cor},
             })
         legenda = [str(c) for c in cols_stack]
+
+    # dataZoom no Eixo X — mesmo padrão do Unifilar (slider + scroll do mouse)
+    # p/ permitir foco em faixas do ranking sem perder a leitura completa dos
+    # rótulos quando há muitas categorias.
+    n_cats = len(ordem_cat)
+    zoom_fim = 100.0 if n_cats <= 10 else round(1000 / n_cats, 1)
 
     opt = {
         "tooltip": {
@@ -916,7 +940,7 @@ def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None
                    if legenda else None),
         "grid": {"left": "3%", "right": "3%",
                  "top": "18%" if legenda else "10%",
-                 "bottom": "18%", "containLabel": True},
+                 "bottom": "22%", "containLabel": True},
         "xAxis": {
             "type": "category", "data": ordem_cat,
             "axisLabel": {"rotate": 30, "fontSize": 10, "color": "#374151",
@@ -926,10 +950,23 @@ def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None
             "type": "value", "axisLabel": {"color": "#374151"},
             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}},
         },
+        "dataZoom": [
+            {
+                "type": "slider", "show": True, "xAxisIndex": [0],
+                "start": 0, "end": zoom_fim,
+                "bottom": 4, "height": 18,
+                "borderColor": "#d1d5db",
+                "fillerColor": "rgba(30,58,95,0.15)",
+                "handleStyle": {"color": COR_PRIMARIA},
+                "moveHandleStyle": {"color": COR_PRIMARIA},
+                "textStyle": {"color": "#374151", "fontSize": 9},
+            },
+            {"type": "inside", "xAxisIndex": [0], "start": 0, "end": zoom_fim},
+        ],
         "series": series,
     }
     opt = _sanitize(opt)
-    st_echarts(opt, height="380px", key=chart_key)
+    st_echarts(opt, height="400px", key=chart_key)
 
     total_dist = int(contagem_cat.shape[0])
     if total_dist > top_n:
@@ -939,10 +976,79 @@ def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None
         )
 
 
+# Cada ranking é seu próprio @st.fragment (mesmo padrão de
+# components/inteligencia_ee.py): o radio "Empilhar por" de um bloco só
+# refaz aquele bloco — não recalcula o gráfico de KM nem os outros 2
+# rankings, trazendo leveza/agilidade ao trocar a visualização.
+
+@st.fragment
+def _bloco_ranking_tipo_inspecao(df: pd.DataFrame, col_insp: str,
+                                  col_prio: str | None, gerencia: str):
+    st.markdown("##### 🔍 Ranking — Tipo de Inspeção × Ativos")
+    opcoes = ["Quantidade Total de Notas"]
+    if col_prio: opcoes.append("Quantidade por Prioridade")
+    modo = (
+        st.radio("Empilhar por:", opcoes, horizontal=True,
+                  key=f"rk_insp_modo_{gerencia}")
+        if len(opcoes) > 1 else opcoes[0]
+    )
+    stack = col_prio if modo == "Quantidade por Prioridade" else None
+    _bar_empilhado_ranking(df, col_insp, stack, f"rk_insp_{gerencia}")
+
+
+@st.fragment
+def _bloco_ranking_familia_defeito(df: pd.DataFrame, col_fam: str,
+                                    col_prio: str | None, col_insp: str | None,
+                                    gerencia: str):
+    st.markdown("##### 🧩 Ranking — Família Defeito × Ativos")
+    opcoes = ["Quantidade Total de Notas"]
+    if col_prio: opcoes.append("Quantidade por Prioridade")
+    if col_insp: opcoes.append("Quantidade por Tipo de Inspeção")
+    modo = (
+        st.radio("Empilhar por:", opcoes, horizontal=True,
+                  key=f"rk_fam_modo_{gerencia}")
+        if len(opcoes) > 1 else opcoes[0]
+    )
+    stack = (
+        col_prio if modo == "Quantidade por Prioridade" else
+        col_insp if modo == "Quantidade por Tipo de Inspeção" else None
+    )
+    _bar_empilhado_ranking(df, col_fam, stack, f"rk_fam_{gerencia}")
+
+
+@st.fragment
+def _bloco_ranking_ativo(df: pd.DataFrame, col_ativo: str, col_fam: str | None,
+                          col_prio: str | None, col_insp: str | None,
+                          gerencia: str):
+    st.markdown("##### 🚂 Ranking — Ativo × Quantidade Total de Notas")
+    opcoes = ["Quantidade Total de Notas"]
+    if col_fam:  opcoes.append("Quantidade por Família Defeito")
+    if col_prio: opcoes.append("Quantidade por Prioridade")
+    if col_insp: opcoes.append("Quantidade por Tipo de Inspeção")
+    modo = (
+        st.radio("Empilhar por:", opcoes, horizontal=True,
+                  key=f"rk_ativo_modo_{gerencia}")
+        if len(opcoes) > 1 else opcoes[0]
+    )
+    stack = (
+        col_fam  if modo == "Quantidade por Família Defeito" else
+        col_prio if modo == "Quantidade por Prioridade" else
+        col_insp if modo == "Quantidade por Tipo de Inspeção" else None
+    )
+
+    d_ativo = df.copy()
+    d_ativo[col_ativo] = d_ativo[col_ativo].apply(
+        lambda v: ativo_curto(v) if pd.notna(v) and str(v).strip() else v
+    )
+    _bar_empilhado_ranking(d_ativo, col_ativo, stack, f"rk_ativo_{gerencia}",
+                           top_n=20)
+
+
 def render_rankings_unifilar(df: pd.DataFrame, gerencia: str):
     """
     Três rankings empilháveis, abaixo do gráfico de KM do Unifilar,
     usando o mesmo recorte de Ramal + Trecho já aplicado na aba.
+    Cada ranking roda no seu próprio fragmento (ver blocos acima).
     """
     if df.empty or not ECHARTS_OK:
         return
@@ -963,59 +1069,13 @@ def render_rankings_unifilar(df: pd.DataFrame, gerencia: str):
         "selecionado no Unifilar acima."
     )
 
-    # ── Ranking 1: Tipo de Inspeção ────────────────────────────────────────
     if col_insp:
-        st.markdown("##### 🔍 Ranking — Tipo de Inspeção × Ativos")
-        opcoes1 = ["Quantidade Total de Notas"]
-        if col_prio: opcoes1.append("Quantidade por Prioridade")
-        modo1 = (
-            st.radio("Empilhar por:", opcoes1, horizontal=True,
-                      key=f"rk_insp_modo_{gerencia}")
-            if len(opcoes1) > 1 else opcoes1[0]
-        )
-        stack1 = col_prio if modo1 == "Quantidade por Prioridade" else None
-        _bar_empilhado_ranking(df, col_insp, stack1, f"rk_insp_{gerencia}")
+        _bloco_ranking_tipo_inspecao(df, col_insp, col_prio, gerencia)
 
-    # ── Ranking 2: Família Defeito ──────────────────────────────────────────
     if col_fam:
-        st.markdown("##### 🧩 Ranking — Família Defeito × Ativos")
-        opcoes2 = ["Quantidade Total de Notas"]
-        if col_prio: opcoes2.append("Quantidade por Prioridade")
-        if col_insp: opcoes2.append("Quantidade por Tipo de Inspeção")
-        modo2 = (
-            st.radio("Empilhar por:", opcoes2, horizontal=True,
-                      key=f"rk_fam_modo_{gerencia}")
-            if len(opcoes2) > 1 else opcoes2[0]
-        )
-        stack2 = (
-            col_prio if modo2 == "Quantidade por Prioridade" else
-            col_insp if modo2 == "Quantidade por Tipo de Inspeção" else None
-        )
-        _bar_empilhado_ranking(df, col_fam, stack2, f"rk_fam_{gerencia}")
+        _bloco_ranking_familia_defeito(df, col_fam, col_prio, col_insp, gerencia)
 
-    # ── Ranking 3: Ativo ─────────────────────────────────────────────────────
     if col_ativo:
-        st.markdown("##### 🚂 Ranking — Ativo × Quantidade Total de Notas")
-        opcoes3 = ["Quantidade Total de Notas"]
-        if col_fam:  opcoes3.append("Quantidade por Família Defeito")
-        if col_prio: opcoes3.append("Quantidade por Prioridade")
-        if col_insp: opcoes3.append("Quantidade por Tipo de Inspeção")
-        modo3 = (
-            st.radio("Empilhar por:", opcoes3, horizontal=True,
-                      key=f"rk_ativo_modo_{gerencia}")
-            if len(opcoes3) > 1 else opcoes3[0]
-        )
-        stack3 = (
-            col_fam  if modo3 == "Quantidade por Família Defeito" else
-            col_prio if modo3 == "Quantidade por Prioridade" else
-            col_insp if modo3 == "Quantidade por Tipo de Inspeção" else None
-        )
-
-        d_ativo = df.copy()
-        d_ativo[col_ativo] = d_ativo[col_ativo].apply(
-            lambda v: ativo_curto(v) if pd.notna(v) and str(v).strip() else v
-        )
-        _bar_empilhado_ranking(d_ativo, col_ativo, stack3, f"rk_ativo_{gerencia}",
-                               top_n=20)
+        _bloco_ranking_ativo(df, col_ativo, col_fam, col_prio, col_insp, gerencia)
 
 # endregion
