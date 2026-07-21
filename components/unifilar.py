@@ -469,17 +469,17 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
                      "os ramais na mesma visão (visão total unifilar).",
             )
             idx_escolha = opcoes.index(escolha)
-            ramal_view = "__TODOS__" if idx_escolha == 0 else matrizes[idx_escolha - 1]
+            ramal_view = "TODOSRAMAIS" if idx_escolha == 0 else matrizes[idx_escolha - 1]
 
     # Filtra pelo ramal
-    if ramal_view == "__TODOS__":
+    if ramal_view == "TODOSRAMAIS":
         df_t_completo = df_unifilar.copy()
     elif col_matriz and len(matrizes) > 1:
         df_t_completo = df_unifilar[df_unifilar[col_matriz] == ramal_view].copy()
     else:
         df_t_completo = df_unifilar.copy()
 
-    if ramal_view == "__TODOS__":
+    if ramal_view == "TODOSRAMAIS":
         label_ramal_final = "Todos"
     else:
         label_ramal_final = nome_ramal(ramal_view, "completo") \
