@@ -33,7 +33,7 @@ except ImportError:
 
 import plotly.graph_objects as go
 
-from core.glossarios import nome_ramal
+from core.glossarios import nome_ramal, ativo_curto
 
 # Motor de alertas — usado só para marcar hot-spots CRÔNICOS (anel extra).
 # Import resiliente: se o módulo/dep falhar, o unifilar segue funcionando
@@ -454,7 +454,7 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
                 unsafe_allow_html=True,
             )
         else:
-            opcoes = []
+            opcoes = [f"🌐 Todos ({len(df_unifilar):,})"]
             for m in matrizes:
                 qtd = len(df_unifilar[df_unifilar[col_matriz] == m])                       if col_matriz else len(df_unifilar)
                 lbl = nome_ramal(m, "completo")                       if col_matriz == "ramal" else str(m)
@@ -465,18 +465,25 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
                 opcoes,
                 horizontal=True,
                 key=f"ramal_unif_{gerencia}",
-                help="Cada ramal gera seu próprio unifilar.",
+                help="Cada ramal gera seu próprio unifilar. 'Todos' combina todos "
+                     "os ramais na mesma visão (visão total unifilar).",
             )
-            ramal_view = matrizes[opcoes.index(escolha)]
+            idx_escolha = opcoes.index(escolha)
+            ramal_view = "__TODOS__" if idx_escolha == 0 else matrizes[idx_escolha - 1]
 
     # Filtra pelo ramal
-    if col_matriz and len(matrizes) > 1:
+    if ramal_view == "__TODOS__":
+        df_t_completo = df_unifilar.copy()
+    elif col_matriz and len(matrizes) > 1:
         df_t_completo = df_unifilar[df_unifilar[col_matriz] == ramal_view].copy()
     else:
         df_t_completo = df_unifilar.copy()
 
-    label_ramal_final = nome_ramal(ramal_view, "completo") \
-                        if col_matriz == "ramal" else str(ramal_view)
+    if ramal_view == "__TODOS__":
+        label_ramal_final = "Todos"
+    else:
+        label_ramal_final = nome_ramal(ramal_view, "completo") \
+                            if col_matriz == "ramal" else str(ramal_view)
 
     # ── Multi-trecho (idêntico ao app1: Sessão 6) ─────────────────────────────
     # Permite selecionar múltiplos trechos (par Origem-Destino) para fechar
@@ -801,7 +808,214 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
         key=f"unif_{gerencia}_{str(ramal_view)}",
     )
 
+    # ── Rankings complementares (Tipo de Inspeção / Família Defeito / Ativo) ──
+    render_rankings_unifilar(df_t_completo, gerencia=f"{gerencia}_{str(ramal_view)}")
+
 # endregion
 
 # Alias de compatibilidade — gerencia_sp/vp/geral importam render_unifilar_dual
 render_unifilar_dual = render_unifilar
+
+
+# region ====================== SESSÃO 4: Rankings da aba Unifilar =============
+#
+# Três rankings em barras (verticais), sempre respeitando o recorte de
+# Ramal + Trecho já selecionado acima no Unifilar:
+#   1. Tipo de Inspeção (X) × Qtd. de Notas (Y)
+#        empilhar por: Total | Prioridade
+#   2. Família Defeito (X) × Qtd. de Notas (Y)
+#        empilhar por: Total | Prioridade | Tipo de Inspeção
+#   3. Ativo (X) × Qtd. de Notas (Y)
+#        empilhar por: Família Defeito | Prioridade | Tipo de Inspeção
+
+_CORES_PRIORIDADE = {
+    "1-Muito alta": COR_CRIT,
+    "2-Alta":       COR_WARN,
+    "3-Média":      "#eab308",
+    "4-Baixa":      COR_OK,
+}
+
+
+def _gradiente_stack(idx: int, total: int) -> str:
+    """Paleta cíclica (azul MRS → dourado) p/ segmentos de empilhamento
+    sem mapeamento fixo de cor (ex.: Tipo de Inspeção, Família Defeito)."""
+    if total <= 1:
+        return COR_PRIMARIA
+    ratio = idx / (total - 1)
+    r = int(30 + (245 - 30) * ratio)
+    g = int(58 + (158 - 58) * ratio)
+    b = int(95 + (11 - 95) * ratio)
+    return f"rgb({r},{g},{b})"
+
+
+def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None,
+                            chart_key: str, top_n: int = 15,
+                            max_segmentos: int = 8):
+    """
+    Barras verticais: Eixo X = ranking de col_cat (top_n por qtd. de notas),
+    Eixo Y = qtd. de notas. Se col_stack for informado, empilha por essa
+    coluna (limitado a max_segmentos + 'Outros').
+    """
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+    if col_cat not in df.columns or df.empty:
+        st.info(f"Coluna '{col_cat}' não disponível nos dados.")
+        return
+
+    d = df.copy()
+    d[col_cat] = d[col_cat].fillna("(Sem informação)").replace("", "(Sem informação)")
+
+    contagem_cat = d[col_cat].value_counts()
+    if contagem_cat.empty:
+        st.info("Sem dados no filtro atual.")
+        return
+    ordem_cat = contagem_cat.head(top_n).index.tolist()
+    d = d[d[col_cat].isin(ordem_cat)]
+
+    if not col_stack or col_stack not in d.columns:
+        contagem = d[col_cat].value_counts().reindex(ordem_cat).fillna(0).astype(int)
+        series = [{
+            "name": "Notas",
+            "type": "bar",
+            "data": [int(contagem[c]) for c in ordem_cat],
+            "itemStyle": {"color": COR_PRIMARIA},
+            "label": {"show": True, "position": "top", "color": "#1f2937",
+                      "fontSize": 10, "fontWeight": "bold"},
+        }]
+        legenda = None
+    else:
+        d[col_stack] = d[col_stack].fillna("(Sem informação)").replace("", "(Sem informação)")
+        pivot = d.groupby([col_cat, col_stack]).size().unstack(fill_value=0)
+        pivot = pivot.reindex(ordem_cat).fillna(0)
+
+        totais_stack = pivot.sum(axis=0).sort_values(ascending=False)
+        cols_stack = totais_stack.index.tolist()[:max_segmentos]
+        outros = [c for c in pivot.columns if c not in cols_stack]
+        if outros:
+            pivot["Outros"] = pivot[outros].sum(axis=1)
+            cols_stack = cols_stack + ["Outros"]
+
+        series = []
+        for i, cs in enumerate(cols_stack):
+            cor = _CORES_PRIORIDADE.get(cs) or _gradiente_stack(i, len(cols_stack))
+            series.append({
+                "name": str(cs), "type": "bar", "stack": "total",
+                "data": [int(pivot.loc[c, cs]) for c in ordem_cat],
+                "itemStyle": {"color": cor},
+            })
+        legenda = [str(c) for c in cols_stack]
+
+    opt = {
+        "tooltip": {
+            "trigger": "axis", "axisPointer": {"type": "shadow"},
+            "backgroundColor": "rgba(255,255,255,0.98)", "borderColor": COR_PRIMARIA,
+            "textStyle": {"color": "#1f2937"},
+        },
+        "legend": ({"data": legenda, "top": 0, "textStyle": {"fontSize": 10}}
+                   if legenda else None),
+        "grid": {"left": "3%", "right": "3%",
+                 "top": "18%" if legenda else "10%",
+                 "bottom": "18%", "containLabel": True},
+        "xAxis": {
+            "type": "category", "data": ordem_cat,
+            "axisLabel": {"rotate": 30, "fontSize": 10, "color": "#374151",
+                          "width": 110, "overflow": "truncate"},
+        },
+        "yAxis": {
+            "type": "value", "axisLabel": {"color": "#374151"},
+            "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}},
+        },
+        "series": series,
+    }
+    opt = _sanitize(opt)
+    st_echarts(opt, height="380px", key=chart_key)
+
+    total_dist = int(contagem_cat.shape[0])
+    if total_dist > top_n:
+        st.caption(
+            f"⚠️ Mostrando os **{top_n} com mais notas**. "
+            f"Total distintos no filtro: **{total_dist:,}**."
+        )
+
+
+def render_rankings_unifilar(df: pd.DataFrame, gerencia: str):
+    """
+    Três rankings empilháveis, abaixo do gráfico de KM do Unifilar,
+    usando o mesmo recorte de Ramal + Trecho já aplicado na aba.
+    """
+    if df.empty or not ECHARTS_OK:
+        return
+
+    col_insp  = "tipo_atividade"    if "tipo_atividade"    in df.columns else None
+    col_fam   = "familia_defeito"   if "familia_defeito"   in df.columns else (
+                "defeito_legivel"   if "defeito_legivel"   in df.columns else None)
+    col_ativo = "local_instalacao"  if "local_instalacao"  in df.columns else None
+    col_prio  = "prioridade"        if "prioridade"        in df.columns else None
+
+    if not any([col_insp, col_fam, col_ativo]):
+        return
+
+    st.markdown("---")
+    st.markdown("#### 🏆 Rankings — Tipo de Inspeção, Família de Defeito e Ativo")
+    st.caption(
+        "Rankings calculados sobre o mesmo recorte de Ramal e Trecho "
+        "selecionado no Unifilar acima."
+    )
+
+    # ── Ranking 1: Tipo de Inspeção ────────────────────────────────────────
+    if col_insp:
+        st.markdown("##### 🔍 Ranking — Tipo de Inspeção × Ativos")
+        opcoes1 = ["Quantidade Total de Notas"]
+        if col_prio: opcoes1.append("Quantidade por Prioridade")
+        modo1 = (
+            st.radio("Empilhar por:", opcoes1, horizontal=True,
+                      key=f"rk_insp_modo_{gerencia}")
+            if len(opcoes1) > 1 else opcoes1[0]
+        )
+        stack1 = col_prio if modo1 == "Quantidade por Prioridade" else None
+        _bar_empilhado_ranking(df, col_insp, stack1, f"rk_insp_{gerencia}")
+
+    # ── Ranking 2: Família Defeito ──────────────────────────────────────────
+    if col_fam:
+        st.markdown("##### 🧩 Ranking — Família Defeito × Ativos")
+        opcoes2 = ["Quantidade Total de Notas"]
+        if col_prio: opcoes2.append("Quantidade por Prioridade")
+        if col_insp: opcoes2.append("Quantidade por Tipo de Inspeção")
+        modo2 = (
+            st.radio("Empilhar por:", opcoes2, horizontal=True,
+                      key=f"rk_fam_modo_{gerencia}")
+            if len(opcoes2) > 1 else opcoes2[0]
+        )
+        stack2 = (
+            col_prio if modo2 == "Quantidade por Prioridade" else
+            col_insp if modo2 == "Quantidade por Tipo de Inspeção" else None
+        )
+        _bar_empilhado_ranking(df, col_fam, stack2, f"rk_fam_{gerencia}")
+
+    # ── Ranking 3: Ativo ─────────────────────────────────────────────────────
+    if col_ativo:
+        st.markdown("##### 🚂 Ranking — Ativo × Quantidade Total de Notas")
+        opcoes3 = ["Quantidade Total de Notas"]
+        if col_fam:  opcoes3.append("Quantidade por Família Defeito")
+        if col_prio: opcoes3.append("Quantidade por Prioridade")
+        if col_insp: opcoes3.append("Quantidade por Tipo de Inspeção")
+        modo3 = (
+            st.radio("Empilhar por:", opcoes3, horizontal=True,
+                      key=f"rk_ativo_modo_{gerencia}")
+            if len(opcoes3) > 1 else opcoes3[0]
+        )
+        stack3 = (
+            col_fam  if modo3 == "Quantidade por Família Defeito" else
+            col_prio if modo3 == "Quantidade por Prioridade" else
+            col_insp if modo3 == "Quantidade por Tipo de Inspeção" else None
+        )
+
+        d_ativo = df.copy()
+        d_ativo[col_ativo] = d_ativo[col_ativo].apply(
+            lambda v: ativo_curto(v) if pd.notna(v) and str(v).strip() else v
+        )
+        _bar_empilhado_ranking(d_ativo, col_ativo, stack3, f"rk_ativo_{gerencia}",
+                               top_n=20)
+
+# endregion
