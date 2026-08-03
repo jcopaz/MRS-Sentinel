@@ -55,6 +55,22 @@ def can_upload(gerencia_alvo: str) -> bool:
     return False
 
 
+def can_manage_alertas(gerencia_alvo: str) -> bool:
+    """
+    Verifica se o usuário pode GERIR alertas (recalcular / marcar visto/resolvido)
+    de uma gerência. Mesma regra de escrita do upload:
+    - Admin: qualquer gerência
+    - Assistente: só a gerência dele
+    - Usuário: não (somente leitura — vê a tela e exporta, mas não altera)
+    """
+    perfil = get_perfil()
+    if perfil == "admin":
+        return True
+    if perfil == "assistente":
+        return get_gerencia() == gerencia_alvo
+    return False
+
+
 def can_admin_panel() -> bool:
     """Somente admin acessa o painel de administração."""
     return is_admin()

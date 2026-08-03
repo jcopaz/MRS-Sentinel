@@ -17,6 +17,7 @@ from database.queries import log_acesso, contar_alertas_novos
 LOGO_VIDEO_PATH = Path(__file__).resolve().parent.parent / "static" / "Sentinel_logo.mp4"
 LOGO_VIDEO_URL = "app/static/Sentinel_logo.mp4"
 LOGO_WIDTH = 240  # px — mesmo tamanho usado na tela de Login (auth/login.py)
+APP_VERSION = "1.0"  # versão exibida abaixo do logo (manter igual em auth/login.py)
 
 
 # region ====================== SESSÃO 1: CSS da Sidebar ======================
@@ -131,6 +132,9 @@ def _render_logo():
         <div style="font-size:0.72rem; color:rgba(255,255,255,0.5); margin-top:4px; letter-spacing:0.3px;">
             INTELIGÊNCIA DE MANUTENÇÃO
         </div>
+        <div style="font-size:0.7rem; color:rgba(255,255,255,0.35); margin-top:6px; letter-spacing:0.5px;">
+            v""" + APP_VERSION + """
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -200,6 +204,14 @@ def _render_nav_buttons():
     # Visão Geral: todos podem ver
     ativo_geral = "🔵 " if pagina_atual == "gerencia_geral" else ""
     nav_items.append(("GERAL", f"{ativo_geral}🌐  Visão Geral", "gerencia_geral"))
+
+    # Evolução da Malha: comparativo período a período (base viva de notas)
+    ativo_evo = "🔵 " if pagina_atual == "evolucao" else ""
+    nav_items.append(("EVOLUCAO", f"{ativo_evo}📈  Evolução da Malha", "evolucao"))
+
+    # Visão de Campo: tela enxuta mobile-first (prioridades + alertas)
+    ativo_campo = "🔵 " if pagina_atual == "campo" else ""
+    nav_items.append(("CAMPO", f"{ativo_campo}📱  Visão de Campo", "campo"))
 
     # Alertas: todos podem ver — badge com contagem de novos
     ativo_alertas = "🔵 " if pagina_atual == "alertas" else ""

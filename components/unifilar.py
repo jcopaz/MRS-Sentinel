@@ -359,12 +359,29 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
     if "score" not in df_u.columns:
         df_u["score"] = 1.0
 
-    # ── KM real (ou sequencial) ───────────────────────────────────────────────
+    # ── KM real (KMZ) → fallback sequencial ───────────────────────────────────
+    # Sprint 6: injeta o KM real dos marcos do KMZ (via core.geo) quando ainda
+    # não veio km_real do banco. Onde não há cobertura, cai no KM sequencial.
+    if "km_real" not in df_u.columns or df_u["km_real"].isna().all():
+        try:
+            from core.geo import enriquecer_geo
+            df_u = enriquecer_geo(df_u)
+        except Exception:
+            pass
+
     if "km_real" not in df_u.columns or df_u["km_real"].isna().all():
         df_u = _criar_km_sequencial(df_u, col_matriz or "ramal", bin_km)
         km_ficticio = True
+        km_hibrido = False
     else:
         km_ficticio = False
+        # Preenche os pontos sem cobertura geo com KM sequencial, preservando
+        # o KM real onde existe (eixo híbrido honesto).
+        km_hibrido = bool(df_u["km_real"].isna().any())
+        if km_hibrido:
+            faltantes = df_u["km_real"].isna()
+            seq = _criar_km_sequencial(df_u.copy(), col_matriz or "ramal", bin_km)
+            df_u.loc[faltantes, "km_real"] = seq.loc[faltantes, "km_real"]
 
     # ── Origem base (para Modo Dual) ──────────────────────────────────────────
     # Mapeamento robusto: tenta várias colunas e padrões de valores do banco.
@@ -417,9 +434,16 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
 
     if km_ficticio:
         st.caption(
-            "ℹ️ **KM real não disponível** — posição sequencial por pátio. "
-            "Sprint 6 substituirá por KM real."
+            "ℹ️ **KM real indisponível neste recorte** — eixo em posição "
+            "sequencial por pátio (sem cobertura de marcos do KMZ)."
         )
+    elif km_hibrido:
+        st.caption(
+            "🗺️ **KM real (KMZ)** onde há marco georreferenciado; os demais "
+            "pontos usam posição sequencial (eixo híbrido)."
+        )
+    else:
+        st.caption("🗺️ **KM real** — marcos georreferenciados do KMZ da malha.")
 
     # ── Seleciona Matriz (Ramal) ──────────────────────────────────────────────
     bases_disponiveis  = sorted(df_unifilar["origem_base"].unique())

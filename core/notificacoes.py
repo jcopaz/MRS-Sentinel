@@ -20,6 +20,7 @@ import pandas as pd
 
 COR_CRIT = "#dc2626"
 COR_WARN = "#f59e0b"
+COR_INFO = "#2563eb"
 COR_OK   = "#16a34a"
 
 # Colunas exportadas e seus rótulos amigáveis
@@ -128,6 +129,129 @@ def _montar_corpo_email(df: pd.DataFrame, gerencia: str) -> str:
         f"<tr><th>Tipo</th><th>Ramal</th><th>Origem</th><th>Família</th><th>Ocorr.</th></tr>"
         f"{tabela}</table>"
     )
+
+
+def _resumo_severidade(df: pd.DataFrame) -> dict:
+    """Conta alertas por severidade (usado no cabeçalho do PDF/HTML)."""
+    base = {"critico": 0, "atencao": 0, "info": 0, "total": 0}
+    if df is None or df.empty or "severidade" not in df.columns:
+        base["total"] = 0 if df is None or df.empty else len(df)
+        return base
+    vc = df["severidade"].value_counts()
+    base["critico"] = int(vc.get("critico", 0))
+    base["atencao"] = int(vc.get("atencao", 0))
+    base["info"]    = int(vc.get("info", 0))
+    base["total"]   = int(len(df))
+    return base
+
+
+def exportar_alertas_relatorio_html(df: pd.DataFrame, gerencia: str) -> bytes:
+    """
+    Relatório HTML imprimível dos alertas (fallback SEMPRE-funciona do PDF).
+    O usuário abre e usa Ctrl+P → "Salvar como PDF". Não depende de reportlab.
+    """
+    out = _preparar_export(df)
+    resumo = _resumo_severidade(df)
+    linhas = "".join(
+        "<tr>" + "".join(f"<td>{('' if pd.isna(v) else v)}</td>" for v in row) + "</tr>"
+        for row in out.itertuples(index=False)
+    ) or f"<tr><td colspan='{max(len(out.columns),1)}'>Sem alertas.</td></tr>"
+    cabecalho = "".join(f"<th>{c}</th>" for c in out.columns)
+    html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>MRS Sentinel — Alertas · Ger. {gerencia}</title>
+<style>
+  body{{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:28px;}}
+  h1{{color:#1e3a5f;margin:0 0 4px;}} .sub{{color:#6b7280;font-size:.85rem;margin-bottom:16px;}}
+  .chips span{{display:inline-block;border-radius:16px;padding:3px 12px;margin:0 6px 12px 0;
+    font-size:.82rem;font-weight:600;color:#fff;}}
+  table{{border-collapse:collapse;width:100%;font-size:.8rem;}}
+  th,td{{border:1px solid #d1d5db;padding:6px 8px;text-align:left;}}
+  th{{background:#1e3a5f;color:#fff;}} tr:nth-child(even) td{{background:#f3f4f6;}}
+  @media print{{@page{{size:A4 landscape;margin:12mm;}}}}
+</style></head><body>
+<h1>🚨 MRS Sentinel — Alertas Automáticos</h1>
+<div class="sub">Gerência {gerencia} · gerado em {datetime.now():%d/%m/%Y %H:%M}</div>
+<div class="chips">
+  <span style="background:{COR_CRIT}">🔴 Críticos: {resumo['critico']}</span>
+  <span style="background:{COR_WARN}">🟡 Atenção: {resumo['atencao']}</span>
+  <span style="background:{COR_INFO}">🔵 Informativo: {resumo['info']}</span>
+  <span style="background:#1e3a5f">Σ Total: {resumo['total']}</span>
+</div>
+<table><thead><tr>{cabecalho}</tr></thead><tbody>{linhas}</tbody></table>
+</body></html>"""
+    return html.encode("utf-8")
+
+
+def exportar_alertas_pdf(df: pd.DataFrame, gerencia: str) -> bytes | None:
+    """
+    Gera um PDF (paisagem A4) dos alertas via reportlab, com resumo por
+    severidade e faixa colorida por linha. Retorna None se reportlab não estiver
+    instalado — nesse caso a UI cai para o relatório HTML imprimível.
+    """
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (
+            SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
+        )
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    except Exception:
+        return None  # reportlab ausente → fallback HTML na tela
+
+    out = _preparar_export(df)
+    resumo = _resumo_severidade(df)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=12 * mm, rightMargin=12 * mm,
+        topMargin=12 * mm, bottomMargin=12 * mm,
+        title=f"MRS Sentinel — Alertas — Ger. {gerencia}",
+    )
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1mrs", parent=styles["Heading1"], textColor=colors.HexColor("#1e3a5f"))
+    sub = ParagraphStyle("submrs", parent=styles["Normal"], textColor=colors.HexColor("#6b7280"), fontSize=9)
+    story = [
+        Paragraph("🚨 MRS Sentinel — Alertas Automáticos", h1),
+        Paragraph(f"Gerência {gerencia} &nbsp;·&nbsp; gerado em {datetime.now():%d/%m/%Y %H:%M}", sub),
+        Spacer(1, 4 * mm),
+        Paragraph(
+            f"<b>Resumo:</b> 🔴 Críticos {resumo['critico']} &nbsp;|&nbsp; "
+            f"🟡 Atenção {resumo['atencao']} &nbsp;|&nbsp; 🔵 Informativo {resumo['info']} "
+            f"&nbsp;|&nbsp; Σ Total {resumo['total']}", styles["Normal"]),
+        Spacer(1, 4 * mm),
+    ]
+
+    # Monta a tabela (cabeçalho + linhas), tratando NaN
+    header = list(out.columns)
+    dados = [header] + [
+        ["" if pd.isna(v) else str(v) for v in row]
+        for row in out.itertuples(index=False)
+    ]
+    tabela = Table(dados, repeatRows=1)
+    estilo = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d1d5db")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f4f6")]),
+    ]
+    # Faixa colorida na 1ª coluna (Severidade) por linha
+    _cor_sev = {"Crítico": COR_CRIT, "Atenção": COR_WARN, "Informativo": COR_INFO,
+                "critico": COR_CRIT, "atencao": COR_WARN, "info": COR_INFO}
+    if header and header[0] == "Severidade":
+        for i, row in enumerate(dados[1:], start=1):
+            c = _cor_sev.get(str(row[0]))
+            if c:
+                estilo.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor(c)))
+                estilo.append(("FONTNAME", (0, i), (0, i), "Helvetica-Bold"))
+    tabela.setStyle(TableStyle(estilo))
+    story.append(tabela)
+
+    doc.build(story)
+    return buf.getvalue()
 
 
 def enviar_email_alertas(df: pd.DataFrame, gerencia: str) -> dict:

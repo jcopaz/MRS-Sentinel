@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagnóstico de Falhas EE — Pátio IAA (2026)</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --page: #f2f1ee;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --gridline: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --series-blue: #2a78d6;
+  --series-orange: #eb6834;
+  --series-aqua: #1baf7a;
+  --series-yellow: #eda100;
+  --series-magenta: #e87ba4;
+  --series-gray: #c3c2b7;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --navy: #1b2130;
+  --navy-2: #262e42;
+  --gold: #d8ad4d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1: #1a1a19; --page: #101012;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #898781;
+    --gridline: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+    --series-blue: #3987e5; --series-orange: #d95926; --series-aqua: #199e70;
+    --series-yellow: #c98500; --series-magenta: #d55181; --series-gray: #383835;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19; --page: #101012;
+  --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #898781;
+  --gridline: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+  --series-blue: #3987e5; --series-orange: #d95926; --series-aqua: #199e70;
+  --series-yellow: #c98500; --series-magenta: #d55181; --series-gray: #383835;
+}
+* { box-sizing: border-box; }
+html, body { margin:0; padding:0; background:var(--page); color:var(--text-primary);
+  font-family: system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
+body { padding-bottom: 48px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+a { color: inherit; }
+
+/* ---- Header ---- */
+.hero { background: linear-gradient(155deg, var(--navy) 0%, var(--navy-2) 100%); color:#fff; padding: 34px 0 26px; }
+.hero .kicker { display:flex; align-items:center; gap:8px; font-size:12.5px; letter-spacing:.14em; text-transform:uppercase;
+  color: var(--gold); font-weight:700; }
+.hero .kicker svg { width:16px; height:16px; }
+.hero h1 { font-size: 30px; line-height:1.2; margin: 10px 0 6px; font-weight:800; letter-spacing:-0.01em; }
+.hero p.sub { margin:0; color:#cfd3e0; font-size:14.5px; max-width: 760px; }
+.hero .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+.hero .chip { background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.14); border-radius:999px;
+  padding: 5px 12px; font-size:12.5px; color:#e7e9f2; }
+.hero .chip b { color:#fff; }
+.theme-btn { position:absolute; top:20px; right:20px; background:rgba(255,255,255,0.10); border:1px solid rgba(255,255,255,0.18);
+  color:#fff; border-radius:8px; padding:7px 10px; font-size:12px; cursor:pointer; }
+.hero { position:relative; }
+
+/* ---- Sub nav ---- */
+.subnav { position: sticky; top:0; z-index:20; background: var(--surface-1); border-bottom:1px solid var(--border);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.04); }
+.subnav .wrap { display:flex; gap:4px; overflow-x:auto; padding-top:9px; padding-bottom:9px; }
+.subnav a { flex:none; font-size:12.8px; font-weight:600; color:var(--text-secondary); text-decoration:none;
+  padding:7px 12px; border-radius:7px; white-space:nowrap; }
+.subnav a:hover { background: var(--page); color:var(--text-primary); }
+
+main { padding-top: 26px; }
+section { margin-bottom: 30px; scroll-margin-top: 54px; }
+.section-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+.section-head h2 { font-size:19px; margin:0; font-weight:800; letter-spacing:-0.01em; }
+.section-head .section-note { font-size:12.5px; color:var(--text-muted); }
+.card { background: var(--surface-1); border:1px solid var(--border); border-radius:14px; padding:20px; }
+.card + .card { margin-top:14px; }
+.grid-2 { display:grid; grid-template-columns: 1.4fr 1fr; gap:14px; align-items:stretch; }
+.grid-2 .stack { display:flex; flex-direction:column; gap:14px; }
+@media (max-width: 880px) { .grid-2 { grid-template-columns: 1fr; } }
+
+/* ---- KPI ---- */
+.kpi-grid { display:grid; grid-template-columns: repeat(6, 1fr); gap:10px; }
+@media (max-width: 980px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 560px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+.kpi { background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:14px 14px 12px; }
+.kpi .lbl { font-size:11.5px; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+.kpi .val { font-size:25px; font-weight:800; margin-top:4px; letter-spacing:-0.02em; }
+.kpi .sub { font-size:12px; color:var(--text-secondary); margin-top:2px; }
+.kpi.flag-critical .val { color: var(--critical); }
+.kpi.flag-warn .val { color: #b97300; }
+
+/* ---- narrativa ---- */
+.narrative ul { margin:0; padding-left:20px; display:flex; flex-direction:column; gap:10px; }
+.narrative li { font-size:14px; line-height:1.55; color:var(--text-primary); }
+.narrative li b { font-weight:700; }
+.narrative li .tag { display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+  padding:1px 7px; border-radius:5px; margin-right:6px; position:relative; top:-1px; }
+.tag-gov { background: rgba(208,59,59,0.12); color:#b23434; }
+.tag-op { background: rgba(42,120,214,0.12); color:#1c5cab; }
+.tag-risk { background: rgba(237,161,0,0.14); color:#8a6100; }
+
+/* ---- charts ---- */
+.chart-wrap { width:100%; }
+.chart-wrap--sm { }
+.viz-svg { width:100%; height:auto; display:block; }
+.gridline { stroke: var(--gridline); stroke-width:1; }
+.axis-lbl { fill: var(--text-muted); font-size:10.5px; }
+.bar-toplbl { fill: var(--text-secondary); font-size:11px; font-weight:700; }
+.bar-seg { transition: opacity .12s ease; cursor:pointer; }
+.hit-col { cursor:pointer; }
+.hit-col:hover ~ .bar-seg, .hit-col:hover { }
+.legend { display:flex; flex-wrap:wrap; gap:12px 16px; margin-top:10px; padding-top:10px; border-top:1px solid var(--gridline); }
+.lg-item { font-size:12px; color:var(--text-secondary); display:flex; align-items:center; gap:6px; }
+.lg-swatch { width:10px; height:10px; border-radius:3px; display:inline-block; }
+.chart-row { display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:14px; }
+@media (max-width: 700px) { .chart-row { grid-template-columns: 1fr; } }
+.chart-title { font-size:13px; font-weight:700; color:var(--text-primary); margin:0 0 2px; }
+.chart-sub { font-size:11.5px; color:var(--text-muted); margin:0 0 8px; }
+
+/* ---- hbar list ---- */
+.hbar-list { display:flex; flex-direction:column; gap:7px; }
+.hbar-row { display:grid; grid-template-columns: 40% 1fr 34px; align-items:center; gap:8px; }
+.hbar-lbl { font-size:11.8px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hbar-track { background: var(--gridline); border-radius:5px; height:10px; overflow:hidden; }
+.hbar-fill { display:block; height:100%; border-radius:5px; }
+.hbar-val { font-size:11.5px; color:var(--text-primary); font-weight:700; text-align:right; font-variant-numeric: tabular-nums; }
+.mini-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; }
+@media (max-width: 880px) { .mini-grid { grid-template-columns: 1fr; } }
+.mini-panel h4 { font-size:12.5px; margin:0 0 10px; color:var(--text-primary); font-weight:700; }
+
+/* ---- group header ---- */
+.grp-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+.grp-title-row { display:flex; align-items:center; gap:10px; }
+.grp-dot { width:12px; height:12px; border-radius:4px; flex:none; }
+.grp-head h3 { font-size:18px; margin:0; font-weight:800; }
+.grp-desc { font-size:13px; color:var(--text-secondary); margin:4px 0 0; max-width:640px; }
+.grp-kpis { display:flex; gap:8px; flex-wrap:wrap; }
+.grp-kpi { background:var(--page); border:1px solid var(--border); border-radius:10px; padding:8px 12px; min-width:92px; }
+.grp-kpi .n { font-size:18px; font-weight:800; }
+.grp-kpi .l { font-size:10.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.02em; }
+.callout { background: var(--page); border-left:3px solid var(--series-blue); border-radius:0 10px 10px 0; padding:10px 14px;
+  font-size:13px; color:var(--text-secondary); margin: 14px 0; }
+
+/* ---- badges ---- */
+.badge { display:inline-block; font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:6px; white-space:nowrap; }
+.badge-xs { font-size:10px; padding:1px 6px; font-weight:600; }
+.badge-good { background: rgba(12,163,12,0.13); color:#0a7d0a; }
+.badge-warn { background: rgba(250,178,25,0.18); color:#8a6100; }
+.badge-neutral { background: rgba(137,135,129,0.16); color: var(--text-secondary); }
+.badge-neutral-soft { background: rgba(137,135,129,0.12); color: var(--text-muted); }
+.badge-critical { background: rgba(208,59,59,0.13); color:#b23434; }
+
+/* ---- table ---- */
+.table-tools { display:flex; align-items:center; justify-content:space-between; gap:10px; margin: 16px 0 8px; flex-wrap:wrap; }
+.table-tools .count { font-size:12px; color:var(--text-muted); }
+.search-input { border:1px solid var(--border); background:var(--page); border-radius:8px; padding:8px 12px; font-size:13px;
+  color:var(--text-primary); width: 260px; max-width:100%; }
+.search-input:focus { outline: 2px solid var(--series-blue); outline-offset:1px; }
+.table-scroll { overflow-x:auto; overflow-y:auto; max-height: 480px; border:1px solid var(--border); border-radius:10px; }
+table.data { width:100%; border-collapse:collapse; font-size:12.8px; }
+table.data thead th { position:sticky; top:0; background: var(--surface-1); text-align:left; font-size:10.8px;
+  text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); font-weight:700; padding:9px 10px;
+  border-bottom:1px solid var(--border); z-index:1; }
+table.data td { padding:8px 10px; border-bottom:1px solid var(--gridline); vertical-align:top; color:var(--text-primary); }
+table.data tbody tr:hover { background: var(--page); }
+.small { font-size:12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.muted { color: var(--text-muted); }
+.ativo-code { display:inline-block; max-width:210px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom; }
+.causa-cell { max-width: 280px; }
+
+/* ---- tooltip ---- */
+#viz-tooltip { position:fixed; z-index:1000; background:var(--navy); color:#fff; font-size:12px; line-height:1.5;
+  padding:8px 11px; border-radius:8px; pointer-events:none; white-space:pre-line; max-width:240px; box-shadow:0 8px 24px rgba(0,0,0,0.28);
+  opacity:0; transform: translateY(2px); transition: opacity .1s ease; }
+#viz-tooltip.show { opacity:1; }
+
+/* ---- footer ---- */
+footer { margin-top: 40px; padding-top:18px; border-top:1px solid var(--border); }
+footer p { font-size:11.5px; color:var(--text-muted); line-height:1.6; margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <button id="theme-toggle" class="theme-btn" type="button">Modo escuro</button>
+    <div class="kicker">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.4 8.7-8 10-4.6-1.3-8-5-8-10V6l8-4z"/></svg>
+      MRS Sentinel · Inteligência de Falhas EE
+    </div>
+    <h1>Diagnóstico de Falhas EE — Pátio IAA</h1>
+    <p class="sub">Leitura das principais causas e problemas de falha no pátio IAA a partir da base RASF ELET SP,
+      cobrindo os quatro recortes solicitados de Origem de Atividade Correta e uma visão geral mensal do pátio
+      desde janeiro até a última atualização da planilha.</p>
+    <div class="chips">
+      <span class="chip">Pátio: <b>IAA</b></span>
+      <span class="chip">Ano: <b>2026</b></span>
+      <span class="chip">Período com dados: <b>01/01/2026 a 28/07/2026</b></span>
+      <span class="chip">Notas no pátio (2026): <b>119</b></span>
+      <span class="chip">Gerado em 30/07/2026 às 23:17</span>
+    </div>
+  </div>
+</header>
+<nav class="subnav"><div class="wrap">
+  <a href="#resumo">Resumo executivo</a>
+  <a href="#visao-geral">Visão geral mensal</a>
+  <a href="#g1">1 · Projetos e Obras</a>
+  <a href="#g2">2 · Falha / Via Perm.</a>
+  <a href="#g3">3 · Ação de Terceiros</a>
+  <a href="#g4">4 · Estoque EAM / Manut.</a>
+  <a href="#recomendacoes">Recomendações</a>
+</div></nav>
+
+<main class="wrap">
+
+<section id="resumo">
+<div class="section-head"><h2>Resumo executivo — Pátio IAA, 2026</h2>
+<span class="section-note">119 notas RASF de EE entre 01/01/2026 a 28/07/2026</span></div>
+<div class="kpi-grid">
+  <div class="kpi"><div class="lbl">Total de falhas</div><div class="val">119</div><div class="sub">notas RASF no pátio</div></div>
+  <div class="kpi"><div class="lbl">Falhas com THP gerado</div><div class="val">32</div><div class="sub">26,9% do total</div></div>
+  <div class="kpi"><div class="lbl">Minutos de THP</div><div class="val">3.155</div><div class="sub">≈ 52.6 h de indisponibilidade</div></div>
+  <div class="kpi"><div class="lbl">Reincidência 90 dias</div><div class="val">33</div><div class="sub">27,7% das falhas repetem no ativo</div></div>
+  <div class="kpi "><div class="lbl">Origem ainda não classificada</div><div class="val">20</div><div class="sub">16,8% · 100% concentrado em julho</div></div>
+  <div class="kpi flag-critical"><div class="lbl">Causa raiz formal (RCA)</div><div class="val">1,7%</div><div class="sub">2 de 119 notas com 6M/Componente</div></div>
+</div>
+
+<div class="card narrative" style="margin-top:14px">
+<h3 style="margin:0 0 12px;font-size:15px">Leitura executiva</h3>
+<ul>
+<li><span class="tag tag-gov">Governança</span>Apenas <b>2 das 119 notas (1,7%)</b> têm causa raiz formalmente estruturada (Componente Causador ou matriz 6M) preenchida em reunião. Nos demais casos, a "Causa" apresentada neste relatório foi reconstruída a partir do relato de campo dentro da nota — as Disposições de Reunião estão sendo registradas normalmente, mas o fechamento estruturado da causa (etapa formal da PG-ENG-0088) não está acontecendo na maioria das reuniões deste pátio.</li>
+<li><span class="tag tag-gov">Governança</span>Depois de aplicar o proxy abaixo, restam <b>20 notas (16,8%)</b> genuinamente sem "Origem de Atividade Correta" — todas de <b>julho</b> (76,9% das falhas do mês), atraso normal de calendário (reunião de agosto ainda não revisou o período). Nenhuma das 20 tem consenso fechado. Já as <b>22 notas de janeiro a junho</b> que estavam em branco foram reclassificadas neste relatório usando "Descrição Tipo Solicitação" como origem de referência (17 Interferência em Outro Ativo, 2 Manual, 2 Falha Causa Operação, 1 Vandalismo) — o campo formal e o consenso continuam em aberto no RASF para elas, então vale formalizar isso na próxima reunião.</li>
+<li><span class="tag tag-op">Operação</span><b>Projetos e Obras</b> concentra <b>43,7% das falhas do pátio</b> (52/119) e quase metade dos minutos de THP (1.475 de 3.155 min = 46,8%), concentradas em Sinalização e no sintoma "Máquina de Chave Inoperante" (22 ocorrências, 25 ativos distintos).</li>
+<li><span class="tag tag-risk">Risco</span>A reincidência em 90 dias é maior justamente nos recortes de <b>Ação de Terceiros (60,0%)</b> e <b>Projetos e Obras (46,2%)</b> — ambos acima da média geral do pátio (27,7%) — indicando problema recorrente no mesmo ativo, não incidentes isolados.</li>
+<li><span class="tag tag-op">Operação</span>As 5 notas de <b>Ação de Terceiros</b> têm padrão homogêneo: 100% delas são sintoma "Circuito de Via com Ocupação Indevida" por manobra indevida — específico o bastante para virar uma ação pontual dirigida.</li>
+<li><span class="tag tag-op">Operação</span>Em <b>Estoque EAM / Requerimento de Manutenção</b>, 4 das 5 notas giram em torno do mesmo item — <b>Placa Deslizante</b> — sugerindo problema de disponibilidade/cadastro desse componente específico, não uma causa técnica dispersa.</li>
+</ul>
+</div>
+</section>
+
+
+<section id="visao-geral">
+<div class="section-head"><h2>Visão geral mensal do pátio</h2>
+<span class="section-note">Todas as falhas de EE do pátio IAA, por classificação de Origem de Atividade Correta</span></div>
+<div class="card">
+  <p class="chart-title">Falhas por mês e classificação</p>
+  <p class="chart-sub">Os quatro recortes solicitados aparecem destacados; "Outras origens" agrupa CCO, Outras Ferrovias,
+    Operação de Trens e Vandalismo; "Não classificado / Pendente" é toda nota sem Origem de Atividade Correta definida.</p>
+  <div class="chart-wrap"><svg viewBox="0 0 780 300" class="viz-svg" role="img" aria-label="Falhas por mes e classificacao"><line x1="46" y1="270.00" x2="772" y2="270.00" class="gridline"/><text x="38" y="274.00" class="axis-lbl" text-anchor="end">0</text><line x1="46" y1="142.00" x2="772" y2="142.00" class="gridline"/><text x="38" y="146.00" class="axis-lbl" text-anchor="end">15</text><line x1="46" y1="14.00" x2="772" y2="14.00" class="gridline"/><text x="38" y="18.00" class="axis-lbl" text-anchor="end">30</text><path d="M85.86,159.07 H109.86 A0.00,0.00 0 0 1 109.86,159.07 V269.00 A0.00,0.00 0 0 1 109.86,269.00 H85.86 A0.00,0.00 0 0 1 85.86,269.00 V159.07 A0.00,0.00 0 0 1 85.86,159.07 Z" fill="var(--series-blue)" class="bar-seg"/><path d="M89.86,134.47 H105.86 A4.00,4.00 0 0 1 109.86,138.47 V159.07 A0.00,0.00 0 0 1 109.86,159.07 H85.86 A0.00,0.00 0 0 1 85.86,159.07 V138.47 A4.00,4.00 0 0 1 89.86,134.47 Z" fill="var(--series-magenta)" class="bar-seg"/><rect x="46.00" y="14" width="103.71" height="256" fill="transparent" class="hit-col" data-tip="Jan/2026 — total 16
+Projetos e Obras: 13
+Outras origens: 3"/><text x="97.86" y="290" class="axis-lbl" text-anchor="middle">Jan</text><path d="M189.57,201.73 H213.57 A0.00,0.00 0 0 1 213.57,201.73 V269.00 A0.00,0.00 0 0 1 213.57,269.00 H189.57 A0.00,0.00 0 0 1 189.57,269.00 V201.73 A0.00,0.00 0 0 1 189.57,201.73 Z" fill="var(--series-blue)" class="bar-seg"/><path d="M193.57,168.60 H209.57 A4.00,4.00 0 0 1 213.57,172.60 V201.73 A0.00,0.00 0 0 1 213.57,201.73 H189.57 A0.00,0.00 0 0 1 189.57,201.73 V172.60 A4.00,4.00 0 0 1 193.57,168.60 Z" fill="var(--series-magenta)" class="bar-seg"/><rect x="149.71" y="14" width="103.71" height="256" fill="transparent" class="hit-col" data-tip="Fev/2026 — total 12
+Projetos e Obras: 8
+Outras origens: 4"/><text x="201.57" y="290" class="axis-lbl" text-anchor="middle">Fev</text><path d="M293.29,201.73 H317.29 A0.00,0.00 0 0 1 317.29,201.73 V269.00 A0.00,0.00 0 0 1 317.29,269.00 H293.29 A0.00,0.00 0 0 1 293.29,269.00 V201.73 A0.00,0.00 0 0 1 293.29,201.73 Z" fill="var(--series-blue)" class="bar-seg"/><path d="M293.29,194.20 H317.29 A0.00,0.00 0 0 1 317.29,194.20 V200.73 A0.00,0.00 0 0 1 317.29,200.73 H293.29 A0.00,0.00 0 0 1 293.29,200.73 V194.20 A0.00,0.00 0 0 1 293.29,194.20 Z" fill="var(--series-orange)" class="bar-seg"/><path d="M297.29,117.40 H313.29 A4.00,4.00 0 0 1 317.29,121.40 V193.20 A0.00,0.00 0 0 1 317.29,193.20 H293.29 A0.00,0.00 0 0 1 293.29,193.20 V121.40 A4.00,4.00 0 0 1 297.29,117.40 Z" fill="var(--series-magenta)" class="bar-seg"/><rect x="253.43" y="14" width="103.71" height="256" fill="transparent" class="hit-col" data-tip="Mar/2026 — total 18
+Projetos e Obras: 8
+Falha / Via Perm.: 1
+Outras origens: 9"/><text x="305.29" y="290" class="axis-lbl" text-anchor="middle">Mar</text><path d="M397.00,201.73 H421.00 A0.00,0.00 0 0 1 421.00,201.73 V269.00 A0.00,0.00 0 0 1 421.00,269.00 H397.00 A0.00,0.00 0 0 1 397.00,269.00 V201.73 A0.00,0.00 0 0 1 397.00,201.73 Z" fill="var(--series-blue)" class="bar-seg"/><path d="M397.00,194.20 H421.00 A0.00,0.00 0 0 1 421.00,194.20 V200.73 A0.00,0.00 0 0 1 421.00,200.73 H397.00 A0.00,0.00 0 0 1 397.00,200.73 V194.20 A0.00,0.00 0 0 1 397.00,194.20 Z" fill="var(--series-yellow)" class="bar-seg"/><path d="M401.00,160.07 H417.00 A4.00,4.00 0 0 1 421.00,164.07 V193.20 A0.00,0.00 0 0 1 421.00,193.20 H397.00 A0.00,0.00 0 0 1 397.00,193.20 V164.07 A4.00,4.00 0 0 1 401.00,160.07 Z" fill="var(--series-magenta)" class="bar-seg"/><rect x="357.14" y="14" width="103.71" height="256" fill="transparent" class="hit-col" data-tip="Abr/2026 — total 13
+Projetos e Obras: 8
+Estoque EAM / Requer. Manut.: 1
+Outras origens: 4"/><text x="409.00" y="290" class="axis-lbl" text-anchor="middle">Abr</text><path d="M500.71,210.27 H524.71 A0.00,0.00 0 0 1 524.71,210.27 V269.00 A0.00,0.00 0 0 1 524.71,269.00 H500.71 A0.00,0.00 0 0 1 500.71,269.00 V210.27 A0.00,0.00 0 0 1 500.71,210.27 Z" fill="var(--series-blue)" class="bar-seg"/><path d="M500.71,202.73 H524.71 A0.00,0.00 0 0 1 524.71,202.73 V209.27 A0.00,0.00 0 0 1 524.71,209.27 H500.71 A0.00,0.00 0 0 1 500.71,209.27 V202.73 A0.00,0.00 0 0 1 500.71,202.73 Z" fill="var(--series-orange)" class="bar-seg"/><path d="M500.71,194.20 H524.71 A0.00,0.00 0 0 1 524.71,194.20 V200.73 A0.00,0.00 0 0 1 524.71,200.73 H500.71 A0.00,0.00 0 0 1 500.71,200.73 V194.20 A0.00,0.00 0 0 1 500.71,194.20 Z" fill="var(--series-aqua)" class="bar-seg"/><path d="M500.71,160.07 H524.71 A0.00,0.00 0 0 1 524.71,160.07 V192.20 A0.00,0.00 0 0 1 524.71,192.20 H500.71 A0.00,0.00 0 0 1 500.71,192.20 V160.07 A0.00,0.00 0 0 1 500.71,160.07 Z" fill="var(--series-yellow)" class="bar-seg"/><path d="M504.71,100.33 H520.71 A4.00,4.00 0 0 1 524.71,104.33 V159.07 A0.00,0.00 0 0 1 524.71,159.07 H500.71 A0.00,0.00 0 0 1 500.71,159.07 V104.33 A4.00,4.00 0 0 1 504.71,100.33 Z" fill="var(--series-magenta)" class="bar-seg"/><rect x="460.86" y="14" width="103.71" height="256" fill="transparent" class="hit-col" data-tip="Mai/2026 — total 20
+Projetos e Obras: 7
+Falha / Via Perm.: 1
+Ação de Terceiros: 1
+Estoque EAM / Requer. Manut.: 4
+Outras origens: 7"/><text x="512.71" y="290" class="axis-lbl" text-anchor="middle">Mai</text><path d="M604.43,235.87 H628.43 A0.00,0.00 0 0 1 628.43,235.87 V269.00 A0.00,0.00 0 0 1 628.43,269.00 H604.43 A0.00,0.00 0 0 1 604.43,269.00 V235.87 A0.00,0.00 0 0 1 604.43,235.87 Z" fill="var(--series-blue)" class="bar-seg"/><path d="M604.43,211.27 H628.43 A0.00,0.00 0 0 1 628.43,211.27 V234.87 A0.00,0.00 0 0 1 628.43,234.87 H604.43 A0.00,0.00 0 0 1 604.43,234.87 V211.27 A0.00,0.00 0 0 1 604.43,211.27 Z" fill="var(--series-aqua)" class="bar-seg"/><path d="M608.43,151.53 H624.43 A4.00,4.00 0 0 1 628.43,155.53 V210.27 A0.00,0.00 0 0 1 628.43,210.27 H604.43 A0.00,0.00 0 0 1 604.43,210.27 V155.53 A4.00,4.00 0 0 1 608.43,151.53 Z" fill="var(--series-magenta)" class="bar-seg"/><rect x="564.57" y="14" width="103.71" height="256" fill="transparent" class="hit-col" data-tip="Jun/2026 — total 14
+Projetos e Obras: 4
+Ação de Terceiros: 3
+Outras origens: 7"/><text x="616.43" y="290" class="axis-lbl" text-anchor="middle">Jun</text><path d="M708.14,235.87 H732.14 A0.00,0.00 0 0 1 732.14,235.87 V269.00 A0.00,0.00 0 0 1 732.14,269.00 H708.14 A0.00,0.00 0 0 1 708.14,269.00 V235.87 A0.00,0.00 0 0 1 708.14,235.87 Z" fill="var(--series-blue)" class="bar-seg"/><path d="M708.14,228.33 H732.14 A0.00,0.00 0 0 1 732.14,228.33 V234.87 A0.00,0.00 0 0 1 732.14,234.87 H708.14 A0.00,0.00 0 0 1 708.14,234.87 V228.33 A0.00,0.00 0 0 1 708.14,228.33 Z" fill="var(--series-orange)" class="bar-seg"/><path d="M708.14,219.80 H732.14 A0.00,0.00 0 0 1 732.14,219.80 V226.33 A0.00,0.00 0 0 1 732.14,226.33 H708.14 A0.00,0.00 0 0 1 708.14,226.33 V219.80 A0.00,0.00 0 0 1 708.14,219.80 Z" fill="var(--series-aqua)" class="bar-seg"/><path d="M712.14,49.13 H728.14 A4.00,4.00 0 0 1 732.14,53.13 V218.80 A0.00,0.00 0 0 1 732.14,218.80 H708.14 A0.00,0.00 0 0 1 708.14,218.80 V53.13 A4.00,4.00 0 0 1 712.14,49.13 Z" fill="var(--series-gray)" class="bar-seg"/><rect x="668.29" y="14" width="103.71" height="256" fill="transparent" class="hit-col" data-tip="Jul/2026 — total 26
+Projetos e Obras: 4
+Falha / Via Perm.: 1
+Ação de Terceiros: 1
+Não classificado / Pendente: 20"/><text x="720.14" y="290" class="axis-lbl" text-anchor="middle">Jul</text></svg><div class="legend"><span class="lg-item"><span class="lg-swatch" style="background:var(--series-blue)"></span>Projetos e Obras</span><span class="lg-item"><span class="lg-swatch" style="background:var(--series-orange)"></span>Falha / Via Perm.</span><span class="lg-item"><span class="lg-swatch" style="background:var(--series-aqua)"></span>Ação de Terceiros</span><span class="lg-item"><span class="lg-swatch" style="background:var(--series-yellow)"></span>Estoque EAM / Requer. Manut.</span><span class="lg-item"><span class="lg-swatch" style="background:var(--series-magenta)"></span>Outras origens</span><span class="lg-item"><span class="lg-swatch" style="background:var(--series-gray)"></span>Não classificado / Pendente</span></div></div>
+  <div class="callout"><b>Proxy de governança aplicado (jan–jun/2026):</b> 22 notas desse período
+    estavam com "Origem de Atividade Correta" em branco - como já deveriam ter passado por reunião RASF, este relatório
+    usa "Descrição Tipo Solicitação" como origem de referência para elas (entram em "Outras origens" no gráfico). O campo
+    formal e o consenso seguem em aberto no RASF. Julho (20 notas) ficou de fora do proxy
+    por estar dentro do prazo normal de revisão e aparece como "Não classificado/Pendente".</div>
+</div>
+<div class="chart-row">
+  <div class="card">
+    <p class="chart-title">Falhas com THP gerado, por mês</p>
+    <p class="chart-sub">Quantidade de notas que geraram Tempo de Habilitação Prejudicada (THP 300)</p>
+    <div class="chart-wrap chart-wrap--sm"><svg viewBox="0 0 372 150" class="viz-svg" role="img"><line x1="34" y1="122.00" x2="364" y2="122.00" class="gridline"/><text x="28" y="126.00" class="axis-lbl" text-anchor="end">0</text><line x1="34" y1="14.00" x2="364" y2="14.00" class="gridline"/><text x="28" y="18.00" class="axis-lbl" text-anchor="end">10</text><path d="M50.57,89.60 H64.57 A4.00,4.00 0 0 1 68.57,93.60 V122.00 A0.00,0.00 0 0 1 68.57,122.00 H46.57 A0.00,0.00 0 0 1 46.57,122.00 V93.60 A4.00,4.00 0 0 1 50.57,89.60 Z" fill="var(--series-blue)" class="bar-seg"/><rect x="34.00" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Jan/2026: 3"/><text x="57.57" y="140" class="axis-lbl" text-anchor="middle">Jan</text><path d="M97.71,100.40 H111.71 A4.00,4.00 0 0 1 115.71,104.40 V122.00 A0.00,0.00 0 0 1 115.71,122.00 H93.71 A0.00,0.00 0 0 1 93.71,122.00 V104.40 A4.00,4.00 0 0 1 97.71,100.40 Z" fill="var(--series-blue)" class="bar-seg"/><rect x="81.14" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Fev/2026: 2"/><text x="104.71" y="140" class="axis-lbl" text-anchor="middle">Fev</text><path d="M144.86,57.20 H158.86 A4.00,4.00 0 0 1 162.86,61.20 V122.00 A0.00,0.00 0 0 1 162.86,122.00 H140.86 A0.00,0.00 0 0 1 140.86,122.00 V61.20 A4.00,4.00 0 0 1 144.86,57.20 Z" fill="var(--series-blue)" class="bar-seg"/><rect x="128.29" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Mar/2026: 6"/><text x="151.86" y="140" class="axis-lbl" text-anchor="middle">Mar</text><path d="M192.00,68.00 H206.00 A4.00,4.00 0 0 1 210.00,72.00 V122.00 A0.00,0.00 0 0 1 210.00,122.00 H188.00 A0.00,0.00 0 0 1 188.00,122.00 V72.00 A4.00,4.00 0 0 1 192.00,68.00 Z" fill="var(--series-blue)" class="bar-seg"/><rect x="175.43" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Abr/2026: 5"/><text x="199.00" y="140" class="axis-lbl" text-anchor="middle">Abr</text><path d="M239.14,78.80 H253.14 A4.00,4.00 0 0 1 257.14,82.80 V122.00 A0.00,0.00 0 0 1 257.14,122.00 H235.14 A0.00,0.00 0 0 1 235.14,122.00 V82.80 A4.00,4.00 0 0 1 239.14,78.80 Z" fill="var(--series-blue)" class="bar-seg"/><rect x="222.57" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Mai/2026: 4"/><text x="246.14" y="140" class="axis-lbl" text-anchor="middle">Mai</text><path d="M286.29,89.60 H300.29 A4.00,4.00 0 0 1 304.29,93.60 V122.00 A0.00,0.00 0 0 1 304.29,122.00 H282.29 A0.00,0.00 0 0 1 282.29,122.00 V93.60 A4.00,4.00 0 0 1 286.29,89.60 Z" fill="var(--series-blue)" class="bar-seg"/><rect x="269.71" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Jun/2026: 3"/><text x="293.29" y="140" class="axis-lbl" text-anchor="middle">Jun</text><path d="M333.43,24.80 H347.43 A4.00,4.00 0 0 1 351.43,28.80 V122.00 A0.00,0.00 0 0 1 351.43,122.00 H329.43 A0.00,0.00 0 0 1 329.43,122.00 V28.80 A4.00,4.00 0 0 1 333.43,24.80 Z" fill="var(--series-blue)" class="bar-seg"/><text x="340.43" y="18.80" class="bar-toplbl" text-anchor="middle">9</text><rect x="316.86" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Jul/2026: 9"/><text x="340.43" y="140" class="axis-lbl" text-anchor="middle">Jul</text></svg></div>
+  </div>
+  <div class="card">
+    <p class="chart-title">Minutos de THP gerado, por mês</p>
+    <p class="chart-sub">Soma do Tempo THP 300 (min) das notas do pátio</p>
+    <div class="chart-wrap chart-wrap--sm"><svg viewBox="0 0 372 150" class="viz-svg" role="img"><line x1="34" y1="122.00" x2="364" y2="122.00" class="gridline"/><text x="28" y="126.00" class="axis-lbl" text-anchor="end">0</text><line x1="34" y1="14.00" x2="364" y2="14.00" class="gridline"/><text x="28" y="18.00" class="axis-lbl" text-anchor="end">900</text><path d="M50.57,89.96 H64.57 A4.00,4.00 0 0 1 68.57,93.96 V122.00 A0.00,0.00 0 0 1 68.57,122.00 H46.57 A0.00,0.00 0 0 1 46.57,122.00 V93.96 A4.00,4.00 0 0 1 50.57,89.96 Z" fill="var(--series-orange)" class="bar-seg"/><rect x="34.00" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Jan/2026: 267"/><text x="57.57" y="140" class="axis-lbl" text-anchor="middle">Jan</text><path d="M97.71,84.20 H111.71 A4.00,4.00 0 0 1 115.71,88.20 V122.00 A0.00,0.00 0 0 1 115.71,122.00 H93.71 A0.00,0.00 0 0 1 93.71,122.00 V88.20 A4.00,4.00 0 0 1 97.71,84.20 Z" fill="var(--series-orange)" class="bar-seg"/><rect x="81.14" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Fev/2026: 315"/><text x="104.71" y="140" class="axis-lbl" text-anchor="middle">Fev</text><path d="M144.86,87.32 H158.86 A4.00,4.00 0 0 1 162.86,91.32 V122.00 A0.00,0.00 0 0 1 162.86,122.00 H140.86 A0.00,0.00 0 0 1 140.86,122.00 V91.32 A4.00,4.00 0 0 1 144.86,87.32 Z" fill="var(--series-orange)" class="bar-seg"/><rect x="128.29" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Mar/2026: 289"/><text x="151.86" y="140" class="axis-lbl" text-anchor="middle">Mar</text><path d="M192.00,25.04 H206.00 A4.00,4.00 0 0 1 210.00,29.04 V122.00 A0.00,0.00 0 0 1 210.00,122.00 H188.00 A0.00,0.00 0 0 1 188.00,122.00 V29.04 A4.00,4.00 0 0 1 192.00,25.04 Z" fill="var(--series-orange)" class="bar-seg"/><rect x="175.43" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Abr/2026: 808"/><text x="199.00" y="140" class="axis-lbl" text-anchor="middle">Abr</text><path d="M239.14,58.88 H253.14 A4.00,4.00 0 0 1 257.14,62.88 V122.00 A0.00,0.00 0 0 1 257.14,122.00 H235.14 A0.00,0.00 0 0 1 235.14,122.00 V62.88 A4.00,4.00 0 0 1 239.14,58.88 Z" fill="var(--series-orange)" class="bar-seg"/><rect x="222.57" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Mai/2026: 526"/><text x="246.14" y="140" class="axis-lbl" text-anchor="middle">Mai</text><path d="M286.29,113.12 H300.29 A4.00,4.00 0 0 1 304.29,117.12 V122.00 A0.00,0.00 0 0 1 304.29,122.00 H282.29 A0.00,0.00 0 0 1 282.29,122.00 V117.12 A4.00,4.00 0 0 1 286.29,113.12 Z" fill="var(--series-orange)" class="bar-seg"/><rect x="269.71" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Jun/2026: 74"/><text x="293.29" y="140" class="axis-lbl" text-anchor="middle">Jun</text><path d="M333.43,16.88 H347.43 A4.00,4.00 0 0 1 351.43,20.88 V122.00 A0.00,0.00 0 0 1 351.43,122.00 H329.43 A0.00,0.00 0 0 1 329.43,122.00 V20.88 A4.00,4.00 0 0 1 333.43,16.88 Z" fill="var(--series-orange)" class="bar-seg"/><text x="340.43" y="10.88" class="bar-toplbl" text-anchor="middle">876</text><rect x="316.86" y="14" width="47.14" height="108" fill="transparent" class="hit-col" data-tip="Jul/2026: 876"/><text x="340.43" y="140" class="axis-lbl" text-anchor="middle">Jul</text></svg></div>
+  </div>
+</div>
+</section>
+
+
+<section id="g1">
+<div class="card">
+  <div class="grp-head">
+    <div>
+      <div class="grp-title-row"><span class="grp-dot" style="background:var(--series-blue)"></span>
+        <h3>Análise 1 · Projetos e Obras</h3></div>
+      <p class="grp-desc">Falhas cuja Origem de Atividade Correta foi atribuída às obras de remodelação/expansão em curso no pátio. Filtro: Pátio = IAA · Ano = 2026 · Origem de Atividade Correta = &quot;Projetos E Obras&quot;.</p>
+    </div>
+    <div class="grp-kpis">
+      <div class="grp-kpi"><div class="n">52</div><div class="l">Notas</div></div>
+      <div class="grp-kpi"><div class="n">29</div><div class="l">Ativos distintos</div></div>
+      <div class="grp-kpi"><div class="n">24</div><div class="l">Reincidência 90d (46,2%)</div></div>
+      <div class="grp-kpi"><div class="n">11</div><div class="l">Com THP (21,2%)</div></div>
+      <div class="grp-kpi"><div class="n">1.475</div><div class="l">Min. THP</div></div>
+    </div>
+  </div>
+
+  <div class="mini-grid">
+    <div class="mini-panel"><h4>Ativos mais afetados (TPLNR)</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-blue)"></span></span><span class="hbar-val">14</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ">SINALIZ</span><span class="hbar-track"><span class="hbar-fill" style="width:21.4%;background:var(--series-blue)"></span></span><span class="hbar-val">3</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 05 - ABR 05">SINALIZ-A-ABR 05 - ABR 05</span><span class="hbar-track"><span class="hbar-fill" style="width:14.3%;background:var(--series-blue)"></span></span><span class="hbar-val">2</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 10 - ABR 10">SINALIZ-A-ABR 10 - ABR 10</span><span class="hbar-track"><span class="hbar-fill" style="width:14.3%;background:var(--series-blue)"></span></span><span class="hbar-val">2</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 15 - MCH 1A">SINALIZ-A-ABR 15 - MCH 1A</span><span class="hbar-track"><span class="hbar-fill" style="width:14.3%;background:var(--series-blue)"></span></span><span class="hbar-val">2</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 30 - MCH 11">SINALIZ-A-ABR 30 - MCH 11</span><span class="hbar-track"><span class="hbar-fill" style="width:14.3%;background:var(--series-blue)"></span></span><span class="hbar-val">2</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 55 - MCH 01">SINALIZ-A-ABR 55 - MCH 01</span><span class="hbar-track"><span class="hbar-fill" style="width:14.3%;background:var(--series-blue)"></span></span><span class="hbar-val">2</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 15 - MCH 1B">SINALIZ-A-ABR 15 - MCH 1B</span><span class="hbar-track"><span class="hbar-fill" style="width:7.1%;background:var(--series-blue)"></span></span><span class="hbar-val">1</span></div></div></div>
+    <div class="mini-panel"><h4>Sintomas mais frequentes</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="35 - MÁQUINA DE CHAVE INOPERANTE">35 - MÁQUINA DE CHAVE INOPERANTE</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-blue)"></span></span><span class="hbar-val">22</span></div><div class="hbar-row"><span class="hbar-lbl" title="33 - CIRCUITO DE VIA COM OCUP. INDEVIDA">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</span><span class="hbar-track"><span class="hbar-fill" style="width:50.0%;background:var(--series-blue)"></span></span><span class="hbar-val">11</span></div><div class="hbar-row"><span class="hbar-lbl" title="40 - SINAL INOPERANTE">40 - SINAL INOPERANTE</span><span class="hbar-track"><span class="hbar-fill" style="width:36.4%;background:var(--series-blue)"></span></span><span class="hbar-val">8</span></div><div class="hbar-row"><span class="hbar-lbl" title="36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO">36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO</span><span class="hbar-track"><span class="hbar-fill" style="width:18.2%;background:var(--series-blue)"></span></span><span class="hbar-val">4</span></div><div class="hbar-row"><span class="hbar-lbl" title="152 - SINAL CANCELANDO INDEVIDO">152 - SINAL CANCELANDO INDEVIDO</span><span class="hbar-track"><span class="hbar-fill" style="width:13.6%;background:var(--series-blue)"></span></span><span class="hbar-val">3</span></div><div class="hbar-row"><span class="hbar-lbl" title="999 - OUTROS PROBLEMAS DE EE">999 - OUTROS PROBLEMAS DE EE</span><span class="hbar-track"><span class="hbar-fill" style="width:9.1%;background:var(--series-blue)"></span></span><span class="hbar-val">2</span></div></div></div>
+    <div class="mini-panel"><h4>Objetos mais citados</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="PLACA DESLIZANTE">PLACA DESLIZANTE</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-blue)"></span></span><span class="hbar-val">5</span></div><div class="hbar-row"><span class="hbar-lbl" title="VIA PERMANENTE">VIA PERMANENTE</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-blue)"></span></span><span class="hbar-val">5</span></div><div class="hbar-row"><span class="hbar-lbl" title="NADA CONSTATADO">NADA CONSTATADO</span><span class="hbar-track"><span class="hbar-fill" style="width:60.0%;background:var(--series-blue)"></span></span><span class="hbar-val">3</span></div><div class="hbar-row"><span class="hbar-lbl" title="TIRANTE DE OPERAÇÃO">TIRANTE DE OPERAÇÃO</span><span class="hbar-track"><span class="hbar-fill" style="width:60.0%;background:var(--series-blue)"></span></span><span class="hbar-val">3</span></div><div class="hbar-row"><span class="hbar-lbl" title="TIRANTE DE TRAVAÇÃO">TIRANTE DE TRAVAÇÃO</span><span class="hbar-track"><span class="hbar-fill" style="width:60.0%;background:var(--series-blue)"></span></span><span class="hbar-val">3</span></div><div class="hbar-row"><span class="hbar-lbl" title="SENSOR">SENSOR</span><span class="hbar-track"><span class="hbar-fill" style="width:60.0%;background:var(--series-blue)"></span></span><span class="hbar-val">3</span></div></div></div>
+  </div>
+
+  <div class="table-tools">
+    <input type="text" class="search-input" placeholder="Filtrar por ativo, objeto, sintoma, causa..."
+      data-filter-target="#tbl-g1 tbody" data-count-target="#cnt-g1">
+    <span class="count" id="cnt-g1">52 de 52 notas</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data" id="tbl-g1">
+      <thead><tr>
+        <th>Nota</th><th>Data</th><th>Ativo</th><th>Objeto</th><th>Sintoma</th>
+        <th>Reincidente</th><th>Causa</th><th>THP gerado</th>
+      </tr></thead>
+      <tbody><tr data-s="13878487 mf-rar-iaa_iaa-sinaliz-blircb040 travessia parcial 33 - circuito de via com ocup. indevida travessia parcial bloqueio inter rele s/ bateria sinalização"><td class="mono small">13878487</td><td class="small">01/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-BLIRCB040">SINALIZ-BLIRCB040</span><div class="muted small">BLOQUEIO INTER RELE S/ BATERIA · SINALIZAÇÃO</div></td><td class="small">TRAVESSIA PARCIAL</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Travessia parcial<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13878488 mf-rar-iaa_iaa-sinaliz-blircb005 nada constatado travessia parcial 33 - circuito de via com ocup. indevida cartao do sensor defeituoso bloqueio inter rele c/ bateria sinalização"><td class="mono small">13878488</td><td class="small">01/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-BLIRCB005">SINALIZ-BLIRCB005</span><div class="muted small">BLOQUEIO INTER RELE C/ BATERIA · SINALIZAÇÃO</div></td><td class="small">NADA CONSTATADO</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Cartao do sensor defeituoso<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13900613 mf-rar-iaa_iaa-energia-a_cx015a placa deslizante falta de lubrificação 35 - máquina de chave inoperante placa deslizante sem lubrificaçao alimentador de energia energia"><td class="mono small">13900613</td><td class="small">11/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Placa deslizante sem lubrificaçao<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13915423 mf-rar-iaa_iaa-energia-a_cx015a defeituoso (a) 40 - sinal inoperante 16/01/2026: garantia operacional. robson vai verificar informações e atualizar na segunda-feira. alimentador de energia energia"><td class="mono small">13915423</td><td class="small">15/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">DEFEITUOSO (A)</td><td class="small">40 - SINAL INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">16/01/2026: GARANTIA OPERACIONAL. ROBSON VAI VERIFICAR INFORMAÇÕES E ATUALIZAR NA SEGUNDA-FEIRA.<div><span class="badge badge-neutral badge-xs">Ata de reunião</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13914099 mf-rar-iaa_iaa-energia-a_cx015a cartão lâmpada vitais vld-c6s defeituoso (a) 40 - sinal inoperante cartao i o defeituoso alimentador de energia energia"><td class="mono small">13914099</td><td class="small">15/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">CARTÃO LÂMPADA VITAIS VLD-C6S</td><td class="small">40 - SINAL INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Cartao I O defeituoso<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13917800 mf-rar-iaa_iaa-sinaliz travessia parcial 33 - circuito de via com ocup. indevida wayconex em auto reset"><td class="mono small">13917800</td><td class="small">16/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ">SINALIZ</span></td><td class="small">TRAVESSIA PARCIAL</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">WAYCONEX em auto reset<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 158 min</span></td></tr><tr data-s="13922404 mf-rar-iaa_iaa-energia-a_cx015a tirante de operação desregulado (a) 35 - máquina de chave inoperante excesso de pressao bitola fora de padrao alimentador de energia energia"><td class="mono small">13922404</td><td class="small">17/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">TIRANTE DE OPERAÇÃO</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Excesso de pressao Bitola fora de padrao<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13923354 - 35 - máquina de chave inoperante excesso de pressao bitola fora de padrao"><td class="mono small">13923354</td><td class="small">18/01</td><td><span class="mono small ativo-code" data-tip="-">-</span></td><td class="small">—</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Excesso de pressao Bitola fora de padrao<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13937572 mf-rar-iaa_iaa-energia-a_cx015a sensor falta de ac fora de posição 40 - sinal inoperante sensor zp 1066 fora dos parametros e1 alimentador de energia energia"><td class="mono small">13937572</td><td class="small">21/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">SENSOR FALTA DE AC</td><td class="small">40 - SINAL INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Sensor ZP 1066 fora dos parametros E1<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13932098 mf-rar-iaa_iaa-energia-a_cx015a placa deslizante falta de lubrificação 35 - máquina de chave inoperante placas deslizantes secas alimentador de energia energia"><td class="mono small">13932098</td><td class="small">21/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Placas deslizantes secas<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13946580 mf-rar-iaa_iaa-energia-a_cx015a tirante de operação desregulado (a) 35 - máquina de chave inoperante tirante de travaçao desregulado nao foi causa via alimentador de energia energia"><td class="mono small">13946580</td><td class="small">24/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">TIRANTE DE OPERAÇÃO</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Tirante de travaçao desregulado nao foi causa via<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13944008 mf-rar-iaa_iaa-energia-a_cx015a tirante de travação desregulado (a) 35 - máquina de chave inoperante via alimentador de energia energia"><td class="mono small">13944008</td><td class="small">24/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">TIRANTE DE TRAVAÇÃO</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">via<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 32 min</span></td></tr><tr data-s="13951403 mf-rar-iaa_iaa-energia-a_cx015a chave fusível defeituoso (a) 40 - sinal inoperante chave 1 manual alimentador de energia energia"><td class="mono small">13951403</td><td class="small">27/01</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">CHAVE FUSÍVEL</td><td class="small">40 - SINAL INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Chave 1 manual<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 77 min</span></td></tr><tr data-s="13968407 mf-rar-iaa_iaa-energia-a_cx015a tirante de operação desregulado (a) 35 - máquina de chave inoperante tirante de operaçao desregulado devido variaçao do amv alimentador de energia energia"><td class="mono small">13968407</td><td class="small">01/02</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">TIRANTE DE OPERAÇÃO</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Tirante de operaçao desregulado devido variaçao do AMV<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13974148 mf-rar-iaa_iaa-energia-a_cx015a conversor defeituoso (a) 33 - circuito de via com ocup. indevida transformador 12 24v defeituoso alimentador de energia energia"><td class="mono small">13974148</td><td class="small">03/02</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">CONVERSOR</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Transformador 12 24V defeituoso<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13995608 - 35 - máquina de chave inoperante agulha agarrando no patinho"><td class="mono small">13995608</td><td class="small">10/02</td><td><span class="mono small ativo-code" data-tip="-">-</span></td><td class="small">—</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Agulha agarrando no patinho<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="13995605 mf-rar-iaa_iaa-energia-a_cx015a via permanente condição inadequada 35 - máquina de chave inoperante barra de travaçao desregulada devido falta de socaria alimentador de energia energia"><td class="mono small">13995605</td><td class="small">10/02</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">VIA PERMANENTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Barra de travaçao desregulada devido falta de socaria<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14012173 mf-rar-iaa_iaa-energia-a_cx015a placa deslizante falta de lubrificação 35 - máquina de chave inoperante excesso de sujeira nas placas deslizantes alimentador de energia energia"><td class="mono small">14012173</td><td class="small">16/02</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">EXCESSO DE SUJEIRA NAS PLACAS DESLIZANTES<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14013837 mf-rar-iaa_iaa-energia-a_cx015a sensor travessia parcial 999 - outros problemas de ee travessia parcial alimentador de energia energia"><td class="mono small">14013837</td><td class="small">17/02</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-ENERGIA-A_CX015A">ENERGIA-A_CX015A</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">SENSOR</td><td class="small">999 - OUTROS PROBLEMAS DE EE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Travessia parcial<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14044686 mf-rar-iaa_iaa-sinaliz-cont eixos 50 sensor 40 - sinal inoperante circuito sobreposto ocupado com erro na cabeça de contagem contador de eixos sinalização"><td class="mono small">14044686</td><td class="small">25/02</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-CONT EIXOS 50">SINALIZ-CONT EIXOS 50</span><div class="muted small">CONTADOR DE EIXOS · SINALIZAÇÃO</div></td><td class="small">SENSOR</td><td class="small">40 - SINAL INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">CIrcuito sobreposto ocupado com erro na cabeça de contagem<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14050707 mf-rar-iaa_iaa-sinaliz-a-abr 10 - abr 10 tirante de travação desregulado (a) 35 - máquina de chave inoperante tirante de travação desrregulado abrigo sinalização"><td class="mono small">14050707</td><td class="small">27/02</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 10 - ABR 10">SINALIZ-A-ABR 10 - ABR 10</span><div class="muted small">ABRIGO · SINALIZAÇÃO</div></td><td class="small">TIRANTE DE TRAVAÇÃO</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Tirante de travação desrregulado<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 111 min</span></td></tr><tr data-s="14081212 mf-rar-iaa_iaa-sinaliz-a-abr 15 - mch 1b tirante de travação desregulado (a) 35 - máquina de chave inoperante barra de travaçao desregulada nao foi causa via maq chave 110vcc grs 5c sinalização"><td class="mono small">14081212</td><td class="small">06/03</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 15 - MCH 1B">SINALIZ-A-ABR 15 - MCH 1B</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">TIRANTE DE TRAVAÇÃO</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Barra de travaçao desregulada nao foi causa via<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14086574 mf-rar-iaa_iaa-sinaliz-a-abr45-mch23a alavanca de duplo controle fora de posição 35 - máquina de chave inoperante intervalo com obra da dipo em seguida chave operada para passagem da socadora deixando travada no painel (23b e 27a) maq chave 110vcc grs 5c sinalização"><td class="mono small">14086574</td><td class="small">09/03</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR45-MCH23A">SINALIZ-A-ABR45-MCH23A</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">ALAVANCA DE DUPLO CONTROLE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Intervalo com obra da DIpo em seguida chave operada para passagem da socadora deixando travada no painel (23B e 27A)<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 30 min</span></td></tr><tr data-s="14089085 mf-rar-iaa_iaa-sinaliz sensor travessia parcial 33 - circuito de via com ocup. indevida contagem negativa sensor de rodas sinalização"><td class="mono small">14089085</td><td class="small">10/03</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ">SINALIZ</span><div class="muted small">SENSOR DE RODAS · SINALIZAÇÃO</div></td><td class="small">SENSOR</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Contagem negativa<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14104283 - 35 - máquina de chave inoperante defeito de socari e livre passagem fora do padrao"><td class="mono small">14104283</td><td class="small">14/03</td><td><span class="mono small ativo-code" data-tip="-">-</span></td><td class="small">—</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Defeito de socari e livre passagem fora do padrao<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14107374 mf-rar-iaa_iaa-sinaliz-a-abr50  - abr50 fonte de alimentação defeituoso (a) 999 - outros problemas de ee queda do wayconex por 1 minuto obs j normalizado pendente entrega ap s an lise de log s 10 34 do dia 18 03 2026 voltou a ocupar as linhas 3 e 5 de iaa abrigo sinalização"><td class="mono small">14107374</td><td class="small">16/03</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR50  - ABR50">SINALIZ-A-ABR50  - ABR50</span><div class="muted small">ABRIGO · SINALIZAÇÃO</div></td><td class="small">FONTE DE ALIMENTAÇÃO</td><td class="small">999 - OUTROS PROBLEMAS DE EE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">QUEDA DO WAYCONEX POR 1 MINUTO OBS J NORMALIZADO PENDENTE ENTREGA AP S AN LISE DE LOG S 10 34 DO DIA 18 03 2026 VOLTOU A OCUPAR AS LINHAS 3 E 5 DE IAA<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14108521 mf-rar-iaa_iaa-sinaliz-a-abr 30 - mch 11 conector fiação terminal com mau contato 35 - máquina de chave inoperante terminais frouxos do contato de indicação e manivela maq chave 110vcc grs 5c sinalização"><td class="mono small">14108521</td><td class="small">16/03</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 30 - MCH 11">SINALIZ-A-ABR 30 - MCH 11</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">CONECTOR FIAÇÃO TERMINAL</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Terminais frouxos do contato de indicação e manivela<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14112925 mf-rar-iaa_iaa-sinaliz conector barra detetora com mau contato 44 - dete descarrilam alarmado indevido cabo partido no terminal barra detetora descarrilamento equipamento de apoio operacional"><td class="mono small">14112925</td><td class="small">17/03</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ">SINALIZ</span><div class="muted small">BARRA DETETORA DESCARRILAMENTO · EQUIPAMENTO DE APOIO OPERACIONAL</div></td><td class="small">CONECTOR BARRA DETETORA</td><td class="small">44 - DETE DESCARRILAM ALARMADO INDEVIDO</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">CABO PARTIDO NO TERMINAL<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14138421 mf-rar-iaa_iaa-sinaliz-a-abr 35 - lpm 35 40 - sinal inoperante cartão módulo de sinal do iconix"><td class="mono small">14138421</td><td class="small">25/03</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 35 - LPM 35">SINALIZ-A-ABR 35 - LPM 35</span></td><td class="small">—</td><td class="small">40 - SINAL INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Cartão módulo de sinal do Iconix<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14162993 mf-rar-iaa_iaa-sinaliz-a-abr 05 - abr 05 cpu defeituoso (a) 33 - circuito de via com ocup. indevida pen drive do wayconnex defeitoso abrigo sinalização"><td class="mono small">14162993</td><td class="small">01/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 05 - ABR 05">SINALIZ-A-ABR 05 - ABR 05</span><div class="muted small">ABRIGO · SINALIZAÇÃO</div></td><td class="small">CPU</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">PEN DRIVE DO WAYCONNEX DEFEITOSO<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 248 min</span></td></tr><tr data-s="14183940 mf-rar-iaa_iaa-sinaliz-a-abr 45- lpm 45 cartão i/o vitais - vio-86s defeituoso (a) 152 - sinal cancelando indevido cartão defeituoso"><td class="mono small">14183940</td><td class="small">07/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 45- LPM 45">SINALIZ-A-ABR 45- LPM 45</span></td><td class="small">CARTÃO I/O VITAIS - VIO-86S</td><td class="small">152 - SINAL CANCELANDO INDEVIDO</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">cartão defeituoso<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14189519 mf-rar-iaa_iaa-sinaliz-a-abr 15 - abr 15 conector de alimentação mau contato 37 - locação isolada cabo b12 manager comunication solto alimentador de energia energia"><td class="mono small">14189519</td><td class="small">09/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 15 - ABR 15">SINALIZ-A-ABR 15 - ABR 15</span><div class="muted small">ALIMENTADOR DE ENERGIA · ENERGIA</div></td><td class="small">CONECTOR DE ALIMENTAÇÃO</td><td class="small">37 - LOCAÇÃO ISOLADA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">CABO B12 MANAGER COMUNICATION SOLTO<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 139 min</span></td></tr><tr data-s="14201433 mf-rar-iaa_iaa-sinaliz-a-abr30  - abr30 conector rj45 com mau contato 33 - circuito de via com ocup. indevida cabo rj-45 com mau contato abrigo sinalização"><td class="mono small">14201433</td><td class="small">13/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR30  - ABR30">SINALIZ-A-ABR30  - ABR30</span><div class="muted small">ABRIGO · SINALIZAÇÃO</div></td><td class="small">CONECTOR RJ45</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Cabo RJ-45 com mau contato<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 253 min</span></td></tr><tr data-s="14209067 mf-rar-iaa_iaa-sinaliz-a-abr 55 - lpm 55 cartão lâmpada vitais vld-r16s defeituoso (a) 40 - sinal inoperante cartão modulo colorlith defeituoso"><td class="mono small">14209067</td><td class="small">15/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 55 - LPM 55">SINALIZ-A-ABR 55 - LPM 55</span></td><td class="small">CARTÃO LÂMPADA VITAIS VLD-R16S</td><td class="small">40 - SINAL INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Cartão modulo colorlith defeituoso<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14215465 mf-rar-iaa_iaa-sinaliz-a-abr 05 - abr 05 modem desligado (a) 33 - circuito de via com ocup. indevida substituiç o de roteadores em iaa açâo reset remotamente pela engenharia término: 18/04/2026 às 05:13hs abrigo sinalização"><td class="mono small">14215465</td><td class="small">17/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 05 - ABR 05">SINALIZ-A-ABR 05 - ABR 05</span><div class="muted small">ABRIGO · SINALIZAÇÃO</div></td><td class="small">MODEM</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">SUBSTITUIÇ O DE ROTEADORES EM IAA AÇÂO RESET REMOTAMENTE PELA ENGENHARIA TÉRMINO: 18/04/2026 ÀS 05:13HS<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14223092 mf-rar-iaa_iaa-sinaliz-cont eixos 35 manobra travessia parcial 33 - circuito de via com ocup. indevida indeterminada contador de eixos sinalização"><td class="mono small">14223092</td><td class="small">21/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-CONT EIXOS 35">SINALIZ-CONT EIXOS 35</span><div class="muted small">CONTADOR DE EIXOS · SINALIZAÇÃO</div></td><td class="small">MANOBRA</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Indeterminada<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14250489 mf-rar-iaa_iaa-sinaliz-a-abr 45 - mch 29 compartimento da engrenagem quebrado (a) 35 - máquina de chave inoperante engrenagens principal e intermediaria com dentes quebrados maq chave 110vcc grs 5c sinalização"><td class="mono small">14250489</td><td class="small">29/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 45 - MCH 29">SINALIZ-A-ABR 45 - MCH 29</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">COMPARTIMENTO DA ENGRENAGEM</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Engrenagens principal e intermediaria com dentes quebrados<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14287840 mf-rar-iaa_iaa-sinaliz-a-abr 55 - mch 01 tirante de indicação desregulado (a) 36 - máquina de chave perdendo indicação tirante de indicação desregulado maq chave 110vcc grs 5c sinalização"><td class="mono small">14287840</td><td class="small">13/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 55 - MCH 01">SINALIZ-A-ABR 55 - MCH 01</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">TIRANTE DE INDICAÇÃO</td><td class="small">36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Tirante de indicação desregulado<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14302391 mf-sju-ipg_ipg-sinaliz-a-abr50-mch21a via permanente condição inadequada 35 - máquina de chave inoperante tirante de travação"><td class="mono small">14302391</td><td class="small">18/05</td><td><span class="mono small ativo-code" data-tip="MF-SJU-IPG_IPG-SINALIZ-A-ABR50-MCH21A">SINALIZ-A-ABR50-MCH21A</span></td><td class="small">VIA PERMANENTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">TIRANTE DE TRAVAÇÃO<div><span class="badge badge-good badge-xs">RCA formal</span></div></td><td><span class="badge badge-critical">Sim · 238 min</span></td></tr><tr data-s="14306449 mf-rar-iaa_iaa-sinaliz-cont eixos 10 manobra travessia parcial 33 - circuito de via com ocup. indevida indeterminada contador de eixos sinalização"><td class="mono small">14306449</td><td class="small">19/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-CONT EIXOS 10">SINALIZ-CONT EIXOS 10</span><div class="muted small">CONTADOR DE EIXOS · SINALIZAÇÃO</div></td><td class="small">MANOBRA</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Indeterminada<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14313643 mf-rar-iaa_iaa-sinaliz-a-abr 15 - mch 1a via permanente condição inadequada 35 - máquina de chave inoperante tirante de indicação desregulado maq chave 110vcc grs 5c sinalização"><td class="mono small">14313643</td><td class="small">21/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 15 - MCH 1A">SINALIZ-A-ABR 15 - MCH 1A</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">VIA PERMANENTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Tirante de indicação desregulado<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14325116 mf-rar-iaa_iaa-sinaliz-a-abr 25 - mch 5b via permanente condição inadequada 35 - máquina de chave inoperante tirante de operação desregulado devido 1 barra de conjugação com parafuso com folga maq chave 110vcc grs 5c sinalização"><td class="mono small">14325116</td><td class="small">25/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 25 - MCH 5B">SINALIZ-A-ABR 25 - MCH 5B</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">VIA PERMANENTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Tirante de operação desregulado devido 1 barra de conjugação com parafuso com folga<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14329893 mf-rar-iaa_iaa-sinaliz-a-abr 15 - mch 1a placa deslizante falta de lubrificação 35 - máquina de chave inoperante falta de lubrificação nas placas deslizantes maq chave 110vcc grs 5c sinalização"><td class="mono small">14329893</td><td class="small">26/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 15 - MCH 1A">SINALIZ-A-ABR 15 - MCH 1A</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Falta de lubrificação nas placas deslizantes<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14341111 mf-rar-iaa_iaa-sinaliz-a-abr 30 - mch 11 placa deslizante falta de lubrificação 35 - máquina de chave inoperante placas deslizantes secas e sujas maq chave 110vcc grs 5c sinalização"><td class="mono small">14341111</td><td class="small">29/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 30 - MCH 11">SINALIZ-A-ABR 30 - MCH 11</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Placas deslizantes secas e sujas<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14353677 mf-sju-ipg_ipg-sinaliz-36sn1 nada constatado nada constatado 152 - sinal cancelando indevido indeterminada maq chave 110vcc grs 5c sinalização"><td class="mono small">14353677</td><td class="small">02/06</td><td><span class="mono small ativo-code" data-tip="MF-SJU-IPG_IPG-SINALIZ-36SN1">SINALIZ-36SN1</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">NADA CONSTATADO</td><td class="small">152 - SINAL CANCELANDO INDEVIDO</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Indeterminada<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14349878 mf-sju-ipg_ipg-sinaliz-39dtcdv fonte de alimentação desligado (a) 33 - circuito de via com ocup. indevida intervalo comissionamento dipo circuito via cc sinalização"><td class="mono small">14349878</td><td class="small">02/06</td><td><span class="mono small ativo-code" data-tip="MF-SJU-IPG_IPG-SINALIZ-39DTCDV">SINALIZ-39DTCDV</span><div class="muted small">CIRCUITO VIA CC · SINALIZAÇÃO</div></td><td class="small">FONTE DE ALIMENTAÇÃO</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Intervalo comissionamento DIPO<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14367256 mf-rar-iaa_iaa-sinaliz-a-abr 10 - abr 10 nada constatado nada constatado 36 - máquina de chave perdendo indicação indeterminada abrigo sinalização"><td class="mono small">14367256</td><td class="small">09/06</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 10 - ABR 10">SINALIZ-A-ABR 10 - ABR 10</span><div class="muted small">ABRIGO · SINALIZAÇÃO</div></td><td class="small">NADA CONSTATADO</td><td class="small">36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Indeterminada<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14375243 mf-rar-iaa_iaa-sinaliz-a-abr 55 - mch 01 via permanente condição inadequada 35 - máquina de chave inoperante amv desnivelado dipo maq chave 110vcc grs 5c sinalização"><td class="mono small">14375243</td><td class="small">11/06</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 55 - MCH 01">SINALIZ-A-ABR 55 - MCH 01</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">VIA PERMANENTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">AMV desnivelado DIPO<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14446287 mf-rar-iaa_iaa-sinaliz-a-abr35 - 22e sin 152 - sinal cancelando indevido 14/07/2026: feito a substituição do cartão colorlight. após a troca normalizou."><td class="mono small">14446287</td><td class="small">04/07</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR35 - 22E SIN">SINALIZ-A-ABR35 - 22E SIN</span></td><td class="small">—</td><td class="small">152 - SINAL CANCELANDO INDEVIDO</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">14/07/2026: FEITO A SUBSTITUIÇÃO DO CARTÃO COLORLIGHT. APÓS A TROCA NORMALIZOU.<div><span class="badge badge-neutral badge-xs">Ata de reunião</span></div></td><td><span class="badge badge-critical">Sim · 57 min</span></td></tr><tr data-s="14449679 mf-rar-iaa_iaa-sinaliz-a-abr50-mch21 agulha desnivelado (a) 40 - sinal inoperante chave desnivelada maq chave 110vcc grs 5c sinalização"><td class="mono small">14449679</td><td class="small">06/07</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR50-MCH21">SINALIZ-A-ABR50-MCH21</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">AGULHA</td><td class="small">40 - SINAL INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Chave desnivelada<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14475153 mf-rar-iaa_iaa-sinaliz-a-abr05-mch1a 36 - máquina de chave perdendo indicação 16/07/2026: verificar"><td class="mono small">14475153</td><td class="small">15/07</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR05-MCH1A">SINALIZ-A-ABR05-MCH1A</span></td><td class="small">—</td><td class="small">36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">16/07/2026: VERIFICAR<div><span class="badge badge-neutral badge-xs">Ata de reunião</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14477585 mf-rar-iaa_iaa-sinaliz-a-abr10-mch1b 36 - máquina de chave perdendo indicação falta de nivelamento e socaria. nota 14480953 via"><td class="mono small">14477585</td><td class="small">15/07</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR10-MCH1B">SINALIZ-A-ABR10-MCH1B</span></td><td class="small">—</td><td class="small">36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Falta de nivelamento e socaria. Nota 14480953 via<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 132 min</span></td></tr></tbody>
+    </table>
+  </div>
+</div>
+</section>
+
+<section id="g2">
+<div class="card">
+  <div class="grp-head">
+    <div>
+      <div class="grp-title-row"><span class="grp-dot" style="background:var(--series-orange)"></span>
+        <h3>Análise 2 · Falha / Via Permanente</h3></div>
+      <p class="grp-desc">Falhas atribuídas a defeito genuíno de equipamento (&#x27;Falha&#x27;) ou a causas de Via Permanente (geometria, lastro, dormentes) que afetam o sistema EE. Filtro: Pátio = IAA · Ano = 2026 · Origem de Atividade Correta = &quot;Falha&quot; ou &quot;Via Permanente&quot;.</p>
+    </div>
+    <div class="grp-kpis">
+      <div class="grp-kpi"><div class="n">3</div><div class="l">Notas</div></div>
+      <div class="grp-kpi"><div class="n">3</div><div class="l">Ativos distintos</div></div>
+      <div class="grp-kpi"><div class="n">1</div><div class="l">Reincidência 90d (33,3%)</div></div>
+      <div class="grp-kpi"><div class="n">1</div><div class="l">Com THP (33,3%)</div></div>
+      <div class="grp-kpi"><div class="n">13</div><div class="l">Min. THP</div></div>
+    </div>
+  </div>
+
+  <div class="mini-grid">
+    <div class="mini-panel"><h4>Ativos mais afetados (TPLNR)</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 15 - MCH 1A">SINALIZ-A-ABR 15 - MCH 1A</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-orange)"></span></span><span class="hbar-val">1</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 50 - MCH 31">SINALIZ-A-ABR 50 - MCH 31</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-orange)"></span></span><span class="hbar-val">1</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR45-MCH23A">SINALIZ-A-ABR45-MCH23A</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-orange)"></span></span><span class="hbar-val">1</span></div></div></div>
+    <div class="mini-panel"><h4>Sintomas mais frequentes</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="35 - MÁQUINA DE CHAVE INOPERANTE">35 - MÁQUINA DE CHAVE INOPERANTE</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-orange)"></span></span><span class="hbar-val">3</span></div></div></div>
+    <div class="mini-panel"><h4>Objetos mais citados</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="TIRANTE DE OPERAÇÃO">TIRANTE DE OPERAÇÃO</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-orange)"></span></span><span class="hbar-val">1</span></div></div></div>
+  </div>
+
+  <div class="table-tools">
+    <input type="text" class="search-input" placeholder="Filtrar por ativo, objeto, sintoma, causa..."
+      data-filter-target="#tbl-g2 tbody" data-count-target="#cnt-g2">
+    <span class="count" id="cnt-g2">3 de 3 notas</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data" id="tbl-g2">
+      <thead><tr>
+        <th>Nota</th><th>Data</th><th>Ativo</th><th>Objeto</th><th>Sintoma</th>
+        <th>Reincidente</th><th>Causa</th><th>THP gerado</th>
+      </tr></thead>
+      <tbody><tr data-s="14083298 mf-rar-iaa_iaa-sinaliz-a-abr 50 - mch 31 35 - máquina de chave inoperante falta de socaria no coice da agulha e abertura da folga do coice da bitola métrica"><td class="mono small">14083298</td><td class="small">07/03</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 50 - MCH 31">SINALIZ-A-ABR 50 - MCH 31</span></td><td class="small">—</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Falta de socaria no coice da agulha e abertura da folga do coice da bitola métrica<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 13 min</span></td></tr><tr data-s="14338126 mf-rar-iaa_iaa-sinaliz-a-abr45-mch23a 35 - máquina de chave inoperante vandalismo, barra de travação desregulada devido brita obstruindo a ponta de agulha"><td class="mono small">14338126</td><td class="small">28/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR45-MCH23A">SINALIZ-A-ABR45-MCH23A</span></td><td class="small">—</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">vandalismo, Barra de travação desregulada devido brita obstruindo a ponta de agulha<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14440217 mf-rar-iaa_iaa-sinaliz-a-abr 15 - mch 1a tirante de operação desregulado (a) 35 - máquina de chave inoperante tirante de operação desregulado maq chave 110vcc grs 5c sinalização"><td class="mono small">14440217</td><td class="small">02/07</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 15 - MCH 1A">SINALIZ-A-ABR 15 - MCH 1A</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">TIRANTE DE OPERAÇÃO</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Tirante de operação desregulado<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr></tbody>
+    </table>
+  </div>
+</div>
+</section>
+
+<section id="g3">
+<div class="card">
+  <div class="grp-head">
+    <div>
+      <div class="grp-title-row"><span class="grp-dot" style="background:var(--series-aqua)"></span>
+        <h3>Análise 3 · Ação de Terceiros</h3></div>
+      <p class="grp-desc">Falhas causadas por agentes externos à manutenção EE - movimentação indevida, invasão de via, dano provocado por terceiros. Filtro: Pátio = IAA · Ano = 2026 · Origem de Atividade Correta = &quot;Ação De Terceiros&quot;.</p>
+    </div>
+    <div class="grp-kpis">
+      <div class="grp-kpi"><div class="n">5</div><div class="l">Notas</div></div>
+      <div class="grp-kpi"><div class="n">4</div><div class="l">Ativos distintos</div></div>
+      <div class="grp-kpi"><div class="n">3</div><div class="l">Reincidência 90d (60,0%)</div></div>
+      <div class="grp-kpi"><div class="n">3</div><div class="l">Com THP (60,0%)</div></div>
+      <div class="grp-kpi"><div class="n">176</div><div class="l">Min. THP</div></div>
+    </div>
+  </div>
+
+  <div class="mini-grid">
+    <div class="mini-panel"><h4>Ativos mais afetados (TPLNR)</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ">SINALIZ</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-aqua)"></span></span><span class="hbar-val">2</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 05 - ABR 05">SINALIZ-A-ABR 05 - ABR 05</span><span class="hbar-track"><span class="hbar-fill" style="width:50.0%;background:var(--series-aqua)"></span></span><span class="hbar-val">1</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-CONT EIXOS 35">SINALIZ-CONT EIXOS 35</span><span class="hbar-track"><span class="hbar-fill" style="width:50.0%;background:var(--series-aqua)"></span></span><span class="hbar-val">1</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A32ET CDV">SINALIZ-A32ET CDV</span><span class="hbar-track"><span class="hbar-fill" style="width:50.0%;background:var(--series-aqua)"></span></span><span class="hbar-val">1</span></div></div></div>
+    <div class="mini-panel"><h4>Sintomas mais frequentes</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="33 - CIRCUITO DE VIA COM OCUP. INDEVIDA">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-aqua)"></span></span><span class="hbar-val">5</span></div></div></div>
+    <div class="mini-panel"><h4>Objetos mais citados</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="MANOBRA">MANOBRA</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-aqua)"></span></span><span class="hbar-val">4</span></div></div></div>
+  </div>
+
+  <div class="table-tools">
+    <input type="text" class="search-input" placeholder="Filtrar por ativo, objeto, sintoma, causa..."
+      data-filter-target="#tbl-g3 tbody" data-count-target="#cnt-g3">
+    <span class="count" id="cnt-g3">5 de 5 notas</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data" id="tbl-g3">
+      <thead><tr>
+        <th>Nota</th><th>Data</th><th>Ativo</th><th>Objeto</th><th>Sintoma</th>
+        <th>Reincidente</th><th>Causa</th><th>THP gerado</th>
+      </tr></thead>
+      <tbody><tr data-s="14314606 mf-sju-isn_icb-sinaliz-a32et cdv manobra travessia parcial 33 - circuito de via com ocup. indevida travessia parcial circuito a diodo sinalização"><td class="mono small">14314606</td><td class="small">22/05</td><td><span class="mono small ativo-code" data-tip="MF-SJU-ISN_ICB-SINALIZ-A32ET CDV">SINALIZ-A32ET CDV</span><div class="muted small">CIRCUITO A DIODO · SINALIZAÇÃO</div></td><td class="small">MANOBRA</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Travessia parcial<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 152 min</span></td></tr><tr data-s="14394253 mf-rar-iaa_iaa-sinaliz manobra travessia parcial 33 - circuito de via com ocup. indevida travessia parcial sensor de rodas sinalização"><td class="mono small">14394253</td><td class="small">18/06</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ">SINALIZ</span><div class="muted small">SENSOR DE RODAS · SINALIZAÇÃO</div></td><td class="small">MANOBRA</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Travessia parcial<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 8 min</span></td></tr><tr data-s="14397103 mf-rar-iaa_iaa-sinaliz manobra travessia parcial 33 - circuito de via com ocup. indevida travessia parcial sensor de rodas sinalização"><td class="mono small">14397103</td><td class="small">18/06</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ">SINALIZ</span><div class="muted small">SENSOR DE RODAS · SINALIZAÇÃO</div></td><td class="small">MANOBRA</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Travessia parcial<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · 16 min</span></td></tr><tr data-s="14426778 mf-rar-iaa_iaa-sinaliz-cont eixos 35 manobra travessia parcial 33 - circuito de via com ocup. indevida travessia parcial contador de eixos sinalização"><td class="mono small">14426778</td><td class="small">29/06</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-CONT EIXOS 35">SINALIZ-CONT EIXOS 35</span><div class="muted small">CONTADOR DE EIXOS · SINALIZAÇÃO</div></td><td class="small">MANOBRA</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Travessia parcial<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14489562 mf-rar-iaa_iaa-sinaliz-a-abr 05 - abr 05 33 - circuito de via com ocup. indevida travessia parcial"><td class="mono small">14489562</td><td class="small">20/07</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 05 - ABR 05">SINALIZ-A-ABR 05 - ABR 05</span></td><td class="small">—</td><td class="small">33 - CIRCUITO DE VIA COM OCUP. INDEVIDA</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Travessia parcial<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr></tbody>
+    </table>
+  </div>
+</div>
+</section>
+
+<section id="g4">
+<div class="card">
+  <div class="grp-head">
+    <div>
+      <div class="grp-title-row"><span class="grp-dot" style="background:var(--series-yellow)"></span>
+        <h3>Análise 4 · Inconsistência de Estoque EAM / Requerimento Manutenção</h3></div>
+      <p class="grp-desc">Falhas ligadas a divergência de saldo/cadastro de material no EAM ou a um requerimento de manutenção que motivou a nota. Filtro: Pátio = IAA · Ano = 2026 · Origem de Atividade Correta = &quot;Inconsistência De Estoque Eam&quot; ou &quot;Requerimento Manutenção&quot;.</p>
+    </div>
+    <div class="grp-kpis">
+      <div class="grp-kpi"><div class="n">5</div><div class="l">Notas</div></div>
+      <div class="grp-kpi"><div class="n">4</div><div class="l">Ativos distintos</div></div>
+      <div class="grp-kpi"><div class="n">1</div><div class="l">Reincidência 90d (20,0%)</div></div>
+      <div class="grp-kpi"><div class="n">2</div><div class="l">Com THP (40,0%)</div></div>
+      <div class="grp-kpi"><div class="n">68</div><div class="l">Min. THP</div></div>
+    </div>
+  </div>
+
+  <div class="mini-grid">
+    <div class="mini-panel"><h4>Ativos mais afetados (TPLNR)</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 25 - MCH 5B">SINALIZ-A-ABR 25 - MCH 5B</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-yellow)"></span></span><span class="hbar-val">2</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR 45 - MCH 25">SINALIZ-A-ABR 45 - MCH 25</span><span class="hbar-track"><span class="hbar-fill" style="width:50.0%;background:var(--series-yellow)"></span></span><span class="hbar-val">1</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR10-MCH1B">SINALIZ-A-ABR10-MCH1B</span><span class="hbar-track"><span class="hbar-fill" style="width:50.0%;background:var(--series-yellow)"></span></span><span class="hbar-val">1</span></div><div class="hbar-row"><span class="hbar-lbl" title="SINALIZ-A-ABR50-MCH21B">SINALIZ-A-ABR50-MCH21B</span><span class="hbar-track"><span class="hbar-fill" style="width:50.0%;background:var(--series-yellow)"></span></span><span class="hbar-val">1</span></div></div></div>
+    <div class="mini-panel"><h4>Sintomas mais frequentes</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="35 - MÁQUINA DE CHAVE INOPERANTE">35 - MÁQUINA DE CHAVE INOPERANTE</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-yellow)"></span></span><span class="hbar-val">4</span></div><div class="hbar-row"><span class="hbar-lbl" title="36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO">36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO</span><span class="hbar-track"><span class="hbar-fill" style="width:25.0%;background:var(--series-yellow)"></span></span><span class="hbar-val">1</span></div></div></div>
+    <div class="mini-panel"><h4>Objetos mais citados</h4><div class="hbar-list"><div class="hbar-row"><span class="hbar-lbl" title="PLACA DESLIZANTE">PLACA DESLIZANTE</span><span class="hbar-track"><span class="hbar-fill" style="width:100.0%;background:var(--series-yellow)"></span></span><span class="hbar-val">4</span></div><div class="hbar-row"><span class="hbar-lbl" title="AGULHA">AGULHA</span><span class="hbar-track"><span class="hbar-fill" style="width:25.0%;background:var(--series-yellow)"></span></span><span class="hbar-val">1</span></div></div></div>
+  </div>
+
+  <div class="table-tools">
+    <input type="text" class="search-input" placeholder="Filtrar por ativo, objeto, sintoma, causa..."
+      data-filter-target="#tbl-g4 tbody" data-count-target="#cnt-g4">
+    <span class="count" id="cnt-g4">5 de 5 notas</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data" id="tbl-g4">
+      <thead><tr>
+        <th>Nota</th><th>Data</th><th>Ativo</th><th>Objeto</th><th>Sintoma</th>
+        <th>Reincidente</th><th>Causa</th><th>THP gerado</th>
+      </tr></thead>
+      <tbody><tr data-s="14220650 mf-rar-iaa_iaa-sinaliz-a-abr10-mch1b agulha obstruída 36 - máquina de chave perdendo indicação máquina de chave elétrica maq chave 110vcc grs 5c sinalização"><td class="mono small">14220650</td><td class="small">19/04</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR10-MCH1B">SINALIZ-A-ABR10-MCH1B</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">AGULHA</td><td class="small">36 - MÁQUINA DE CHAVE PERDENDO INDICAÇÃO</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">MÁQUINA DE CHAVE ELÉTRICA<div><span class="badge badge-good badge-xs">RCA formal</span></div></td><td><span class="badge badge-critical">Sim · 68 min</span></td></tr><tr data-s="14261995 mf-rar-iaa_iaa-sinaliz-a-abr 25 - mch 5b placa deslizante falta de lubrificação 35 - máquina de chave inoperante placa deslizante com produto maq chave 110vcc grs 5c sinalização"><td class="mono small">14261995</td><td class="small">04/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 25 - MCH 5B">SINALIZ-A-ABR 25 - MCH 5B</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Placa deslizante com produto<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14265278 mf-rar-iaa_iaa-sinaliz-a-abr 45 - mch 25 placa deslizante falta de lubrificação 35 - máquina de chave inoperante tirante desregulado maq chave 110vcc grs 5c sinalização"><td class="mono small">14265278</td><td class="small">05/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 45 - MCH 25">SINALIZ-A-ABR 45 - MCH 25</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Tirante desregulado<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14302242 mf-rar-iaa_iaa-sinaliz-a-abr 25 - mch 5b placa deslizante falta de lubrificação 35 - máquina de chave inoperante placas deslizantes sem lubrificação maq chave 110vcc grs 5c sinalização"><td class="mono small">14302242</td><td class="small">18/05</td><td><span class="mono small ativo-code" data-tip="MF-RAR-IAA_IAA-SINALIZ-A-ABR 25 - MCH 5B">SINALIZ-A-ABR 25 - MCH 5B</span><div class="muted small">MAQ CHAVE 110VCC GRS 5C · SINALIZAÇÃO</div></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-critical">Sim</span></td><td class="small causa-cell">Placas deslizantes sem lubrificação<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-neutral-soft">Não</span></td></tr><tr data-s="14330213 mf-sju-ipg_ipg-sinaliz-a-abr50-mch21b placa deslizante falta de lubrificação 35 - máquina de chave inoperante placas deslizantes secas"><td class="mono small">14330213</td><td class="small">25/05</td><td><span class="mono small ativo-code" data-tip="MF-SJU-IPG_IPG-SINALIZ-A-ABR50-MCH21B">SINALIZ-A-ABR50-MCH21B</span></td><td class="small">PLACA DESLIZANTE</td><td class="small">35 - MÁQUINA DE CHAVE INOPERANTE</td><td><span class="badge badge-neutral-soft">Não</span></td><td class="small causa-cell">Placas deslizantes secas<div><span class="badge badge-warn badge-xs">Relato de campo</span></div></td><td><span class="badge badge-critical">Sim · sem duração</span></td></tr></tbody>
+    </table>
+  </div>
+</div>
+</section>
+
+
+<section id="recomendacoes">
+<div class="section-head"><h2>Recomendações</h2></div>
+<div class="card narrative">
+<ul>
+<li><span class="tag tag-gov">Governança</span>Retomar o preenchimento de <b>6M / Componente Causador</b> nas reuniões RASF do pátio IAA — hoje a causa formal existe em apenas 1,7% das notas; sem isso o pátio não consegue medir causa raiz recorrente de forma agregada, só caso a caso pelo relato de campo.</li>
+<li><span class="tag tag-gov">Governança</span>Formalizar em reunião RASF as <b>22 notas de janeiro a junho</b> cuja origem foi reclassificada apenas por proxy neste relatório (via Descrição Tipo Solicitação) — o campo oficial e o consenso continuam em aberto até a equipe validar. Julho (20 notas) é atraso normal de calendário e deve fechar na próxima reunião.</li>
+<li><span class="tag tag-op">Operação</span>Abrir tratativa específica com a equipe de <b>Obras</b> para os pontos de máquina de chave que mais reincidem (25 ativos distintos, 46,2% de reincidência em 90 dias) — validar se é padrão de comissionamento/entrega da obra.</li>
+<li><span class="tag tag-op">Operação</span>Investigar <b>disponibilidade/cadastro EAM da Placa Deslizante</b> — item concentra 4 das 5 notas do recorte de estoque/requerimento de manutenção.</li>
+<li><span class="tag tag-risk">Risco</span>Avaliar ação pontual (reforço de sinalização, barreira física ou tratativa operacional) no(s) ponto(s) recorrente(s) de <b>Ação de Terceiros</b>, dado o padrão 100% homogêneo das 5 notas (ocupação indevida por manobra).</li>
+</ul>
+</div>
+</section>
+
+</main>
+
+<footer><div class="wrap">
+<p><b>Fonte:</b> planilha RASF ELET SP.xlsx (aba "Export"), extração de 30/07/2026 às 23:17. Filtros aplicados: Pátio = IAA · Ano = 2026.</p>
+<p><b>Definições:</b> "Reincidente" = campo "Reincidência 90 dias ativo" do RASF (Sim/Não). "THP gerado" = notas com "Gerador THP (300)" marcado, tempo em "Tempo THP 300 (min)".
+"Causa": prioriza Componente Causador / matriz 6M (Eng. e depois Campo) quando preenchidos (badge "RCA formal"); na ausência, usa o relato de causa extraído do texto longo da nota (badge "Relato de campo") ou, por último, a primeira linha das Disposições de Reunião (badge "Ata de reunião"). "Ativo" usa "Local de instalação" (coluna K) sempre que preenchida — inclusive quando diverge do TPLNR (coluna J), que só é adotado quando K está em branco.</p>
+<p>Os quatro recortes seguem a "Origem de Atividade Correta" (coluna AW do RASF) exatamente como solicitado; quando essa correção diverge da origem original da nota, ela prevalece por já refletir a decisão da reunião RASF.</p>
+<p><b>Proxy de governança:</b> para notas com Data da nota entre 01/01/2026 e 29/06/2026 e "Origem de Atividade Correta" em branco (22 notas), este relatório usa "Descrição Tipo Solicitação" como origem de referência apenas para fins de visão geral mensal e do KPI de origem não classificada — não altera o campo oficial nem o consenso no RASF, e não afeta as 4 análises detalhadas (nenhuma dessas notas se enquadra nos filtros solicitados). Notas de julho/2026 ficaram fora do proxy por estarem dentro do prazo normal de revisão em reunião.</p>
+<p>Relatório gerado automaticamente a partir da base de dados — MRS Sentinel.</p>
+</div></footer>
+
+<script>
+(function(){
+  // Tooltip generico para qualquer elemento com data-tip
+  var tip = document.createElement('div');
+  tip.id = 'viz-tooltip';
+  document.body.appendChild(tip);
+  var current = null;
+  function place(e){
+    var pad = 14, x = e.clientX + pad, y = e.clientY + pad;
+    var r = tip.getBoundingClientRect();
+    if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - pad;
+    if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - pad;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  document.addEventListener('pointerover', function(e){
+    var el = e.target.closest('[data-tip]');
+    if (!el) return;
+    current = el;
+    tip.textContent = el.getAttribute('data-tip');
+    tip.classList.add('show');
+  });
+  document.addEventListener('pointermove', function(e){
+    if (current) place(e);
+  });
+  document.addEventListener('pointerout', function(e){
+    var el = e.target.closest('[data-tip]');
+    if (el && el === current) { tip.classList.remove('show'); current = null; }
+  });
+
+  // Filtro de texto nas tabelas de detalhe
+  document.querySelectorAll('[data-filter-target]').forEach(function(inp){
+    var tbody = document.querySelector(inp.getAttribute('data-filter-target'));
+    var countEl = document.querySelector(inp.getAttribute('data-count-target'));
+    var total = tbody.querySelectorAll('tr').length;
+    inp.addEventListener('input', function(){
+      var q = inp.value.trim().toLowerCase();
+      var shown = 0;
+      tbody.querySelectorAll('tr').forEach(function(tr){
+        var ok = (tr.getAttribute('data-s') || '').indexOf(q) !== -1;
+        tr.style.display = ok ? '' : 'none';
+        if (ok) shown++;
+      });
+      if (countEl) countEl.textContent = shown + ' de ' + total + ' notas';
+    });
+  });
+
+  // Alternar tema claro/escuro (persistido)
+  var root = document.documentElement;
+  var saved = localStorage.getItem('sentinel-theme');
+  if (saved) root.setAttribute('data-theme', saved);
+  var btn = document.getElementById('theme-toggle');
+  function label(){
+    var t = root.getAttribute('data-theme');
+    var isDark = t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    btn.textContent = isDark ? '☀ Modo claro' : '🌙 Modo escuro';
+  }
+  if (btn) {
+    label();
+    btn.addEventListener('click', function(){
+      var t = root.getAttribute('data-theme');
+      var isDark = t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      var next = isDark ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      localStorage.setItem('sentinel-theme', next);
+      label();
+    });
+  }
+})();
+</script>
+</body>
+</html>

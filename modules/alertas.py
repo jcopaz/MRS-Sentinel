@@ -18,7 +18,7 @@ import streamlit as st
 import pandas as pd
 
 from auth.session import get_gerencia, get_perfil, get_id
-from auth.permissions import can_see_gerencia
+from auth.permissions import can_see_gerencia, can_manage_alertas, require_login
 from database.queries import (
     get_alertas, marcar_alerta_status, contar_alertas_novos, log_acesso,
 )
@@ -68,8 +68,12 @@ def _gerencia_ativa() -> str:
     return st.session_state.get("alertas_ger", opcoes[0])
 
 
-def _barra_acoes(gerencia: str):
-    """Filtros + botões de recálculo e exportação."""
+def _barra_acoes(gerencia: str, pode_gerir: bool = True):
+    """Filtros + botões de recálculo e exportação.
+
+    `pode_gerir` (RBAC): quando False (perfil Usuário), o botão de recálculo
+    fica oculto e a tela opera em modo somente-leitura.
+    """
     c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.4])
 
     with c1:
@@ -92,10 +96,15 @@ def _barra_acoes(gerencia: str):
         status = st.selectbox("Status", ["Ativos", "Todos", "Novos", "Vistos", "Resolvidos"],
                               key="sel_alertas_status")
 
-    b1, b2, b3 = st.columns([1.4, 1, 1])
-    with b1:
-        recalcular = st.button("🔄 Recalcular alertas", use_container_width=True,
-                               key="btn_recalc_alertas")
+    recalcular = False
+    if pode_gerir:
+        b1, _b2, _b3 = st.columns([1.4, 1, 1])
+        with b1:
+            recalcular = st.button("🔄 Recalcular alertas", use_container_width=True,
+                                   key="btn_recalc_alertas")
+    else:
+        st.caption("🔒 Modo somente-leitura — seu perfil pode consultar e exportar, "
+                   "mas não recalcular nem alterar status de alertas.")
     return {
         "disciplina": None if disc == "Todas" else disc,
         "severidade": {"Crítico": "critico", "Atenção": "atencao",
@@ -109,6 +118,12 @@ def _executar_recalculo(gerencia: str):
     """Dispara o motor de detecção e persiste (botão manual)."""
     from core.alertas import gerar_alertas, persistir_alertas
     from core.notificacoes import enviar_email_alertas
+
+    # Defesa em profundidade: revalida a permissão de escrita mesmo que o botão
+    # tenha sido exibido indevidamente (ex.: sessão adulterada).
+    if not can_manage_alertas(gerencia):
+        st.error("🚫 Você não tem permissão para recalcular alertas desta gerência.")
+        return
 
     with st.spinner("Analisando notas e gerando alertas..."):
         df_alertas = gerar_alertas(gerencia)
@@ -174,7 +189,7 @@ def _filtrar(df: pd.DataFrame, f: dict) -> pd.DataFrame:
     return d.sort_values(["_ord", "score_acumulado"], ascending=[True, False]).drop(columns="_ord")
 
 
-def _render_lista(df: pd.DataFrame):
+def _render_lista(df: pd.DataFrame, pode_gerir: bool = True):
     if df.empty:
         st.info("✅ Nenhum alerta para os filtros selecionados.")
         return
@@ -207,6 +222,9 @@ def _render_lista(df: pd.DataFrame):
             </div>
             """, unsafe_allow_html=True)
 
+            # Ações de escrita só para quem pode gerir (admin / assistente da ger.)
+            if not pode_gerir:
+                continue
             ca, cb, cc = st.columns([1, 1, 6])
             aid = r.get("id")
             if status != "visto" and status != "resolvido":
@@ -221,12 +239,15 @@ def _render_lista(df: pd.DataFrame):
                     st.rerun()
 
 
-def _botoes_export(df: pd.DataFrame):
+def _botoes_export(df: pd.DataFrame, gerencia: str = ""):
     if df.empty:
         return
-    from core.notificacoes import exportar_alertas_csv, exportar_alertas_xlsx
+    from core.notificacoes import (
+        exportar_alertas_csv, exportar_alertas_xlsx,
+        exportar_alertas_pdf, exportar_alertas_relatorio_html,
+    )
     st.markdown("##### 📥 Exportar")
-    e1, e2, _ = st.columns([1, 1, 4])
+    e1, e2, e3, _ = st.columns([1, 1, 1, 3])
     e1.download_button("CSV", exportar_alertas_csv(df),
                        file_name="alertas_mrs.csv", mime="text/csv",
                        use_container_width=True, key="dl_csv_alertas")
@@ -235,6 +256,19 @@ def _botoes_export(df: pd.DataFrame):
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        use_container_width=True, key="dl_xlsx_alertas")
 
+    # PDF via reportlab; se ausente, cai para relatório HTML imprimível (Ctrl+P)
+    pdf_bytes = exportar_alertas_pdf(df, gerencia)
+    if pdf_bytes:
+        e3.download_button("PDF", pdf_bytes,
+                           file_name="alertas_mrs.pdf", mime="application/pdf",
+                           use_container_width=True, key="dl_pdf_alertas")
+    else:
+        e3.download_button("PDF (HTML)", exportar_alertas_relatorio_html(df, gerencia),
+                           file_name="alertas_mrs.html", mime="text/html",
+                           use_container_width=True, key="dl_html_alertas",
+                           help="reportlab não instalado — baixa um HTML imprimível "
+                                "(abra e use Ctrl+P → Salvar como PDF).")
+
 # endregion
 
 
@@ -242,6 +276,7 @@ def _botoes_export(df: pd.DataFrame):
 
 def render_alertas():
     """Ponto de entrada da tela de Alertas (rota 'alertas')."""
+    require_login()  # RBAC: tela protegida — sem sessão, não renderiza
     _inject_css()
     st.markdown("## 🚨 Alertas Automáticos")
     st.caption(
@@ -250,8 +285,10 @@ def render_alertas():
     )
 
     gerencia = _gerencia_ativa()
-    filtros = _barra_acoes(gerencia)
-    gerencia = _gerencia_ativa()  # reavalia após seletor
+    pode_gerir = can_manage_alertas(gerencia)
+    filtros = _barra_acoes(gerencia, pode_gerir)
+    gerencia = _gerencia_ativa()          # reavalia após seletor
+    pode_gerir = can_manage_alertas(gerencia)  # reavalia p/ a gerência escolhida
 
     if filtros["recalcular"]:
         _executar_recalculo(gerencia)
@@ -263,8 +300,8 @@ def render_alertas():
     st.divider()
 
     df_view = _filtrar(df, filtros)
-    _render_lista(df_view)
+    _render_lista(df_view, pode_gerir)
     st.divider()
-    _botoes_export(df_view)
+    _botoes_export(df_view, gerencia)
 
 # endregion

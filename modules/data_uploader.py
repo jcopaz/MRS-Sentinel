@@ -68,14 +68,16 @@ def _render_selecao() -> tuple[str, str]:
     with col2:
         disciplina = st.selectbox(
             "📋 Disciplina",
-                ["VP", "EE", "RASF"],
+                ["VP", "EE", "RASF", "RASF_BASE"],
                 format_func=lambda x: {
-                    "VP":   "🛤️ Via Permanente (VP)",
-                    "EE":   "⚡ Eletroeletrônica (EE)",
-                    "RASF": "🔌 RASF — Análise de Falha EE",
+                    "VP":        "🛤️ Via Permanente (VP)",
+                    "EE":        "⚡ Eletroeletrônica (EE)",
+                    "RASF":      "🔌 RASF — Análise de Falha EE",
+                    "RASF_BASE": "🗓️ RASF — Base Congelada 2025 (YoY)",
                 }.get(x, x),
                 help="VP/EE = planilha SAP de notas. RASF = export da Reunião de "
-                     "Análise Sistêmica de Falha (alimenta a aba de Inteligência EE)."
+                     "Análise Sistêmica de Falha (base viva). RASF — Base 2025 = "
+                     "congelado do ano anterior (habilita o comparativo YoY na aba EE)."
             )
 
     return gerencia, disciplina
@@ -91,6 +93,11 @@ def _render_upload_area(gerencia: str, disciplina: str):
     # RASF tem pipeline próprio (parser + tabela dedicada rasf_ee).
     if disciplina == "RASF":
         _render_upload_rasf(gerencia)
+        return
+
+    # Base congelada 2025 tem pipeline próprio (tabela rasf_baseline).
+    if disciplina == "RASF_BASE":
+        _render_upload_baseline(gerencia)
         return
 
     st.markdown("---")
@@ -401,6 +408,9 @@ def _executar_upload_gerencia(
         # Recálculo automático de alertas (Sprint 5) — não bloqueia o upload
         _recalcular_alertas_pos_upload(gerencia, disciplina)
 
+        # Foto semanal da malha (Sprint 8) — snapshot automático, não bloqueia
+        _gravar_snapshot_pos_upload(gerencia, disciplina)
+
         return True
 
     except Exception as e:
@@ -441,6 +451,38 @@ def _recalcular_alertas_pos_upload(gerencia: str, disciplina: str) -> None:
             pass
     except Exception as e:
         st.warning(f"⚠️ Upload concluído, mas o recálculo de alertas falhou: {e}")
+
+
+def _gravar_snapshot_pos_upload(gerencia: str, disciplina: str) -> None:
+    """
+    Grava a foto SEMANAL agregada da base viva (Sprint 8) logo após um upload
+    de notas bem-sucedido. Idempotente (upsert por semana) e tolerante a falha:
+    um erro aqui NÃO invalida o upload já concluído.
+
+    Só se aplica a notas vivas (VP/EE) — RASF/RASF_BASE têm pipeline próprio e
+    a comparação deles é por base congelada anual (YoY), não por snapshot.
+    """
+    if disciplina not in ("VP", "EE"):
+        return
+    try:
+        from core.snapshots import gravar_snapshot
+        from database.queries_snapshots import get_snapshots
+
+        with st.spinner("📸 Gravando foto semanal da malha..."):
+            n = gravar_snapshot(gerencia, disciplina)
+
+        try:
+            get_snapshots.clear()
+        except Exception:
+            pass
+
+        if n:
+            st.info(
+                f"📸 Foto semanal atualizada — {n} recorte(s) de trecho "
+                f"registrados na memória da malha (Sprint 8)."
+            )
+    except Exception as e:
+        st.warning(f"⚠️ Upload concluído, mas a foto semanal falhou: {e}")
 
 # endregion
 
@@ -640,6 +682,189 @@ def _gravar_rasf_gerencia(df, nome_arquivo: str, gerencia: str, tamanho_mb: floa
     except Exception as e:
         barra.empty()
         st.error(f"❌ Falha ao gravar RASF da Gerência {gerencia}: {e}")
+        return False
+
+# endregion
+
+
+# region ============= SESSÃO 4C: Pipeline Base Congelada 2025 (YoY) ============
+
+def _render_upload_baseline(gerencia: str):
+    """
+    Upload da Base de Falhas EE congelada 2025. Parser dedicado
+    (core.parser_rasf_baseline) → tabela rasf_baseline. Mesmo padrão
+    anti-duplicação dos demais uploads (uploads_historico, disciplina='RASF_BASE').
+    """
+    from core.parser_rasf_baseline import carregar_baseline_xlsx
+
+    st.markdown("---")
+    st.markdown("### 📁 Selecione a Base Congelada 2025")
+    st.markdown("""
+    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px;
+        padding:12px 16px; margin-bottom:1rem; font-size:0.85rem; color:#374151;">
+        <strong>Arquivo esperado:</strong> <em>Base_de_Falhas_Congelado_2025_EE.xlsx</em>
+        (aba <code>Export</code>). Layout enxuto com a coluna <strong>Causa</strong>
+        já classificada.<br>
+        <strong>Alimenta:</strong> o bloco <em>📅 Comparativo Anual (YoY)</em> da aba
+        🔌 Inteligência de Falhas EE.<br>
+        <strong>Congelado:</strong> substitui a versão anterior da mesma gerência
+        (não interfere na base RASF viva).
+    </div>
+    """, unsafe_allow_html=True)
+
+    arquivo = st.file_uploader(
+        "Base Congelada 2025", type=["xlsx", "xls"],
+        key="upload_baseline", label_visibility="collapsed",
+    )
+    if not arquivo:
+        return
+
+    tamanho_mb = arquivo.size / (1024 * 1024)
+    if tamanho_mb > 50:
+        st.error(f"❌ Arquivo muito grande ({tamanho_mb:.1f} MB). Máximo: 50 MB.")
+        return
+
+    st.markdown("---")
+    st.markdown("### 🔄 Processando base congelada...")
+    with st.spinner(f"Analisando **{arquivo.name}**..."):
+        try:
+            df = carregar_baseline_xlsx(io.BytesIO(arquivo.read()))
+        except Exception as e:
+            st.error(f"❌ Erro ao processar a base congelada: {e}")
+            return
+
+    if df.empty:
+        st.warning("⚠️ Nenhuma linha válida encontrada na base congelada.")
+        return
+
+    # Descarta linhas com gerência não reconhecida (mesma regra do RASF)
+    sem_ger = df["gerencia"].isna()
+    if sem_ger.any():
+        qtd_sem = int(sem_ger.sum())
+        vals = (df.loc[sem_ger, "_gerencia_raw"].dropna().unique().tolist()
+                if "_gerencia_raw" in df.columns else [])
+        detalhe = f" (valores: {', '.join(map(str, vals))})" if vals else ""
+        st.warning(
+            f"⚠️ **{qtd_sem} linha(s) com gerência não reconhecida** descartadas{detalhe}. "
+            f"Aceitos: GEE.SP, GEV.SP, GEE.VP, GEV.VP."
+        )
+        df = df[~sem_ger].reset_index(drop=True)
+        if df.empty:
+            st.error("❌ Nenhuma linha com gerência reconhecida no arquivo.")
+            return
+
+    # Aplica permissão de upload por gerência
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+    nao_permitidas = [g for g in gerencias_presentes if not can_upload(g)]
+    if nao_permitidas:
+        qtd = int(df["gerencia"].isin(nao_permitidas).sum())
+        st.warning(
+            f"⚠️ {qtd} linha(s) da(s) gerência(s) **{', '.join(nao_permitidas)}** "
+            f"descartadas — você só pode subir a base da Gerência **{gerencia}**."
+        )
+        df = df[~df["gerencia"].isin(nao_permitidas)].reset_index(drop=True)
+        if df.empty:
+            st.error("❌ Nenhuma linha restante após aplicar as permissões.")
+            return
+
+    # Preview enxuto
+    anos = sorted(int(a) for a in df["ano"].dropna().unique())
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Linhas", f"{len(df):,}".replace(",", "."))
+    c2.metric("Ano(s)", ", ".join(map(str, anos)) or "—")
+    c3.metric("Com Causa", f"{int(df['causa'].notna().sum()):,}".replace(",", ".")
+              if "causa" in df.columns else "0")
+    c4.metric("THP (h)", f"{df['thp_min'].sum()/60:,.0f}".replace(",", "."))
+
+    if anos and any(a != 2025 for a in anos):
+        st.info(f"ℹ️ A base traz anos {anos}. O congelado normalmente é só 2025 — "
+                f"confira se enviou o arquivo certo (o YoY usa o ano dominante como referência).")
+
+    st.dataframe(
+        df[[c for c in ["data_nota", "numero_nota", "gerencia", "sistema",
+                        "anomalia_sintoma", "causa", "thp_min"] if c in df.columns]].head(20),
+        use_container_width=True, hide_index=True,
+    )
+
+    if st.button("✅ Confirmar e gravar Base 2025", type="primary", use_container_width=True):
+        _executar_upload_baseline(df, arquivo.name, tamanho_mb)
+
+
+def _executar_upload_baseline(df, nome_arquivo: str, tamanho_mb: float):
+    """Grava a base congelada em rasf_baseline, uma gerência por vez."""
+    from database.queries_baseline import get_baseline_cached
+
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+    total = len(df)
+    sucesso = False
+
+    for ger in gerencias_presentes:
+        sub = df[df["gerencia"] == ger].reset_index(drop=True)
+        if _gravar_baseline_gerencia(sub, nome_arquivo, ger,
+                                     tamanho_mb * (len(sub) / total) if total else tamanho_mb):
+            sucesso = True
+
+    if sucesso:
+        try:
+            get_baseline_cached.clear()
+        except Exception:
+            pass
+        st.balloons()
+        st.session_state.pop("upload_baseline", None)
+
+
+def _gravar_baseline_gerencia(df, nome_arquivo: str, gerencia: str, tamanho_mb: float) -> bool:
+    from core.parser_rasf_baseline import df_baseline_para_registros
+    from database.queries_baseline import DISCIPLINA_BASELINE
+
+    supabase   = get_supabase()
+    usuario_id = get_id()
+    total      = len(df)
+    barra = st.progress(0, text="Iniciando gravação da base congelada...")
+
+    try:
+        barra.progress(10, text="Arquivando base anterior...")
+        supabase.table("uploads_historico").update({"status": "substituido"}).match({
+            "gerencia": gerencia, "disciplina": DISCIPLINA_BASELINE, "status": "ativo",
+        }).execute()
+
+        barra.progress(25, text="Registrando upload...")
+        resp = supabase.table("uploads_historico").insert({
+            "usuario_id":    usuario_id,
+            "gerencia":      gerencia,
+            "disciplina":    DISCIPLINA_BASELINE,
+            "nome_arquivo":  nome_arquivo,
+            "total_notas":   total,
+            "tamanho_bytes": int(tamanho_mb * 1024 * 1024),
+            "status":        "ativo",
+            "metadados": {"origem": "RASF_BASE", "colunas": list(df.columns)},
+        }).execute()
+        upload_id = resp.data[0]["id"]
+
+        barra.progress(40, text="Convertendo dados...")
+        registros = df_baseline_para_registros(df, upload_id)
+
+        lote = 500
+        total_lotes = (len(registros) + lote - 1) // lote
+        for i in range(0, len(registros), lote):
+            supabase.table("rasf_baseline").insert(registros[i:i + lote]).execute()
+            barra.progress(min(40 + int(55 * (i + lote) / len(registros)), 95),
+                           text=f"Inserindo... lote {i//lote + 1}/{total_lotes}")
+
+        barra.progress(100, text="Concluído!")
+        log_acesso(usuario_id, "upload_baseline", {
+            "gerencia": gerencia, "arquivo": nome_arquivo,
+            "total": total, "upload_id": upload_id,
+        })
+        st.success(
+            f"✅ **Base 2025 gravada!** {total:,} linha(s) da Gerência **{gerencia}** "
+            f"carregadas.".replace(",", ".")
+        )
+        return True
+
+    except Exception as e:
+        barra.empty()
+        st.error(f"❌ Falha ao gravar base congelada da Gerência {gerencia}: {e}")
         return False
 
 # endregion

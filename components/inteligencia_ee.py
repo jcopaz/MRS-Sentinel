@@ -308,72 +308,77 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
         return df
 
     with st.expander("🔍 Filtros", expanded=False):
-        col_sist, col_reinc, col_thp, col_periodo = st.columns([1, 1, 1, 1.4])
+        with st.form(key=f"ee_form_filtros_{escopo}"):
+            col_sist, col_reinc, col_thp, col_periodo = st.columns([1, 1, 1, 1.4])
 
-        with col_sist:
-            sistema_sel = _multiselect_coluna(df, "sistema", "Sistema", escopo)
+            with col_sist:
+                sistema_sel = _multiselect_coluna(df, "sistema", "Sistema", escopo)
 
-        with col_reinc:
-            reincidencia_opt = st.radio(
-                "Reincidência (90d, ativo)", ["Todas", "Só reincidentes", "Só não reincidentes"],
-                index=0, key=f"ee_filtro_reincid_{escopo}",
-                help="Usa o campo 'Reincidência 90 dias ativo' já pré-calculado pelo RASF.",
-            )
+            with col_reinc:
+                reincidencia_opt = st.radio(
+                    "Reincidência (90d, ativo)", ["Todas", "Só reincidentes", "Só não reincidentes"],
+                    index=0, key=f"ee_filtro_reincid_{escopo}",
+                    help="Usa o campo 'Reincidência 90 dias ativo' já pré-calculado pelo RASF.",
+                )
 
-        with col_thp:
-            gerador_thp_opt = st.radio(
-                "Gerador THP (300)", ["Todas", "Só com THP", "Só sem THP"],
-                index=0, key=f"ee_filtro_thp_{escopo}",
-                help="Coluna Z do RASF ('Gerador THP (300)') — sinalizada com "
-                     "'X' nas notas que geraram trem parado.",
-            )
+            with col_thp:
+                gerador_thp_opt = st.radio(
+                    "Gerador THP (300)", ["Todas", "Só com THP", "Só sem THP"],
+                    index=0, key=f"ee_filtro_thp_{escopo}",
+                    help="Coluna Z do RASF ('Gerador THP (300)') — sinalizada com "
+                         "'X' nas notas que geraram trem parado.",
+                )
 
-        with col_periodo:
-            data_max = date.today()  # SEMPRE hoje — nunca derivar dos dados
-            datas_validas = pd.to_datetime(df.get("data_nota"), errors="coerce").dropna()
-            data_min_disp = datas_validas.min().date() if not datas_validas.empty else date(2018, 1, 1)
-            periodo = st.date_input(
-                "Período (data da nota)",
-                value=(data_min_disp, data_max),
-                min_value=date(2018, 1, 1),
-                max_value=data_max,
-                format="DD/MM/YYYY",
-                key=f"ee_filtro_periodo_{escopo}",
-            )
+            with col_periodo:
+                data_max = date.today()  # SEMPRE hoje — nunca derivar dos dados
+                datas_validas = pd.to_datetime(df.get("data_nota"), errors="coerce").dropna()
+                data_min_disp = datas_validas.min().date() if not datas_validas.empty else date(2018, 1, 1)
+                periodo = st.date_input(
+                    "Período (data da nota)",
+                    value=(data_min_disp, data_max),
+                    min_value=date(2018, 1, 1),
+                    max_value=data_max,
+                    format="DD/MM/YYYY",
+                    key=f"ee_filtro_periodo_{escopo}",
+                )
 
-        st.markdown("---")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            tipo_sel = _multiselect_coluna(df, "desc_tipo_solicitacao", "Descrição Tipo Solicitação", escopo)
-            origem_sel = _multiselect_coluna(
-                df, "origem_efetiva", "Origem da Atividade (efetiva)", escopo,
-                help="Já com a correção aplicada: usa 'Origem de Atividade Correta' "
-                     "quando ela diverge de 'Descrição da Origem da Atividade' — "
-                     "é a referência de causa raiz/responsabilidade após a reunião do RASF.",
-            )
-            consenso_sel = _multiselect_coluna(
-                df, "consenso_origem_status", "Consenso Origem de Atividade", escopo,
-                help="Sim = processo encerrado · Não = pode caber revisão · "
-                     "Pendente = campo em branco (reunião ainda não decidiu).",
-            )
-        with col_b:
-            centro_sel = _multiselect_coluna(
-                df, "centro_trab", "Coordenação (Centro de Trabalho)", escopo,
-                help="Filtra por centro de coordenação regional (ex.: CIPA, CIPG, "
-                     "CIJN, CFAN...) — escolha aqui primeiro pra encurtar a lista "
-                     "de Pátio logo abaixo.",
-            )
-            # Cascata: as opções de Pátio já vêm restritas à Coordenação
-            # escolhida acima — mesmo padrão de components/filtros.py
-            # (Centro de Trabalho → Ramal).
-            df_para_patio = (
-                df[df["centro_trab"].isin(centro_sel)]
-                if centro_sel is not None and "centro_trab" in df.columns
-                else df
-            )
-            patio_sel = _multiselect_coluna(df_para_patio, "local_patio", "Pátio", escopo)
-            grupo_sel = _multiselect_coluna(df, "grupo_ativo", "Grupo do Ativo", escopo)
+            st.markdown("---")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                tipo_sel = _multiselect_coluna(df, "desc_tipo_solicitacao", "Descrição Tipo Solicitação", escopo)
+                origem_sel = _multiselect_coluna(
+                    df, "origem_efetiva", "Origem da Atividade (efetiva)", escopo,
+                    help="Já com a correção aplicada: usa 'Origem de Atividade Correta' "
+                         "quando ela diverge de 'Descrição da Origem da Atividade' — "
+                         "é a referência de causa raiz/responsabilidade após a reunião do RASF.",
+                )
+                consenso_sel = _multiselect_coluna(
+                    df, "consenso_origem_status", "Consenso Origem de Atividade", escopo,
+                    help="Sim = processo encerrado · Não = pode caber revisão · "
+                         "Pendente = campo em branco (reunião ainda não decidiu).",
+                )
+            with col_b:
+                centro_sel = _multiselect_coluna(
+                    df, "centro_trab", "Coordenação (Centro de Trabalho)", escopo,
+                    help="Filtra por centro de coordenação regional (ex.: CIPA, CIPG, "
+                         "CIJN, CFAN...) — escolha aqui primeiro pra encurtar a lista "
+                         "de Pátio logo abaixo.",
+                )
+                # Cascata: as opções de Pátio já vêm restritas à Coordenação
+                # escolhida acima — mesmo padrão de components/filtros.py
+                # (Centro de Trabalho → Ramal).
+                df_para_patio = (
+                    df[df["centro_trab"].isin(centro_sel)]
+                    if centro_sel is not None and "centro_trab" in df.columns
+                    else df
+                )
+                patio_sel = _multiselect_coluna(df_para_patio, "local_patio", "Pátio", escopo)
+                grupo_sel = _multiselect_coluna(df, "grupo_ativo", "Grupo do Ativo", escopo)
 
+
+            st.form_submit_button(
+                "✅ Filtrar", use_container_width=True, type="primary",
+            )
     d = df.copy()
     if sistema_sel is not None and "sistema" in d.columns:
         d = d[d["sistema"].isin(sistema_sel)]
@@ -1777,13 +1782,208 @@ def _bloco_detalhamento_notas(df: pd.DataFrame, escopo: str = ""):
 
 # region ====================== SESSÃO 8: Entrada pública ======================
 
-def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
+# region ====================== SESSÃO 3B: Comparativo Anual (YoY) =============
+# Sprint 7 — camada YoY: contrasta a base congelada 2025 (rasf_baseline) com o
+# ano vigente da base RASF viva. Comparação YTD (mesmos meses) para ser justa
+# quando o ano corrente ainda está parcial (ex.: jan–jul).
+
+def _yoy_thp_h(df: pd.DataFrame) -> pd.Series:
+    """THP em horas a partir de thp_min (resiliente a ausência da coluna)."""
+    if df is None or df.empty or "thp_min" not in df.columns:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(df["thp_min"], errors="coerce").fillna(0) / 60.0
+
+
+def _yoy_prep(df: pd.DataFrame) -> pd.DataFrame:
+    """Garante data_nota/ano/mes/thp_h para o bloco YoY."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    d = df.copy()
+    if "data_nota" in d.columns:
+        d["data_nota"] = pd.to_datetime(d["data_nota"], errors="coerce")
+    else:
+        d["data_nota"] = pd.NaT
+    if "ano" not in d.columns or d["ano"].isna().all():
+        d["ano"] = d["data_nota"].dt.year
+    if "mes" not in d.columns or d["mes"].isna().all():
+        d["mes"] = d["data_nota"].dt.month
+    d["ano"] = pd.to_numeric(d["ano"], errors="coerce")
+    d["mes"] = pd.to_numeric(d["mes"], errors="coerce")
+    d["thp_h"] = _yoy_thp_h(d)
+    return d.dropna(subset=["mes"])
+
+
+def _yoy_delta_txt(atual: float, ref: float) -> str:
+    """Rótulo de variação YoY com seta/cor (↑ vermelho = piora em falhas/THP)."""
+    if ref in (0, None) or pd.isna(ref):
+        return "—" if not atual else "novo"
+    var = (atual - ref) / ref * 100.0
+    seta = "▲" if var > 0 else ("▼" if var < 0 else "▬")
+    cor = COR_CRIT if var > 0 else (COR_OK if var < 0 else "#6b7280")
+    return f"<span style='color:{cor};font-weight:700;'>{seta} {abs(var):.0f}%</span>"
+
+
+def _bloco_yoy(df_atual: pd.DataFrame, df_baseline: pd.DataFrame, escopo: str = ""):
+    """
+    Comparativo Ano-a-Ano: base congelada 2025 × ano vigente (base RASF viva).
+    Blocos: KPIs YTD · volume mensal sobreposto · YoY por Sistema ·
+    distribuição de Causa do congelado (referência de causa raiz padronizada).
+    """
+    st.markdown("#### 📅 Comparativo Anual (YoY)")
+
+    if df_baseline is None or df_baseline.empty:
+        st.info(
+            "📥 **Base congelada 2025 ainda não carregada.** Envie o arquivo "
+            "*Base de Falhas Congelado 2025 EE* na tela de **Alimentação de Dados** "
+            "(disciplina **RASF — Base 2025**) para habilitar o comparativo ano-a-ano.",
+            icon="🗓️",
+        )
+        return
+
+    base = _yoy_prep(df_baseline)
+    atual = _yoy_prep(df_atual)
+    if base.empty or atual.empty:
+        st.info("Sem datas válidas para o comparativo YoY.")
+        return
+
+    # Ano de referência (congelado) e ano vigente (maior ano na base viva)
+    ano_ref = int(base["ano"].dropna().mode().iloc[0]) if base["ano"].notna().any() else 2025
+    anos_atuais = atual["ano"].dropna()
+    if anos_atuais.empty:
+        st.info("Base viva sem ano identificável para o comparativo.")
+        return
+    ano_atual = int(anos_atuais.max())
+    if ano_atual <= ano_ref:
+        st.info(
+            f"O comparativo YoY precisa de dados do ano seguinte a {ano_ref}. "
+            f"A base viva ainda não tem registros de {ano_ref + 1}."
+        )
+        return
+
+    base_y  = base[base["ano"] == ano_ref]
+    atual_y = atual[atual["ano"] == ano_atual]
+    meses_atual = sorted(int(m) for m in atual_y["mes"].dropna().unique())
+    if not meses_atual:
+        st.info("Sem meses válidos no ano vigente.")
+        return
+    ultimo_mes = max(meses_atual)
+
+    # KPIs em base YTD (mesmos meses do ano vigente) — comparação justa
+    base_ytd  = base_y[base_y["mes"].isin(meses_atual)]
+    falhas_at, falhas_ref = len(atual_y), len(base_ytd)
+    thp_at,   thp_ref     = float(atual_y["thp_h"].sum()), float(base_ytd["thp_h"].sum())
+
+    st.caption(
+        f"Congelado **{ano_ref}** × vigente **{ano_atual}** · {escopo or ''} · "
+        f"KPIs em base **YTD** (jan–{MESES_PT_ABREV[ultimo_mes]}, mesmos meses dos dois anos)."
+    )
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(
+        f"<div style='background:#fff;border-radius:10px;padding:12px 14px;border-top:4px solid {COR_PRIMARIA};'>"
+        f"<div style='font-size:.78rem;color:#6b7280;'>Falhas YTD</div>"
+        f"<div style='font-size:1.5rem;font-weight:700;color:{COR_PRIMARIA};'>{falhas_at:,}".replace(",", ".") +
+        f"</div><div style='font-size:.8rem;'>{ano_ref}: {falhas_ref:,}".replace(",", ".") +
+        f" · {_yoy_delta_txt(falhas_at, falhas_ref)}</div></div>",
+        unsafe_allow_html=True)
+    c2.markdown(
+        f"<div style='background:#fff;border-radius:10px;padding:12px 14px;border-top:4px solid {COR_THP};'>"
+        f"<div style='font-size:.78rem;color:#6b7280;'>THP YTD (h)</div>"
+        f"<div style='font-size:1.5rem;font-weight:700;color:{COR_THP};'>{thp_at:,.0f}".replace(",", ".") +
+        f"</div><div style='font-size:.8rem;'>{ano_ref}: {thp_ref:,.0f}".replace(",", ".") +
+        f" · {_yoy_delta_txt(thp_at, thp_ref)}</div></div>",
+        unsafe_allow_html=True)
+    thp_med_at  = thp_at / falhas_at if falhas_at else 0
+    thp_med_ref = thp_ref / falhas_ref if falhas_ref else 0
+    c3.markdown(
+        f"<div style='background:#fff;border-radius:10px;padding:12px 14px;border-top:4px solid {COR_GOLD};'>"
+        f"<div style='font-size:.78rem;color:#6b7280;'>THP médio/falha (h)</div>"
+        f"<div style='font-size:1.5rem;font-weight:700;color:#b45309;'>{thp_med_at:.1f}</div>"
+        f"<div style='font-size:.8rem;'>{ano_ref}: {thp_med_ref:.1f} · "
+        f"{_yoy_delta_txt(thp_med_at, thp_med_ref)}</div></div>",
+        unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # ---- Volume mensal sobreposto (jan..dez, ano todo p/ ambos) ----
+    def _serie_mensal(d):
+        g = d.groupby("mes").size()
+        return [int(g.get(m, 0)) for m in range(1, 13)]
+
+    rotulos = [MESES_PT_ABREV[m] for m in range(1, 13)]
+    serie_ref = _serie_mensal(base_y)
+    serie_at  = _serie_mensal(atual_y)
+
+    if ECHARTS_OK:
+        opt = {
+            "tooltip": {"trigger": "axis"},
+            "legend": {"data": [f"{ano_ref} (congelado)", f"{ano_atual} (vigente)"], "top": 0,
+                       "textStyle": {"fontWeight": "bold"}},
+            "grid": {"left": "3%", "right": "4%", "top": "16%", "bottom": "8%", "containLabel": True},
+            "xAxis": {"type": "category", "data": rotulos,
+                      "axisLabel": {"color": "#374151"}},
+            "yAxis": {"type": "value", "name": "Falhas",
+                      "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}}},
+            "series": [
+                {"name": f"{ano_ref} (congelado)", "type": "bar", "data": serie_ref,
+                 "itemStyle": {"color": "#9ca3af", "borderRadius": [3, 3, 0, 0]}},
+                {"name": f"{ano_atual} (vigente)", "type": "bar", "data": serie_at,
+                 "itemStyle": {"color": COR_PRIMARIA, "borderRadius": [3, 3, 0, 0]}},
+            ],
+        }
+        st_echarts(opt, height="380px", key=f"ee_yoy_mensal_{escopo}")
+    else:
+        tab = pd.DataFrame({"Mês": rotulos, str(ano_ref): serie_ref, str(ano_atual): serie_at})
+        st.dataframe(tab, use_container_width=True, hide_index=True)
+
+    # ---- YoY por Sistema (top 8, base YTD) ----
+    if "sistema" in atual_y.columns and "sistema" in base_ytd.columns:
+        st.markdown("##### 🔧 YoY por Sistema (YTD)")
+        top = (atual_y["sistema"].fillna("(não informado)").value_counts().head(8).index.tolist())
+        ref_cnt = base_ytd["sistema"].fillna("(não informado)").value_counts()
+        at_cnt  = atual_y["sistema"].fillna("(não informado)").value_counts()
+        linhas = []
+        for s in top:
+            r, a = int(ref_cnt.get(s, 0)), int(at_cnt.get(s, 0))
+            linhas.append({"Sistema": s, str(ano_ref): r, str(ano_atual): a,
+                           "Δ%": None if r == 0 else round((a - r) / r * 100.0, 0)})
+        st.dataframe(pd.DataFrame(linhas), use_container_width=True, hide_index=True)
+
+    # ---- Distribuição de Causa do congelado (referência de causa raiz) ----
+    if "causa" in base_y.columns and base_y["causa"].notna().any():
+        st.markdown("##### 🧭 Causa raiz classificada em " + str(ano_ref) + " (referência)")
+        st.caption(
+            "O congelado 2025 já tem **Causa** classificada — serve de referência de "
+            "padronização enquanto a base viva ainda tem lacuna de causa raiz (backlog RCA)."
+        )
+        cc = base_y["causa"].fillna("(sem causa)").value_counts().head(10)
+        if ECHARTS_OK:
+            dados = [{"value": int(v), "name": str(k)} for k, v in cc.items()]
+            opt_c = {
+                "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
+                "legend": {"type": "scroll", "orient": "vertical", "right": 0, "top": "middle",
+                           "textStyle": {"fontSize": 11}},
+                "series": [{"type": "pie", "radius": ["40%", "70%"], "center": ["38%", "50%"],
+                            "data": dados, "label": {"show": False},
+                            "emphasis": {"label": {"show": True, "fontWeight": "bold"}}}],
+            }
+            st_echarts(opt_c, height="320px", key=f"ee_yoy_causa_{escopo}")
+        else:
+            st.dataframe(cc.rename_axis("Causa").reset_index(name="Falhas"),
+                         use_container_width=True, hide_index=True)
+
+# endregion
+
+
+def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP", df_baseline: pd.DataFrame | None = None):
     """
     Renderiza a aba de Inteligência de Falhas EE.
 
     Args:
-        df:     DataFrame RASF canônico (já filtrado à gerência, se aplicável).
-        escopo: "SP", "VP" ou "GLOBAL" — usado apenas para rótulos/contexto.
+        df:          DataFrame RASF canônico (já filtrado à gerência, se aplicável).
+        escopo:      "SP", "VP" ou "GLOBAL" — usado para rótulos/contexto.
+        df_baseline: DataFrame da base congelada 2025 (rasf_baseline) para o
+                     comparativo YoY. Opcional — se None/vazio, o bloco YoY
+                     apenas orienta a fazer o upload (retrocompatível).
     """
     if df is None or df.empty:
         st.warning(
@@ -1805,6 +2005,11 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
     # Origem efetiva + status de consenso ANTES dos filtros — o filtro de
     # origem/consenso já precisa dessas colunas calculadas.
     df = _preparar_origem(df)
+
+    # Snapshot da base viva na gerência INTEIRA (antes dos filtros de drill e
+    # do seletor de trecho) — o comparativo YoY é um panorama estratégico e
+    # não deve encolher com o recorte micro escolhido nos blocos abaixo.
+    df_ano_atual_full = df.copy()
 
     # Filtros (Sistema, Reincidência, Período + expander) — aplicados ANTES
     # do enriquecimento, pra score_ee e todas as agregações já refletirem o
@@ -1838,6 +2043,13 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP"):
         _bloco_heatmap_patio_origem(df, escopo)
         st.markdown("---")
         _bloco_tendencia(df, escopo)
+    st.markdown("---")
+
+    # Comparativo Anual (YoY) — Sprint 7. Usa a base viva da gerência inteira
+    # (df_ano_atual_full) × base congelada 2025 (df_baseline). Panorama
+    # estratégico independente do recorte de trecho/filtros dos demais blocos.
+    with st.expander("📅 Comparativo Anual (YoY 2025 × vigente)", expanded=False):
+        _bloco_yoy(df_ano_atual_full, df_baseline, escopo)
     st.markdown("---")
 
     with st.expander("🔍 Visão Micro", expanded=False):

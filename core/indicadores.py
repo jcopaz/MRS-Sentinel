@@ -22,7 +22,9 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-# Limites de referência (podem ser sobrescritos via configuracoes no Supabase)
+# Metas/limites PADRÃO (usados como fallback; podem ser sobrescritos na aba
+# ⚙️ Configurações → 🎯 Metas dos Indicadores, gravadas na tabela `configuracoes`).
+# Não há fórmula OFICIAL da MRS para as notas — por isso as metas são ajustáveis.
 LIMITE_IMT_CRITICO  = 70.0   # IMT abaixo disso = crítico
 LIMITE_IMT_ATENCAO  = 85.0   # IMT entre 70–85 = atenção
 LIMITE_DI_CRITICO   = 60.0   # DI abaixo disso = crítico
@@ -36,6 +38,57 @@ COR_CRIT = "#dc2626"
 COR_WARN = "#f59e0b"
 COR_OK   = "#16a34a"
 COR_NA   = "#94a3b8"
+
+# Chaves na tabela `configuracoes` (gerencia=NULL) → (default_critico, default_atencao)
+_METAS_DEFAULT = {
+    "imt": ("meta_imt_critico", "meta_imt_atencao", LIMITE_IMT_CRITICO, LIMITE_IMT_ATENCAO),
+    "di":  ("meta_di_critico",  "meta_di_atencao",  LIMITE_DI_CRITICO,  LIMITE_DI_ATENCAO),
+    "adh": ("meta_adh_critico", "meta_adh_atencao", LIMITE_ADH_CRITICO, LIMITE_ADH_ATENCAO),
+    "lt":  ("meta_lt_critico",  "meta_lt_atencao",  float(LIMITE_LT_CRITICO), float(LIMITE_LT_ATENCAO)),
+}
+
+
+def _ler_config(chave: str, default: float) -> float:
+    """Lê um valor numérico de `configuracoes` (gerencia NULL). Fallback = default."""
+    try:
+        from database.client import get_supabase
+        resp = (get_supabase().table("configuracoes").select("valor")
+                .eq("chave", chave).is_("gerencia", "null").limit(1).execute())
+        if resp.data:
+            return float(resp.data[0]["valor"])
+    except Exception:
+        pass
+    return float(default)
+
+
+def _carregar_metas() -> dict:
+    """
+    Devolve os limites (crítico/atenção) de cada indicador, aplicando os valores
+    configurados pelo admin quando existirem, senão os padrões. Cacheado por 5min.
+    """
+    def _carrega():
+        m = {}
+        for ind, (k_crit, k_aten, d_crit, d_aten) in _METAS_DEFAULT.items():
+            m[ind] = (_ler_config(k_crit, d_crit), _ler_config(k_aten, d_aten))
+        return m
+    try:
+        return st.cache_data(ttl=300, show_spinner=False)(_carrega)()
+    except Exception:
+        return {ind: (v[2], v[3]) for ind, v in _METAS_DEFAULT.items()}
+
+
+# Nota curta explicando como cada indicador é calculado (exibida no painel).
+NOTA_INDICADORES = (
+    "**Como são calculados** (metas ajustáveis em ⚙️ Configurações):\n\n"
+    "- **IMT — Índice de Manutenção Técnica** = notas **encerradas ÷ total** × 100. "
+    "Mede o quanto do volume já foi tratado. Meta = quanto **maior**, melhor.\n"
+    "- **DI — Desempenho de Intervenção** = notas encerradas **dentro do prazo ÷ "
+    "encerradas** × 100 (no prazo = `data_encerramento ≤ data_planejada`). Mede "
+    "pontualidade da intervenção.\n"
+    "- **Aderência ao Planejamento** = notas abertas **com data planejada ÷ abertas** "
+    "× 100. Mede quanto do backlog está planejado.\n\n"
+    "_Não há fórmula oficial da MRS para as notas; os limites 🟢🟡🔴 são configuráveis._"
+)
 
 # endregion
 
@@ -221,45 +274,52 @@ def render_indicadores_geral(df: pd.DataFrame):
     adh  = calcular_aderencia(df)
     lt   = calcular_lead_time_medio(df)
 
+    metas = _carregar_metas()
+    imt_crit, imt_aten = metas["imt"]
+    di_crit,  di_aten  = metas["di"]
+    adh_crit, adh_aten = metas["adh"]
+    lt_crit,  lt_aten  = metas["lt"]
+
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        cor = _cor_indicador(imt, LIMITE_IMT_CRITICO, LIMITE_IMT_ATENCAO)
+        cor = _cor_indicador(imt, imt_crit, imt_aten)
         _card_indicador(
             "IMT — Índice Manutenção Técnica",
             f"{imt:.1f}%",
-            f"Meta ≥ {LIMITE_IMT_ATENCAO:.0f}%",
+            f"Meta ≥ {imt_aten:.0f}%",
             cor,
         )
 
     with col2:
-        cor = _cor_indicador(di, LIMITE_DI_CRITICO, LIMITE_DI_ATENCAO)
+        cor = _cor_indicador(di, di_crit, di_aten)
         _card_indicador(
             "DI — Desempenho de Intervenção",
             f"{di:.1f}%",
-            f"Meta ≥ {LIMITE_DI_ATENCAO:.0f}%",
+            f"Meta ≥ {di_aten:.0f}%",
             cor,
         )
 
     with col3:
-        cor = _cor_indicador(adh, LIMITE_ADH_CRITICO, LIMITE_ADH_ATENCAO)
+        cor = _cor_indicador(adh, adh_crit, adh_aten)
         _card_indicador(
             "Aderência ao Planejamento",
             f"{adh:.1f}%",
-            f"Meta ≥ {LIMITE_ADH_ATENCAO:.0f}%",
+            f"Meta ≥ {adh_aten:.0f}%",
             cor,
         )
 
     with col4:
-        cor = _cor_indicador(
-            lt, LIMITE_LT_CRITICO, LIMITE_LT_ATENCAO, inverso=True
-        )
+        cor = _cor_indicador(lt, lt_crit, lt_aten, inverso=True)
         _card_indicador(
             "Lead Time Médio",
             f"{lt:.0f} dias",
-            f"Meta ≤ {LIMITE_LT_ATENCAO} dias",
+            f"Meta ≤ {lt_aten:.0f} dias",
             cor,
         )
+
+    with st.expander("ℹ️ Como os indicadores são calculados", expanded=False):
+        st.markdown(NOTA_INDICADORES)
 
     # Barra de contexto
     total = len(df)
@@ -297,11 +357,12 @@ def render_semaforo(df_sp: pd.DataFrame, df_vp: pd.DataFrame):
         cor = _cor_indicador(valor, lim_crit, lim_aten, inverso)
         return {"#16a34a": "🟢", "#f59e0b": "🟡", "#dc2626": "🔴"}.get(cor, "⚫")
 
+    metas = _carregar_metas()
     indicadores = [
-        ("IMT (%)",         "imt",  False, LIMITE_IMT_CRITICO,  LIMITE_IMT_ATENCAO),
-        ("DI (%)",          "di",   False, LIMITE_DI_CRITICO,   LIMITE_DI_ATENCAO),
-        ("Aderência (%)",   "adh",  False, LIMITE_ADH_CRITICO,  LIMITE_ADH_ATENCAO),
-        ("Lead Time (dias)","lt",   True,  LIMITE_LT_CRITICO,   LIMITE_LT_ATENCAO),
+        ("IMT (%)",         "imt",  False, metas["imt"][0], metas["imt"][1]),
+        ("DI (%)",          "di",   False, metas["di"][0],  metas["di"][1]),
+        ("Aderência (%)",   "adh",  False, metas["adh"][0], metas["adh"][1]),
+        ("Lead Time (dias)","lt",   True,  metas["lt"][0],  metas["lt"][1]),
     ]
 
     # Calcula para SP e VP

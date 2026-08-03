@@ -43,6 +43,8 @@ from modules.gerencia_geral import render_gerencia_geral
 from modules.admin_panel    import render_admin_panel
 from modules.data_uploader  import render_upload
 from modules.alertas        import render_alertas
+from modules.evolucao_malha import render_evolucao_malha
+from modules.visao_campo   import render_visao_campo
 # endregion
 
 
@@ -133,6 +135,44 @@ def _inject_global_css():
 
     /* ── Divisor ─────────────────────────────────────────────────── */
     hr { border-color: #e5e7eb !important; margin: 0.8rem 0 !important; }
+
+    /* ── Tabelas sempre com rolagem horizontal (não estouram a tela) ── */
+    [data-testid="stDataFrame"], [data-testid="stTable"] { overflow-x: auto; }
+
+    /* ═══════════════ RESPONSIVIDADE GLOBAL (Mobile First) ═══════════ */
+    /* Tablets e telas médias */
+    @media (max-width: 992px) {
+        .main .block-container,
+        [data-testid="stMainBlockContainer"] {
+            padding-left: 1rem; padding-right: 1rem; max-width: 100%;
+        }
+        /* Tabs roláveis em vez de espremidas */
+        .stTabs [data-baseweb="tab-list"] {
+            overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch;
+        }
+    }
+    /* Celulares: colunas empilham em uma só */
+    @media (max-width: 640px) {
+        .main .block-container,
+        [data-testid="stMainBlockContainer"] {
+            padding-top: 0.8rem; padding-left: 0.7rem; padding-right: 0.7rem;
+        }
+        /* st.columns → empilha (cada coluna ocupa 100%) */
+        [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: 0.4rem !important; }
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+        [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+            flex: 1 1 100% !important; width: 100% !important; min-width: 100% !important;
+        }
+        /* Métricas e títulos mais compactos */
+        [data-testid="stMetricValue"] { font-size: 1.5rem !important; }
+        h1 { font-size: 1.5rem !important; }
+        h2 { font-size: 1.25rem !important; }
+        h3 { font-size: 1.1rem !important; }
+        /* Alvos de toque: botões ocupam a largura e ganham altura */
+        .stButton > button { width: 100% !important; min-height: 44px !important; }
+        /* Inputs com altura confortável para o dedo */
+        .stSelectbox, .stMultiSelect, .stNumberInput, .stTextInput { min-height: 44px; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -152,6 +192,8 @@ def _rotear():
         "gerencia_sp":    render_gerencia_sp,
         "gerencia_vp":    render_gerencia_vp,
         "gerencia_geral": render_gerencia_geral,
+        "evolucao":       render_evolucao_malha,
+        "campo":          render_visao_campo,
         "alertas":        render_alertas,
         "upload":         render_upload,
         "admin":          render_admin_panel,

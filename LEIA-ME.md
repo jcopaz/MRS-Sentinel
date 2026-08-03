@@ -12,7 +12,6 @@ ao **PG-ENG-0088**. Entra como aba **🔌 Inteligência EE** em cada Gerência
 | `database/schema_rasf.sql` | Schema da tabela `rasf_ee` + índices + migrações incrementais (`ALTER TABLE ADD COLUMN IF NOT EXISTS`) |
 | `database/queries_rasf.py` | Leitura/cache do Supabase para a aba |
 | `components/inteligencia_ee.py` | A aba em si (filtros, blocos, gráficos) |
-| `components/relatorio_ee.py` | Gerador de relatório HTML autônomo (botão "🧾 Gerar relatório" na aba) |
 | `scripts/verificar_rasf_e2e.py` | Validação e2e do parser fora do Streamlit |
 | `modules/data_uploader.py` | Upload do export RASF → pipeline `rasf_ee` |
 | `modules/gerencia_sp.py` / `gerencia_vp.py` / `gerencia_geral.py` | Ponto de entrada da aba 🔌 Inteligência EE por escopo |
@@ -45,12 +44,10 @@ O seletor **🚂 Trecho** (dentro do bloco Unifilar) filtra **todos** os blocos
 abaixo dele, não só o próprio gráfico — "🌐 Todos os trechos" mostra a malha
 inteira.
 
-1. **📄 Exportar Relatório** — gera um `.html` autônomo do recorte filtrado
-   (ver `components/relatorio_ee.py`).
-2. **📌 Cards Resumo** — ativo com mais falhas (+ tipo predominante), ativo
+1. **📌 Cards Resumo** — ativo com mais falhas (+ tipo predominante), ativo
    com maior THP, ativo mais reincidente, sintoma mais crítico por THP,
    origem de atividade mais frequente.
-3. **🗺️ Unifilar EE** — ativos por trecho; bolha=qtd de falhas, cor=score,
+2. **🗺️ Unifilar EE** — ativos por trecho; bolha=qtd de falhas, cor=score,
    🟣 anel=reincidente (≥3 em 90d), pulso=top 10% score. Inclui a leitura
    rápida (Ativos/Densidade/Ativo mais crítico) **acima** do gráfico.
 4. **📊 Pareto de Sintomas** — Falhas × THP por sintoma, barras com % de

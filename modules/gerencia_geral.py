@@ -277,7 +277,11 @@ def render_gerencia_geral():
     # (Sprint 4.5 — sem cascata geográfica aqui, a Geral não tem essa hierarquia)
     with st.sidebar:
         st.markdown("### 🎛️ Filtros de Atributo")
-        filtros_attrs = render_filtros_atributos(df_total, gerencia="GERAL")
+        with st.form(key="form_filtros_geral"):
+            filtros_attrs = render_filtros_atributos(df_total, gerencia="GERAL")
+            st.form_submit_button(
+                "✅ Filtrar", use_container_width=True, type="primary",
+            )
 
     df_sp = aplicar_filtros_atributos(df_sp, filtros_attrs)
     df_vp = aplicar_filtros_atributos(df_vp, filtros_attrs)
@@ -507,14 +511,18 @@ def render_gerencia_geral():
     with aba_ee:
         from components.inteligencia_ee import render_inteligencia_ee
         from database.queries_rasf import get_rasf_cached
+        from database.queries_baseline import get_baseline_cached
 
         with st.spinner("⏳ Carregando base RASF (Eletroeletrônica)..."):
             df_rasf = get_rasf_cached(None)  # ambas as gerências
+            df_base_2025 = get_baseline_cached(None)   # camada YoY (Sprint 7)
 
         # Respeita o filtro de gerências visíveis da Visão Global.
         if not df_rasf.empty and "gerencia" in df_rasf.columns:
             df_rasf = df_rasf[df_rasf["gerencia"].isin(gerencias_vis)]
+        if not df_base_2025.empty and "gerencia" in df_base_2025.columns:
+            df_base_2025 = df_base_2025[df_base_2025["gerencia"].isin(gerencias_vis)]
 
-        render_inteligencia_ee(df_rasf, escopo="GLOBAL")
+        render_inteligencia_ee(df_rasf, escopo="GLOBAL", df_baseline=df_base_2025)
 
     # endregion

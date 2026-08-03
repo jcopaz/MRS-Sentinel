@@ -44,6 +44,25 @@ RAMAIS_ALIASES = {
     "RIP": "JIT",   # RIP faz parte do mesmo trecho Jundiaí - Itirapina
 }
 
+# Ramais presentes no KMZ oficial "Marcos_KM_Malha_MRS" mas AINDA sem nome
+# oficial no glossário. Sprint 6 (Geografia Real): rótulos PROVISÓRIOS derivados
+# do campo "Deno" do próprio KMZ (terminal/corredor do trecho) — servem só para
+# exibição amigável no mapa/unifilar. ⚠️ Confirmar denominação oficial com o
+# Julio antes de promover para RAMAIS_MRS.
+RAMAIS_KMZ = {
+    "ACL": "Alça Dupla – Caetano Lopes",
+    "AJC": "Alça Dupla – Jeceaba",
+    "LC1": "Estaleiro",
+    "LC2": "Buarque de Macedo",
+    "LFA": "São Gonçalo (P1)",
+    "LRJ": "Posto KM 63",
+    "LSM": "Posto KM 64 – Elísson",
+    "P12": "Alça Dupla – Posto 2",
+    "RGI": "Guaíba – Ponte",
+    "VBA": "Guaíba – Sahy",
+    "VPB": "Moeda – Marinhos",
+}
+
 RAMAIS_REVERSO = {v: k for k, v in RAMAIS_MRS.items()}
 
 # endregion
@@ -60,7 +79,11 @@ def normalizar_ramal(sigla: str) -> str:
 
 def nome_ramal(sigla: str, formato: str = "completo") -> str:
     sigla_canonica = normalizar_ramal(sigla)
-    nome = RAMAIS_MRS.get(sigla_canonica, sigla_canonica)
+    # Nome oficial (RAMAIS_MRS) → rótulo provisório do KMZ → a própria sigla.
+    nome = RAMAIS_MRS.get(
+        sigla_canonica,
+        RAMAIS_KMZ.get(sigla_canonica, sigla_canonica),
+    )
     if formato == "sigla":
         return sigla_canonica
     elif formato == "completo_sigla":

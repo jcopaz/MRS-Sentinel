@@ -244,10 +244,11 @@ def render_gerencia_sp():
         )
 
     # ── 7 Abas principais ─────────────────────────────────────────────────────
-    aba_kpi, aba_ger, aba_unif, aba_heat, aba_rank, aba_temp, aba_ee = st.tabs([
+    aba_kpi, aba_ger, aba_unif, aba_mapa, aba_heat, aba_rank, aba_temp, aba_ee = st.tabs([
         "📊 Visão Geral",
         "🎯 Visão Gerencial",
         "🗺️ Unifilar",
+        "🌍 Mapa Geo",
         "🌡️ Heatmap",
         "🏆 Ranking",
         "📈 Temporal",
@@ -296,6 +297,17 @@ def render_gerencia_sp():
             )
 
         render_unifilar_dual(df, gerencia="SP")
+
+    # endregion
+
+    # region =================== SESSÃO 4.2B: Aba — Mapa Geográfico ============
+    with aba_mapa:
+        from components.mapa_geografico import render_mapa_geografico
+        render_mapa_geografico(
+            df, escopo="SP",
+            titulo="🌍 Mapa Geográfico — Notas no KM real da malha",
+            granularidade="auto",
+        )
 
     # endregion
 
@@ -356,9 +368,11 @@ def render_gerencia_sp():
     with aba_ee:
         from components.inteligencia_ee import render_inteligencia_ee
         from database.queries_rasf import get_rasf_cached
+        from database.queries_baseline import get_baseline_cached
 
         with st.spinner("⏳ Carregando base RASF (Eletroeletrônica)..."):
             df_rasf = get_rasf_cached("SP")
-        render_inteligencia_ee(df_rasf, escopo="SP")
+            df_base_2025 = get_baseline_cached("SP")   # camada YoY (Sprint 7)
+        render_inteligencia_ee(df_rasf, escopo="SP", df_baseline=df_base_2025)
 
     # endregion

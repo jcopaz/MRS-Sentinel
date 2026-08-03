@@ -17,6 +17,7 @@ from auth.session import set_usuario, set_pagina
 LOGO_VIDEO_PATH = Path(__file__).resolve().parent.parent / "static" / "Sentinel_logo.mp4"
 LOGO_VIDEO_URL = "app/static/Sentinel_logo.mp4"
 LOGO_WIDTH = 240  # px — mesmo tamanho usado na sidebar (modules/home.py)
+APP_VERSION = "1.0"  # versão exibida abaixo do logo (manter igual em modules/home.py)
 
 
 # region ====================== SESSÃO 1: CSS da Tela de Login ======================
@@ -136,6 +137,8 @@ def _render_header():
         <div class="sentinel-gold-3d lg">SENTINEL</div>
         <p style="color:#ffffff;font-size:0.95rem;margin:0.4rem 0 0;">
             Plataforma de Inteligência de Manutenção da Malha</p>
+        <div style="color:rgba(255,255,255,0.45);font-size:0.75rem;margin-top:0.35rem;letter-spacing:0.5px;">
+            v""" + APP_VERSION + """</div>
         <div style="width:60px;height:3px;
             background:linear-gradient(90deg,#ffb000,#ffd04d);
             border-radius:2px;margin:1rem auto 0 auto;"></div>

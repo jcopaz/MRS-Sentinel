@@ -524,6 +524,41 @@ def _render_aba_configuracoes() -> None:
             _salvar_config(None, "imt_critico", imt_critico)
             st.success("✅ Limites de IMT atualizados!")
 
+    # ── 4.2b: Metas dos Indicadores (IMT / DI / Aderência) ────────────────────
+    with st.expander("🎯 Metas dos Indicadores (IMT / DI / Aderência)", expanded=False):
+        st.caption(
+            "Não há fórmula oficial da MRS para as notas — os limites do semáforo "
+            "🟢🟡🔴 do painel Consolidado são configuráveis aqui.\n\n"
+            "**IMT** = encerradas ÷ total × 100 · **DI** = encerradas no prazo "
+            "(`data_enc ≤ data_planejada`) ÷ encerradas × 100 · **Aderência** = "
+            "abertas com data planejada ÷ abertas × 100. Meta = quanto **maior**, melhor."
+        )
+
+        def _meta_row(rot: str, k_at: str, d_at: float, k_cr: str, d_cr: float):
+            a, b = st.columns(2)
+            atencao = a.number_input(
+                f"{rot} — Meta / Atenção (🟢≥ · 🟡<)", min_value=0.0, max_value=100.0,
+                value=float(_get_config(None, k_at, d_at)), step=1.0, key=f"cfg_{k_at}")
+            critico = b.number_input(
+                f"{rot} — Crítico (🔴<)", min_value=0.0, max_value=100.0,
+                value=float(_get_config(None, k_cr, d_cr)), step=1.0, key=f"cfg_{k_cr}")
+            if critico >= atencao:
+                st.warning(f"⚠️ {rot}: o limite Crítico deve ser MENOR que o de Atenção.")
+            return atencao, critico
+
+        imt_at, imt_cr = _meta_row("IMT", "meta_imt_atencao", 85.0, "meta_imt_critico", 70.0)
+        di_at,  di_cr  = _meta_row("DI",  "meta_di_atencao",  80.0, "meta_di_critico",  60.0)
+        adh_at, adh_cr = _meta_row("Aderência", "meta_adh_atencao", 85.0, "meta_adh_critico", 70.0)
+
+        if st.button("💾 Salvar Metas dos Indicadores", key="btn_metas_ind"):
+            _salvar_config(None, "meta_imt_atencao", imt_at)
+            _salvar_config(None, "meta_imt_critico", imt_cr)
+            _salvar_config(None, "meta_di_atencao",  di_at)
+            _salvar_config(None, "meta_di_critico",  di_cr)
+            _salvar_config(None, "meta_adh_atencao", adh_at)
+            _salvar_config(None, "meta_adh_critico", adh_cr)
+            st.success("✅ Metas dos indicadores atualizadas! Aplicadas na próxima renderização.")
+
     # ── 4.3: Score padrão por gerência ───────────────────────────────────────
     with st.expander("⚖️ Score Padrão — Fator Idade (α)", expanded=False):
         c5, c6 = st.columns(2)
@@ -596,7 +631,7 @@ def _render_aba_configuracoes() -> None:
             |---|---|
             | **App** | MRS Sentinel |
             | **Stack** | Streamlit + Supabase + ECharts + Plotly |
-            | **Versão** | Sprint 4 |
+            | **Versão** | v1.0 — Sprint 9 (Mobile First, consolidado S5–S9) |
             | **Perfis** | Admin / Assistente / Usuário |
             | **Banco** | Supabase (PostgreSQL) |
             """
