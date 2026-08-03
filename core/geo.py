@@ -239,6 +239,37 @@ def _chaves_de_colunas(ramal, origem) -> tuple:
             (str(origem).upper() if origem is not None and str(origem) != "nan" else None))
 
 
+def _up(v):
+    """Uppercase seguro, tratando None/NaN."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s.upper() if s and s.lower() != "nan" else None
+
+
+def geo_lookup_cols(trecho=None, origem=None, destino=None,
+                    lookups: dict | None = None) -> tuple:
+    """
+    Resolve (lat, lon, km, fonte) usando as colunas NATIVAS da nota
+    (trecho / origem / destino) — que já vêm decodificadas do parser e
+    compartilham o mesmo vocabulário da referência geo (ACL, ADP, ...).
+
+    É a via preferencial quando a nota não traz o TPLNR no formato MF- e o
+    `ramal` está na sigla canônica (SJU, JIT...), diferente do código de trecho.
+    """
+    lk = lookups or carregar_ref_geo()
+    fino, patio = lk["fino"], lk["patio"]
+    t, o, d = _up(trecho), _up(origem), _up(destino)
+    if t is not None:
+        if (t, o, d) in fino:
+            lat, lon, km = fino[(t, o, d)]
+            return lat, lon, km, "segmento"
+        if (t, o) in patio:
+            lat, lon, km = patio[(t, o)]
+            return lat, lon, km, "patio"
+    return np.nan, np.nan, np.nan, None
+
+
 def geo_lookup(tplnr=None, ramal=None, origem=None, lookups: dict | None = None) -> tuple:
     """
     Resolve (lat, lon, km, fonte) para uma falha/nota.
@@ -274,7 +305,9 @@ def enriquecer_geo(df: pd.DataFrame,
                    col_tplnr: str = "local_instalacao",
                    col_ramal: str = "ramal",
                    col_origem: str = "origem",
-                   col_km: str = "km_real") -> pd.DataFrame:
+                   col_km: str = "km_real",
+                   col_trecho: str = "trecho",
+                   col_destino: str = "destino") -> pd.DataFrame:
     """
     Adiciona colunas lat, lon, km_real, geo_fonte ao DataFrame.
 
@@ -304,6 +337,8 @@ def enriquecer_geo(df: pd.DataFrame,
     tplnr_col = col_tplnr if col_tplnr in df.columns else None
     ramal_col = col_ramal if col_ramal in df.columns else None
     origem_col = col_origem if col_origem in df.columns else None
+    trecho_col = col_trecho if col_trecho in df.columns else None
+    destino_col = col_destino if col_destino in df.columns else None
     km_col = col_km if col_km in df.columns else None
     km_atual = pd.to_numeric(df[km_col], errors="coerce") if km_col else None
 
@@ -312,15 +347,33 @@ def enriquecer_geo(df: pd.DataFrame,
         lat = lon = km = np.nan
         fonte = None
 
-        # 1) Posição EXATA por KM (notas VP com km_real).
         km_lin = km_atual.loc[i] if km_atual is not None else np.nan
         ramal_lin = r.get(ramal_col) if ramal_col else None
-        if rk and ramal_lin is not None and pd.notna(km_lin):
-            lat, lon, fonte = geo_por_km(ramal_lin, km_lin, ref_km=rk)
-            if fonte:
-                km = float(km_lin)
+        trecho_lin = r.get(trecho_col) if trecho_col else None
 
-        # 2/3) Fallback por TPLNR (segmento) / colunas (pátio).
+        # 1) Posição EXATA por KM (notas VP com km_real). A referência de KM é
+        #    chaveada por CÓDIGO DE TRECHO (ACL, ADP...); o `ramal` da nota pode
+        #    estar na sigla canônica (SJU, JIT...). Tenta ambos.
+        if rk and pd.notna(km_lin):
+            for chave in (trecho_lin, ramal_lin):
+                if chave is None or (isinstance(chave, float) and pd.isna(chave)):
+                    continue
+                lat, lon, fonte = geo_por_km(chave, km_lin, ref_km=rk)
+                if fonte:
+                    km = float(km_lin)
+                    break
+
+        # 2) Colunas NATIVAS da nota (trecho/origem/destino) — mesmo vocabulário
+        #    da referência. Preferencial ao TPLNR quando ele não vem em MF-.
+        if fonte is None and trecho_lin is not None:
+            lat, lon, km, fonte = geo_lookup_cols(
+                trecho=trecho_lin,
+                origem=r.get(origem_col) if origem_col else None,
+                destino=r.get(destino_col) if destino_col else None,
+                lookups=lk,
+            )
+
+        # 3) Fallback por TPLNR (segmento) / ramal+origem (pátio).
         if fonte is None:
             lat, lon, km, fonte = geo_lookup(
                 tplnr=r.get(tplnr_col) if tplnr_col else None,
