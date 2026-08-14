@@ -17,19 +17,50 @@ def _upload_ids_ativos(gerencia: str, disciplina: str | None = None) -> list[str
     """
     Retorna os IDs de uploads com status 'ativo' para a gerencia
     (e disciplina, se informada). Base da leitura anti-duplicação.
+
+    ⭐ BLINDAGEM: em condições normais só existe 1 upload 'ativo' por
+    gerencia+disciplina (o passo de arquivamento em data_uploader.py cuida
+    disso). Mas se aquele UPDATE falhar parcialmente (ex.: instabilidade da
+    rede corporativa/proxy no meio do upload), podem sobrar 2+ uploads
+    'ativo' ao mesmo tempo — e como esta função soma os upload_id de todos
+    eles, as notas de bases antigas e novas aparecem juntas (duplicação
+    visível no Dash). Por isso, quando disciplina é informada (leitura por
+    tela), agrupamos por disciplina e mantemos só o upload mais recente de
+    cada uma — a mesma regra de "usar a base mais nova" que o upload já
+    tenta aplicar na escrita.
     """
     try:
         supabase = get_supabase()
         q = (
             supabase.table("uploads_historico")
-            .select("id")
+            .select("id, disciplina, enviado_em")
             .eq("gerencia", gerencia)
             .eq("status", "ativo")
         )
         if disciplina:
             q = q.eq("disciplina", disciplina)
         resp = q.execute()
-        return [r["id"] for r in (resp.data or [])]
+        registros = resp.data or []
+
+        mais_recente: dict[str, dict] = {}
+        for r in registros:
+            chave = r.get("disciplina") or ""
+            atual = mais_recente.get(chave)
+            if atual is None or (r.get("enviado_em") or "") > (atual.get("enviado_em") or ""):
+                mais_recente[chave] = r
+
+        if len(registros) > len(mais_recente):
+            st.warning(
+                f"⚠️ Foram encontrados {len(registros)} uploads 'ativo' para "
+                f"Gerência **{gerencia}**"
+                + (f" / Disciplina **{disciplina}**" if disciplina else "")
+                + f", mas só {len(mais_recente)} deveria(m) existir. Usando "
+                "apenas o mais recente de cada disciplina — confira o "
+                "Histórico de Uploads.",
+                icon="⚠️",
+            )
+
+        return [r["id"] for r in mais_recente.values()]
     except Exception:
         return []
 

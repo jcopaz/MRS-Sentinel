@@ -15,19 +15,44 @@ _COLS_BOOL = ["gerador_thp"]
 
 
 def _upload_ids_ativos_baseline(gerencia: str | None = None) -> list[str]:
-    """IDs de uploads do congelado com status 'ativo' (anti-duplicação)."""
+    """
+    IDs de uploads do congelado com status 'ativo' (anti-duplicação).
+
+    ⭐ BLINDAGEM (mesma regra de database/queries.py::_upload_ids_ativos):
+    mantém só o upload mais recente por gerência, caso o arquivamento do
+    anterior tenha falhado parcialmente e sobrado mais de um 'ativo'.
+    """
     try:
         supabase = get_supabase()
         q = (
             supabase.table("uploads_historico")
-            .select("id")
+            .select("id, gerencia, enviado_em")
             .eq("disciplina", DISCIPLINA_BASELINE)
             .eq("status", "ativo")
         )
         if gerencia:
             q = q.eq("gerencia", gerencia)
         resp = q.execute()
-        return [r["id"] for r in (resp.data or [])]
+        registros = resp.data or []
+
+        mais_recente: dict[str, dict] = {}
+        for r in registros:
+            chave = r.get("gerencia") or ""
+            atual = mais_recente.get(chave)
+            if atual is None or (r.get("enviado_em") or "") > (atual.get("enviado_em") or ""):
+                mais_recente[chave] = r
+
+        if len(registros) > len(mais_recente):
+            st.warning(
+                f"⚠️ Foram encontrados {len(registros)} uploads da base "
+                "congelada 2025 'ativo'"
+                + (f" para Gerência **{gerencia}**" if gerencia else "")
+                + f", mas só {len(mais_recente)} deveria(m) existir. Usando "
+                "apenas o mais recente de cada gerência.",
+                icon="⚠️",
+            )
+
+        return [r["id"] for r in mais_recente.values()]
     except Exception:
         return []
 

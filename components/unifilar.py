@@ -835,6 +835,9 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
     # ── Rankings complementares (Tipo de Inspeção / Família Defeito / Ativo) ──
     render_rankings_unifilar(df_t_completo, gerencia=f"{gerencia}_{str(ramal_view)}")
 
+    # ── Tabela completa de notas (mesmo recorte de Ramal + Trecho acima) ──────
+    render_tabela_completa_unifilar(df_t_completo, gerencia=f"{gerencia}_{str(ramal_view)}")
+
 # endregion
 
 # Alias de compatibilidade — gerencia_sp/vp/geral importam render_unifilar_dual
@@ -1101,5 +1104,102 @@ def render_rankings_unifilar(df: pd.DataFrame, gerencia: str):
 
     if col_ativo:
         _bloco_ranking_ativo(df, col_ativo, col_fam, col_prio, col_insp, gerencia)
+
+# endregion
+
+
+# region ====================== SESSÃO 5: Tabela completa de notas =============
+#
+# Tabela com TODAS as colunas da base importada (não só o subconjunto
+# curado do Quadro Resumo — components/visao_gerencial.py), no mesmo
+# recorte de Ramal + Trecho já aplicado acima no Unifilar. Serve para
+# quem precisa extrair as notas de um pedaço específico do trecho/pátio.
+
+# Colunas adicionadas pelo próprio app para desenhar o gráfico/rankings —
+# não vêm da planilha importada, então ficam de fora da tabela "igual à
+# base imputada".
+_COLS_INTERNAS_UNIFILAR = {
+    "is_cronico", "origem_base", "nota", "sub_trecho", "bin_km",
+    "disciplina_label", "uploads_historico", "gerencia_auto",
+}
+
+_COLS_DATA_UNIFILAR = [
+    "data_nota", "data_encerramento", "data_planejada", "criado_em",
+]
+
+
+def render_tabela_completa_unifilar(df: pd.DataFrame, gerencia: str):
+    """
+    Tabela completa (todas as colunas da base) no recorte de Ramal+Trecho
+    já selecionado no Unifilar. Mesmo formato do Quadro Resumo (seletor de
+    linhas + download Excel/CSV), mas sem curar/renomear colunas.
+    """
+    if df.empty:
+        return
+
+    from io import BytesIO
+    from datetime import datetime
+
+    st.markdown("---")
+    st.markdown("##### 📋 Notas do Recorte Selecionado — Todas as Colunas")
+    st.caption(
+        "Todas as colunas da base importada, respeitando o Ramal e Trecho "
+        "escolhidos acima no Unifilar. Ordenada por Data da Nota "
+        "(mais recente primeiro). Exportável."
+    )
+
+    cols_show = [c for c in df.columns if c not in _COLS_INTERNAS_UNIFILAR]
+    if not cols_show:
+        st.info("Nenhuma coluna disponível para exibir.")
+        return
+
+    df_t = df[cols_show].copy()
+
+    for col in _COLS_DATA_UNIFILAR:
+        if col in df_t.columns:
+            df_t[col] = pd.to_datetime(df_t[col], errors="coerce").dt.strftime("%d/%m/%Y")
+
+    for col in df_t.select_dtypes(include=["object"]).columns:
+        df_t[col] = df_t[col].fillna("—").replace("", "—")
+
+    if "data_nota" in df_t.columns:
+        df_t_ord = df_t.copy()
+        df_t_ord["_sort"] = pd.to_datetime(df_t["data_nota"], format="%d/%m/%Y", errors="coerce")
+        df_t_ord = df_t_ord.sort_values("_sort", ascending=False).drop(columns="_sort")
+    else:
+        df_t_ord = df_t
+
+    col_lim, col_info = st.columns([1, 2])
+    with col_lim:
+        limite = st.selectbox(
+            "Mostrar:", [50, 100, 250, 500, "Todas"], index=1,
+            key=f"unif_tabela_limite_{gerencia}",
+        )
+    with col_info:
+        st.caption(f"📊 Total de notas no recorte: **{len(df_t_ord):,}**")
+
+    df_view = df_t_ord if limite == "Todas" else df_t_ord.head(int(limite))
+    st.dataframe(df_view, use_container_width=True, height=500, hide_index=True)
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_t_ord.to_excel(writer, index=False, sheet_name="Notas Unifilar")
+    buffer.seek(0)
+
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            "⬇️ Baixar Notas do Recorte (Excel)", data=buffer,
+            file_name=f"notas_unifilar_{gerencia}_{datetime.now():%Y%m%d_%H%M}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"unif_dl_xlsx_{gerencia}",
+        )
+    with col_dl2:
+        csv_bytes = df_t_ord.to_csv(index=False, sep=";").encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Baixar Notas do Recorte (CSV)", data=csv_bytes,
+            file_name=f"notas_unifilar_{gerencia}_{datetime.now():%Y%m%d_%H%M}.csv",
+            mime="text/csv", key=f"unif_dl_csv_{gerencia}",
+        )
 
 # endregion

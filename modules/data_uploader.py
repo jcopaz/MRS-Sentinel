@@ -13,6 +13,37 @@ from database.queries import log_acesso
 from core.parser import processar_planilha, df_para_registros_supabase
 
 
+def _verificar_arquivamento(supabase, gerencia: str, disciplina: str) -> bool:
+    """
+    Confirma que a Etapa 1 (arquivar uploads 'ativo' anteriores) realmente
+    zerou os uploads antigos daquela gerência+disciplina ANTES de inserir as
+    notas novas.
+
+    Por que existe: reportado que, ao subir uma nova base (VP e RASF), o
+    Dash às vezes soma em vez de substituir. O UPDATE de arquivamento roda
+    numa rede corporativa com proxy/SSL instáveis (ver database/client.py) —
+    se ele falhar parcialmente sem lançar exceção (ex.: timeout após aplicar
+    só parte do filtro), sobra mais de um upload 'ativo' e as notas de
+    ambos passam a ser somadas na leitura. Esta checagem aborta o upload
+    ANTES de inserir notas novas quando isso acontece, em vez de deixar o
+    Dash silenciosamente duplicar. A leitura (database/queries.py e
+    queries_rasf.py) também tem uma blindagem equivalente para o que já
+    estiver duplicado no banco.
+    """
+    try:
+        resp = (
+            supabase.table("uploads_historico")
+            .select("id", count="exact")
+            .match({"gerencia": gerencia, "disciplina": disciplina, "status": "ativo"})
+            .execute()
+        )
+        return (resp.count or 0) == 0
+    except Exception:
+        # Falha na própria checagem não deve travar o upload — a blindagem
+        # de leitura ainda protege a tela nesse caso.
+        return True
+
+
 # region ====================== SESSÃO 1: Header ======================
 
 def _render_header():
@@ -350,6 +381,16 @@ def _executar_upload_gerencia(
             "status":     "ativo",
         }).execute()
 
+        if not _verificar_arquivamento(supabase, gerencia, disciplina):
+            barra.empty()
+            st.error(
+                f"❌ Falha ao arquivar a base anterior da Gerência **{gerencia}** "
+                f"— Disciplina **{disciplina}**. Upload cancelado para evitar "
+                "duplicar notas no Dash. Tente novamente — se persistir, pode "
+                "ser instabilidade da rede corporativa."
+            )
+            return False
+
         # Etapa 2: Criar registro em uploads_historico
         barra.progress(25, text="Registrando upload...")
         resp_upload = supabase.table("uploads_historico").insert({
@@ -645,6 +686,15 @@ def _gravar_rasf_gerencia(df, nome_arquivo: str, gerencia: str, tamanho_mb: floa
             "gerencia": gerencia, "disciplina": DISCIPLINA_RASF, "status": "ativo",
         }).execute()
 
+        if not _verificar_arquivamento(supabase, gerencia, DISCIPLINA_RASF):
+            barra.empty()
+            st.error(
+                f"❌ Falha ao arquivar o RASF anterior da Gerência **{gerencia}**. "
+                "Upload cancelado para evitar duplicar linhas no Dash. Tente "
+                "novamente — se persistir, pode ser instabilidade da rede corporativa."
+            )
+            return False
+
         barra.progress(25, text="Registrando upload...")
         resp = supabase.table("uploads_historico").insert({
             "usuario_id":    usuario_id,
@@ -827,6 +877,16 @@ def _gravar_baseline_gerencia(df, nome_arquivo: str, gerencia: str, tamanho_mb: 
         supabase.table("uploads_historico").update({"status": "substituido"}).match({
             "gerencia": gerencia, "disciplina": DISCIPLINA_BASELINE, "status": "ativo",
         }).execute()
+
+        if not _verificar_arquivamento(supabase, gerencia, DISCIPLINA_BASELINE):
+            barra.empty()
+            st.error(
+                f"❌ Falha ao arquivar a base congelada anterior da Gerência "
+                f"**{gerencia}**. Upload cancelado para evitar duplicar linhas "
+                "no Dash. Tente novamente — se persistir, pode ser "
+                "instabilidade da rede corporativa."
+            )
+            return False
 
         barra.progress(25, text="Registrando upload...")
         resp = supabase.table("uploads_historico").insert({

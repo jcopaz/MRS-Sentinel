@@ -16,6 +16,7 @@
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
+import math
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
@@ -103,6 +104,21 @@ def _opcoes_patios(
         df_f = df_f[df_f["trecho"].isin(trechos_sel)]
 
     return sorted(df_f["origem"].dropna().unique().tolist())
+
+
+def _limites_km(df: pd.DataFrame) -> tuple[float, float] | None:
+    """
+    Retorna (km_min, km_max) presentes nos dados, arredondados para fora
+    (floor/ceil na casa decimal) para não cortar notas nas pontas. None se
+    não há coluna km_real ou nenhum valor válido — nesse caso o filtro de
+    KM não é exibido (mesma lógica de Trecho/Pátio quando a coluna falta).
+    """
+    if "km_real" not in df.columns:
+        return None
+    validos = pd.to_numeric(df["km_real"], errors="coerce").dropna()
+    if validos.empty:
+        return None
+    return (math.floor(validos.min() * 10) / 10, math.ceil(validos.max() * 10) / 10)
 
 
 def _opcoes_prioridade(df: pd.DataFrame) -> list[str]:
@@ -369,6 +385,7 @@ def render_filtros_cascata(
             f"filtro_prioridade_{uid}", f"filtro_familia_{uid}",
             f"filtro_tipo_insp_{uid}",
             f"filtro_status_base_vp_{uid}", f"filtro_status_base_ee_{uid}",
+            f"filtro_km_ini_{uid}", f"filtro_km_fim_{uid}",
         ]:
             if key in st.session_state:
                 del st.session_state[key]
@@ -438,6 +455,42 @@ def render_filtros_cascata(
                 patios_sel = opcoes_patios
         else:
             patios_sel = []
+
+        # 4B. KM Início / KM Fim — mesmo eixo usado no gráfico Unifilar.
+        # Permite recortar um pedaço específico do trecho/pátio (ex.: para
+        # extrair as notas de um trecho de obra) sem depender só de
+        # Ramal/Trecho/Pátio. Só aparece quando há km_real nos dados.
+        limites_km = _limites_km(df)
+        if limites_km:
+            km_disp_min, km_disp_max = limites_km
+            st.markdown("**📏 KM (Quilometragem)**")
+            col_km1, col_km2 = st.columns(2)
+            with col_km1:
+                km_ini = st.number_input(
+                    "KM Início",
+                    min_value=km_disp_min, max_value=km_disp_max,
+                    value=km_disp_min, step=0.1, format="%.1f",
+                    key=f"filtro_km_ini_{uid}",
+                )
+            with col_km2:
+                km_fim = st.number_input(
+                    "KM Fim",
+                    min_value=km_disp_min, max_value=km_disp_max,
+                    value=km_disp_max, step=0.1, format="%.1f",
+                    key=f"filtro_km_fim_{uid}",
+                )
+            if km_ini > km_fim:
+                st.warning("⚠️ KM Início maior que KM Fim.")
+                km_ini, km_fim = km_fim, km_ini
+        else:
+            km_ini, km_fim, km_disp_min, km_disp_max = None, None, None, None
+
+        # Só considera o filtro "ativo" se o usuário estreitou o intervalo
+        # em relação ao padrão (min/max completos) — senão notas sem
+        # km_real (não cobertas pelo KMZ) seriam descartadas por engano.
+        filtro_km_ativo = bool(
+            limites_km and (km_ini != km_disp_min or km_fim != km_disp_max)
+        )
 
         # 5. Período — Abertura da Nota
         st.markdown("**📅 Abertura da Nota**")
@@ -523,6 +576,9 @@ def render_filtros_cascata(
         "ramais":           ramais_sel,
         "trechos":          trechos_sel,
         "patios":           patios_sel,
+        "km_ini":           km_ini,
+        "km_fim":           km_fim,
+        "filtro_km_ativo":  filtro_km_ativo,
         "data_ini":         data_abertura_ini,   # alias backward compat
         "data_fim":         data_abertura_fim,   # alias backward compat
         "data_abertura_ini": data_abertura_ini,

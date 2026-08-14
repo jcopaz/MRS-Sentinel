@@ -124,6 +124,18 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     if patios and "origem" in df.columns:
         df = df[df["origem"].isin(patios)]
 
+    # Filtro de KM Início/Fim (mesmo eixo do gráfico Unifilar).
+    # Só filtra quando o usuário estreitou o intervalo (filtro_km_ativo) —
+    # senão notas sem km_real (fora da cobertura do KMZ) seriam descartadas.
+    if filtros.get("filtro_km_ativo") and "km_real" in df.columns:
+        col_km = pd.to_numeric(df["km_real"], errors="coerce")
+        km_ini = filtros.get("km_ini")
+        km_fim = filtros.get("km_fim")
+        if km_ini is not None:
+            df = df[col_km >= km_ini]
+        if km_fim is not None:
+            df = df[col_km <= km_fim]
+
     # Filtro de Abertura da Nota
     # Usa dt.date() para evitar bug de meia-noite (pd.Timestamp corta notas do dia)
     data_ab_ini = filtros.get("data_abertura_ini") or filtros.get("data_ini")

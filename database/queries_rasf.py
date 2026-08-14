@@ -22,19 +22,45 @@ _COLS_BOOL = [
 
 
 def _upload_ids_ativos_rasf(gerencia: str | None = None) -> list[str]:
-    """IDs de uploads RASF com status 'ativo' (base da leitura anti-duplicação)."""
+    """
+    IDs de uploads RASF com status 'ativo' (base da leitura anti-duplicação).
+
+    ⭐ BLINDAGEM (mesma regra de database/queries.py::_upload_ids_ativos):
+    só deveria existir 1 upload 'ativo' por gerência. Se o arquivamento do
+    upload anterior falhar parcialmente (rede/proxy corporativo), mantém só
+    o mais recente por gerência para evitar duplicar linhas do RASF na tela.
+    """
     try:
         supabase = get_supabase()
         q = (
             supabase.table("uploads_historico")
-            .select("id")
+            .select("id, gerencia, enviado_em")
             .eq("disciplina", DISCIPLINA_RASF)
             .eq("status", "ativo")
         )
         if gerencia:
             q = q.eq("gerencia", gerencia)
         resp = q.execute()
-        return [r["id"] for r in (resp.data or [])]
+        registros = resp.data or []
+
+        mais_recente: dict[str, dict] = {}
+        for r in registros:
+            chave = r.get("gerencia") or ""
+            atual = mais_recente.get(chave)
+            if atual is None or (r.get("enviado_em") or "") > (atual.get("enviado_em") or ""):
+                mais_recente[chave] = r
+
+        if len(registros) > len(mais_recente):
+            st.warning(
+                f"⚠️ Foram encontrados {len(registros)} uploads RASF 'ativo'"
+                + (f" para Gerência **{gerencia}**" if gerencia else "")
+                + f", mas só {len(mais_recente)} deveria(m) existir. Usando "
+                "apenas o mais recente de cada gerência — confira o "
+                "Histórico de Uploads.",
+                icon="⚠️",
+            )
+
+        return [r["id"] for r in mais_recente.values()]
     except Exception:
         return []
 
