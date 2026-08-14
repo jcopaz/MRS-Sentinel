@@ -239,11 +239,10 @@ def render_gerencia_vp():
         )
 
     # ── 6 Abas ────────────────────────────────────────────────────────────────
-    aba_kpi, aba_ger, aba_unif, aba_mapa, aba_heat, aba_rank, aba_temp, aba_ee = st.tabs([
+    aba_kpi, aba_ger, aba_unif, aba_heat, aba_rank, aba_temp, aba_ee = st.tabs([
         "📊 Visão Geral",
         "🎯 Visão Gerencial",
         "🗺️ Unifilar",
-        "🌍 Mapa Geo",
         "🌡️ Heatmap",
         "🏆 Ranking",
         "📈 Temporal",
@@ -288,17 +287,6 @@ def render_gerencia_vp():
             )
 
         render_unifilar_dual(df, gerencia="VP")
-
-    # endregion
-
-    # region =================== SESSÃO 4.2B: Aba — Mapa Geográfico ============
-    with aba_mapa:
-        from components.mapa_geografico import render_mapa_geografico
-        render_mapa_geografico(
-            df, escopo="VP",
-            titulo="🌍 Mapa Geográfico — Notas no KM real da malha",
-            granularidade="auto",
-        )
 
     # endregion
 

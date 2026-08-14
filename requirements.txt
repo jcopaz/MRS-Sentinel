@@ -13,10 +13,6 @@ supabase>=2.0.0
 plotly>=5.22.0
 streamlit-echarts>=0.4.0
 
-# Mapa geográfico (Sprint 6) — mapa branco com traçado da via
-folium>=0.16.0
-streamlit-folium>=0.21.0
-
 # Excel / Planilhas
 openpyxl>=3.1.0
 
