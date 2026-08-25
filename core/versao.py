@@ -27,5 +27,13 @@
 # Supabase em vez da mensagem genérica — diagnóstico temporário pra achar
 # por que login com senha confirmada correta (testada via curl direto no
 # Supabase) falhava pelo app. Reverter a mensagem amigável depois.
+# 3.0.0 (2026-08-25): correção de segurança — RLS estava ligado na tabela
+# usuarios sem nenhuma policy pra chave anon (achado real: linha existia
+# no banco mas a chave anon usada pelo app sempre via lista vazia, é a
+# causa raiz do login travado do Julio), corrigido com
+# schema_usuarios_rls.sql. Reverte também o diagnóstico temporário do
+# 2.0.2, que expunha em texto se um e-mail/matrícula existe no sistema e
+# o erro cru do Supabase — voltou a mostrar só a mensagem genérica. MAJOR
+# pela própria regra acima (correção de segurança).
 
-APP_VERSION = "2.0.2"
+APP_VERSION = "3.0.0"
