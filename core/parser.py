@@ -26,6 +26,7 @@ from core.glossarios import (
     FAMILIAS_VP, FAMILIAS_EE, GLOSSARIO_VP, GLOSSARIO_EE,
     normalizar_coluna_ramal, RAMAIS_MRS, status_base_label,
     GERENCIA_POR_CENTRO, GERENCIAS_CONHECIDAS, GERENCIA_CODIGO_LEGADO,
+    COORDENACAO_REALOCADA,
 )
 from core.score_engine import aplicar_score_dataframe
 

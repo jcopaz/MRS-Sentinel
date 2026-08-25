@@ -21,5 +21,7 @@
 # correção de bug de sessão Auth compartilhada entre usuários e correção
 # de integridade de dado (notas de Barão de Juparanã caindo na gerência
 # errada) — MAJOR pela própria regra acima.
+# 2.0.1 (2026-08-25): corrige NameError em core/parser.py — import de
+# COORDENACAO_REALOCADA esquecido no commit do 2.0.0, quebrava todo upload.
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
