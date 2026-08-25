@@ -201,7 +201,9 @@ def _autenticar(identificador: str, senha: str) -> tuple[bool, str]:
         usuario = get_usuario_by_matricula(identificador)
 
     if not usuario:
-        return False, "Matrícula/e-mail ou senha incorretos."
+        # 🩺 DIAGNÓSTICO TEMPORÁRIO (2026-08-25) — reverter depois de achar a
+        # causa do login falhando pra contas que deveriam funcionar.
+        return False, f"Matrícula/e-mail ou senha incorretos. [diag: usuário '{identificador}' não encontrado em usuarios]"
 
     # Passo 2: autenticar via Supabase Auth com o e-mail (real ou sintético).
     # Client descartável (não o singleton compartilhado get_supabase()) —
@@ -213,12 +215,13 @@ def _autenticar(identificador: str, senha: str) -> tuple[bool, str]:
             "password": senha,
         })
         if not auth_resp.user:
-            return False, "Matrícula/e-mail ou senha incorretos."
+            # 🩺 DIAGNÓSTICO TEMPORÁRIO
+            return False, "Matrícula/e-mail ou senha incorretos. [diag: sign_in retornou sem user, sem lançar exceção]"
     except Exception as e:
-        err = str(e).lower()
-        if "invalid" in err or "credentials" in err:
-            return False, "Matrícula/e-mail ou senha incorretos."
-        return False, f"Erro de conexão: verifique sua internet."
+        # 🩺 DIAGNÓSTICO TEMPORÁRIO — mostra o erro real do Supabase em vez
+        # de esconder atrás da mensagem genérica. Reverter pra mensagem
+        # amigável depois de achar a causa.
+        return False, f"[diag] {type(e).__name__}: {e}"
 
     # Passo 3: salvar na sessão e navegar para home
     set_usuario(usuario)

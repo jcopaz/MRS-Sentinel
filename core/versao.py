@@ -23,5 +23,9 @@
 # errada) — MAJOR pela própria regra acima.
 # 2.0.1 (2026-08-25): corrige NameError em core/parser.py — import de
 # COORDENACAO_REALOCADA esquecido no commit do 2.0.0, quebrava todo upload.
+# 2.0.2 (2026-08-25): auth/login.py::_autenticar mostra o erro real do
+# Supabase em vez da mensagem genérica — diagnóstico temporário pra achar
+# por que login com senha confirmada correta (testada via curl direto no
+# Supabase) falhava pelo app. Reverter a mensagem amigável depois.
 
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
