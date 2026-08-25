@@ -30,9 +30,11 @@ except Exception:  # pragma: no cover - fallback defensivo
     def _mapear_gerencia(valor):
         if valor is None:
             return None
-        from core.glossarios import GERENCIAS_CONHECIDAS
+        from core.glossarios import GERENCIAS_CONHECIDAS, GERENCIA_CODIGO_LEGADO
         sigla = str(valor).strip().upper().split(".")[-1]
-        return sigla if sigla in GERENCIAS_CONHECIDAS else None
+        if sigla in GERENCIAS_CONHECIDAS:
+            return sigla
+        return GERENCIA_CODIGO_LEGADO.get(sigla)
 
     def _sim_nao(valor) -> bool:
         if valor is None:

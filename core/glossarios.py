@@ -123,6 +123,14 @@ GERENCIA_POR_CENTRO = {
 LISTA_GERENCIAS = ["SP", "VP", "FN", "FS", "RJ", "LC"]
 GERENCIAS_CONHECIDAS = set(LISTA_GERENCIAS)
 
+# Códigos de gerência LEGADOS que ainda aparecem em notas antigas do SAP,
+# mapeados pra sigla atual — ex.: "MG" (Gerência Minas Gerais) virou "LC"
+# (Linha do Centro) em 2026, mas notas de antes da troca continuam
+# chegando com o código antigo. Ver mesma lógica em org_codigo_sap
+# (database/schema_organograma.sql) — esta cópia é a usada de fato na
+# detecção de gerência do upload (core/parser.py, core/parser_rasf.py).
+GERENCIA_CODIGO_LEGADO = {"MG": "LC"}
+
 NOME_GERENCIA = {
     "SP": "Gerência de Malha SP",
     "VP": "Gerência de Malha VP",

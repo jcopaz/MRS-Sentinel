@@ -25,7 +25,7 @@ from datetime import datetime
 from core.glossarios import (
     FAMILIAS_VP, FAMILIAS_EE, GLOSSARIO_VP, GLOSSARIO_EE,
     normalizar_coluna_ramal, RAMAIS_MRS, status_base_label,
-    GERENCIA_POR_CENTRO, GERENCIAS_CONHECIDAS,
+    GERENCIA_POR_CENTRO, GERENCIAS_CONHECIDAS, GERENCIA_CODIGO_LEGADO,
 )
 from core.score_engine import aplicar_score_dataframe
 
@@ -440,7 +440,9 @@ def detectar_gerencia_nota(centro_trab, gerencia_origem=None) -> str | None:
          hoje só cobre SP/VP no formato de planilha mais antigo)
       2) fallback: último segmento de 'gerencia_origem' separado por "."
          (cobre qualquer formato observado: "V.SP", "E.VP", "GEE.FN",
-         "V.RJ" etc. — o código da gerência é sempre o último pedaço)
+         "V.RJ" etc. — o código da gerência é sempre o último pedaço),
+         com tradução de código legado (ex.: "MG" → "LC") via
+         GERENCIA_CODIGO_LEGADO
 
     Retorna None quando não dá pra determinar com segurança — nesse caso
     o chamador usa a gerência selecionada manualmente no upload.
@@ -455,6 +457,8 @@ def detectar_gerencia_nota(centro_trab, gerencia_origem=None) -> str | None:
         sigla = texto.split(".")[-1]
         if sigla in GERENCIAS_CONHECIDAS:
             return sigla
+        if sigla in GERENCIA_CODIGO_LEGADO:
+            return GERENCIA_CODIGO_LEGADO[sigla]
 
     return None
 

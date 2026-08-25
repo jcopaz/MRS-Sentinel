@@ -214,12 +214,15 @@ def status_consenso_origem(valor) -> str:
 
 
 def _mapear_gerencia(valor) -> str | None:
-    """GEE.SP -> SP, GEE.VP -> VP, GEE.FN -> FN etc. Desconhecido/None -> None."""
+    """GEE.SP -> SP, GEE.VP -> VP, GEE.FN -> FN etc. Código legado (GEE.MG ->
+    LC) traduzido via GERENCIA_CODIGO_LEGADO. Desconhecido/None -> None."""
     if valor is None:
         return None
-    from core.glossarios import GERENCIAS_CONHECIDAS
+    from core.glossarios import GERENCIAS_CONHECIDAS, GERENCIA_CODIGO_LEGADO
     sigla = str(valor).strip().upper().split(".")[-1]
-    return sigla if sigla in GERENCIAS_CONHECIDAS else None
+    if sigla in GERENCIAS_CONHECIDAS:
+        return sigla
+    return GERENCIA_CODIGO_LEGADO.get(sigla)
 
 
 def _m6_preenchido(valor) -> bool:
