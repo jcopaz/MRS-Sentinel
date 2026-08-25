@@ -5,8 +5,13 @@
 from pathlib import Path
 
 import streamlit as st
-from database.client import get_supabase
-from database.queries import get_usuario_by_email, atualizar_ultimo_login, log_acesso
+from database.client import criar_cliente_auth_temporario
+from database.queries import (
+    get_usuario_by_email,
+    get_usuario_by_matricula,
+    atualizar_ultimo_login,
+    log_acesso,
+)
 from auth.session import set_usuario, set_pagina
 
 # Logo animado — mp4 em vez de gif (mesmo conteúdo, muito mais leve: H.264
@@ -170,54 +175,71 @@ def _render_footer():
 
 # region ====================== SESSÃO 3: Lógica de Autenticação ======================
 
-def _autenticar(email: str, senha: str) -> tuple[bool, str]:
+def _autenticar(identificador: str, senha: str) -> tuple[bool, str]:
     """
     Autentica o usuário via Supabase Auth, depois busca o perfil
     na tabela 'usuarios'. Retorna (sucesso, mensagem_erro).
 
+    Login aceita MATRÍCULA ou e-mail no mesmo campo (não há SMTP
+    disponível pra recuperação de senha, então nem todo colaborador tem
+    e-mail corporativo real — quem não tem loga pela matrícula, e o
+    e-mail usado por baixo dos panos no Supabase Auth é sintético, gerado
+    em modules/admin_panel.py na criação da conta).
+
     Fluxo:
-    1. sign_in_with_password → valida credenciais no Supabase Auth
-    2. get_usuario_by_email  → busca perfil (perfil, gerencia, ativo)
+    1. Resolve o perfil primeiro (por matrícula ou e-mail) — descobre qual
+       e-mail está registrado no Supabase Auth para essa conta.
+    2. sign_in_with_password → valida a senha no Supabase Auth.
     3. Salva na session      → set_usuario()
     4. Registra log e atualiza último_login
     """
-    # Passo 1: autenticar via Supabase Auth
+    identificador = identificador.strip()
+
+    # Passo 1: resolve o perfil (e o e-mail real do Auth) por matrícula ou e-mail
+    if "@" in identificador:
+        usuario = get_usuario_by_email(identificador.lower())
+    else:
+        usuario = get_usuario_by_matricula(identificador)
+
+    if not usuario:
+        return False, "Matrícula/e-mail ou senha incorretos."
+
+    # Passo 2: autenticar via Supabase Auth com o e-mail (real ou sintético).
+    # Client descartável (não o singleton compartilhado get_supabase()) —
+    # ver docstring de criar_cliente_auth_temporario em database/client.py.
     try:
-        supabase = get_supabase()
-        auth_resp = supabase.auth.sign_in_with_password({
-            "email": email.strip().lower(),
+        auth_client = criar_cliente_auth_temporario()
+        auth_resp = auth_client.auth.sign_in_with_password({
+            "email": usuario["email"],
             "password": senha,
         })
         if not auth_resp.user:
-            return False, "Email ou senha incorretos."
+            return False, "Matrícula/e-mail ou senha incorretos."
     except Exception as e:
         err = str(e).lower()
         if "invalid" in err or "credentials" in err:
-            return False, "Email ou senha incorretos."
+            return False, "Matrícula/e-mail ou senha incorretos."
         return False, f"Erro de conexão: verifique sua internet."
-
-    # Passo 2: buscar perfil na tabela usuarios
-    usuario = get_usuario_by_email(email.strip().lower())
-    if not usuario:
-        # Existe no Auth mas não tem perfil cadastrado (ou está inativo)
-        supabase.auth.sign_out()
-        return False, "Usuário sem perfil ativo. Contate o administrador."
 
     # Passo 3: salvar na sessão e navegar para home
     set_usuario(usuario)
 
-    # Decide para qual gerência redirecionar por padrão
+    # Decide para qual gerência redirecionar por padrão. Usuário com
+    # gerência fixa vai direto pro dashboard dela (app.py::_rotear mostra
+    # "em construção" se ainda não tiver tela ligada). Admin/global (sem
+    # gerência) cai na tela de escolher a Gerência Geral.
     gerencia = usuario.get("gerencia")
-    if gerencia == "SP":
-        set_pagina("gerencia_sp")
-    elif gerencia == "VP":
-        set_pagina("gerencia_vp")
+    if gerencia:
+        set_pagina(f"gerencia_{gerencia.lower()}")
     else:
-        set_pagina("gerencia_sp")  # Admin começa pela SP
+        set_pagina("selecionar_gg")
 
-    # Passo 4: auditoria (falha silenciosa)
-    atualizar_ultimo_login(usuario["id"])
-    log_acesso(usuario["id"], "login", {"email": email})
+    # Passo 4: auditoria (falha silenciosa — login não pode quebrar por causa disso)
+    try:
+        atualizar_ultimo_login(usuario["id"])
+        log_acesso(usuario["id"], "login", {"email": usuario["email"]})
+    except Exception:
+        pass
 
     return True, ""
 
@@ -234,12 +256,12 @@ def render_login():
 
     with st.form("form_login", clear_on_submit=False):
         st.markdown(
-            "<p style='color:#ffffff; font-weight:600; margin-bottom:0.3rem;'>E-mail corporativo</p>",
+            "<p style='color:#ffffff; font-weight:600; margin-bottom:0.3rem;'>Matrícula ou e-mail corporativo</p>",
             unsafe_allow_html=True
         )
-        email = st.text_input(
-            "Email",
-            placeholder="seu.nome@mrs.com.br",
+        identificador = st.text_input(
+            "Matrícula ou e-mail",
+            placeholder="Ex: 123456 ou seu.nome@mrs.com.br",
             label_visibility="collapsed",
         )
 
@@ -259,21 +281,22 @@ def render_login():
 
         if entrar:
             # Validação básica antes de chamar a API
-            if not email or not email.strip():
-                st.error("⚠️ Informe o e-mail.")
-            elif "@" not in email:
-                st.error("⚠️ E-mail inválido.")
+            if not identificador or not identificador.strip():
+                st.error("⚠️ Informe a matrícula ou o e-mail.")
             elif not senha:
                 st.error("⚠️ Informe a senha.")
             else:
                 with st.spinner("Autenticando..."):
-                    sucesso, msg_erro = _autenticar(email, senha)
+                    sucesso, msg_erro = _autenticar(identificador, senha)
 
                 if sucesso:
                     st.success("✅ Acesso autorizado!")
                     st.rerun()
                 else:
                     st.error(f"❌ {msg_erro}")
+
+    from auth.recuperar_senha import render_esqueci_senha
+    render_esqueci_senha()
 
     _render_card_fim()
     _render_footer()

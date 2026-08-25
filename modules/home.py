@@ -6,8 +6,9 @@ from pathlib import Path
 
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
-from auth.permissions import can_see_gerencia, can_admin_panel, can_upload
+from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis
 from database.queries import log_acesso, contar_alertas_novos
+from core.glossarios import GERENCIAS_COM_DASHBOARD
 
 # Logo animado — mp4 em vez de gif (mesmo conteúdo, muito mais leve: H.264
 # comprime bem melhor que a paleta do GIF). Servido via static file serving
@@ -193,13 +194,20 @@ def _render_nav_buttons():
     # Define os botões disponíveis com base nas permissões
     nav_items = []
 
-    if can_see_gerencia("SP"):
-        ativo_sp = "🔵 " if pagina_atual == "gerencia_sp" else ""
-        nav_items.append(("SP", f"{ativo_sp}🏭  Gerência SP", "gerencia_sp"))
+    # Só quem não tem gerência fixa (admin/global) passa pela tela de
+    # escolher a Gerência Geral no login — dá pra voltar lá a qualquer
+    # momento por este botão (antes só existia o redirect automático).
+    if get_gerencia() is None:
+        ativo_gg = "🔵 " if pagina_atual == "selecionar_gg" else ""
+        nav_items.append(("GG", f"{ativo_gg}🗺️  Trocar Gerência Geral", "selecionar_gg"))
 
-    if can_see_gerencia("VP"):
-        ativo_vp = "🔵 " if pagina_atual == "gerencia_vp" else ""
-        nav_items.append(("VP", f"{ativo_vp}🏭  Gerência VP", "gerencia_vp"))
+    for sigla in gerencias_visiveis():
+        pagina_ger = f"gerencia_{sigla.lower()}"
+        ativo_ger = "🔵 " if pagina_atual == pagina_ger else ""
+        # 🚧 pras gerências sem dashboard ligado ainda — evita que o
+        # usuário só descubra clicando (ver modules/gerencia_placeholder.py)
+        icone = "🏭" if sigla in GERENCIAS_COM_DASHBOARD else "🚧"
+        nav_items.append((sigla, f"{ativo_ger}{icone}  Gerência {sigla}", pagina_ger))
 
     # Visão Geral: todos podem ver
     ativo_geral = "🔵 " if pagina_atual == "gerencia_geral" else ""
@@ -314,12 +322,13 @@ def _render_logout():
             uid = get_id()
             if uid:
                 log_acesso(uid, "logout")
-            # Faz signout no Supabase Auth
-            try:
-                from database.client import get_supabase
-                get_supabase().auth.sign_out()
-            except Exception:
-                pass
+            # Não chama auth.sign_out() no client compartilhado (get_supabase())
+            # de propósito — login já não usa esse client pra autenticar (ver
+            # database/client.py::criar_cliente_auth_temporario), então ele
+            # nunca tem uma sessão "logada" própria dele pra encerrar; um
+            # sign_out ali arriscaria derrubar a sessão de outro usuário
+            # concorrente caso o client acabe acumulando estado no futuro.
+            # Bastar limpar o estado da aplicação:
             clear_session()
             st.rerun()
 

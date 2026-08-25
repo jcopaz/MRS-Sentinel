@@ -85,13 +85,10 @@ COLUNAS_RASF: dict[str, str] = {
     "Data SAC":                                    "data_sac",
 }
 
-# Gerência do RASF (GEE.SP / GEE.VP / GEV.SP) -> gerência canônica do app (SP/VP)
-MAPA_GERENCIA: dict[str, str] = {
-    "GEE.SP": "SP",
-    "GEV.SP": "SP",
-    "GEE.VP": "VP",
-    "GEV.VP": "VP",
-}
+# Gerência do RASF (GEE.SP / GEE.VP / GEV.SP / GEE.FN / ...) -> sigla canônica
+# do app. O código de gerência é sempre o último segmento após o ".", então
+# não precisa de um dict exaustivo por combinação de prefixo — ver
+# GERENCIAS_CONHECIDAS em core/glossarios.py pra lista de siglas válidas.
 
 # Valores de "(Eng) Gatilho" que caracterizam ocorrência que DEVE ter causa raiz
 # (Gatilho de Análise de Falhas — PG-ENG-0088, seção 6.4.1).
@@ -217,10 +214,12 @@ def status_consenso_origem(valor) -> str:
 
 
 def _mapear_gerencia(valor) -> str | None:
-    """GEE.SP -> SP, GEE.VP -> VP. Desconhecido/None -> None."""
+    """GEE.SP -> SP, GEE.VP -> VP, GEE.FN -> FN etc. Desconhecido/None -> None."""
     if valor is None:
         return None
-    return MAPA_GERENCIA.get(str(valor).strip().upper())
+    from core.glossarios import GERENCIAS_CONHECIDAS
+    sigla = str(valor).strip().upper().split(".")[-1]
+    return sigla if sigla in GERENCIAS_CONHECIDAS else None
 
 
 def _m6_preenchido(valor) -> bool:

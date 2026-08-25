@@ -114,6 +114,41 @@ GERENCIA_POR_CENTRO = {
     for centro in centros
 }
 
+# Todas as siglas de Gerência conhecidas pelo sistema hoje, agrupadas por
+# Gerência Geral (mesma ordem visual em qualquer tela) — usado pelo
+# fallback textual de detecção de gerência em core/parser.py e por telas
+# que precisam listar "todas as gerências" sem hardcode local. Ver
+# database/schema_organograma.sql pra estrutura completa (Gerência Geral
+# > Gerência > Coordenação) com nomes e códigos SAP de cada uma.
+LISTA_GERENCIAS = ["SP", "VP", "FN", "FS", "RJ", "LC"]
+GERENCIAS_CONHECIDAS = set(LISTA_GERENCIAS)
+
+NOME_GERENCIA = {
+    "SP": "Gerência de Malha SP",
+    "VP": "Gerência de Malha VP",
+    "FN": "Gerência Frente Norte",
+    "FS": "Gerência Frente Sul",
+    "RJ": "Gerência de Malha Rio de Janeiro",
+    "LC": "Gerência de Malha Linha do Centro",
+}
+
+# Gerência Geral de cada Gerência — usado na tela "Escolha a Gerência
+# Geral" (modules/selecionar_gg.py) pra agrupar as 6 gerências em 4 GGs.
+GERENCIA_GERAL_DE = {
+    "SP": "São Paulo",
+    "VP": "São Paulo",
+    "FN": "Ferrovia do Aço",
+    "FS": "Ferrovia do Aço",
+    "RJ": "Rio de Janeiro",
+    "LC": "Linha do Centro",
+}
+
+# Gerências que já têm tela de dashboard ligada (modules/gerencia_sp.py,
+# gerencia_vp.py). As demais caem em modules/gerencia_placeholder.py até
+# ganharem tela própria — atualizar aqui é o ÚNICO lugar a mudar quando
+# isso acontecer (usado por selecionar_gg.py e pela sidebar em home.py).
+GERENCIAS_COM_DASHBOARD = {"SP", "VP"}
+
 PATIOS_POR_CENTRO = {
     "CIPA": ["IPA", "IRS", "ICG", "IRG", "IBA", "ICZ",
              "IJU", "IQA", "ISN", "IUF", "IVP", "ZPG"],

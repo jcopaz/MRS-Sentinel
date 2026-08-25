@@ -27,12 +27,12 @@ import pandas as pd
 try:
     from core.parser_rasf import _mapear_gerencia, _sim_nao
 except Exception:  # pragma: no cover - fallback defensivo
-    _MAPA_GER = {"GEE.SP": "SP", "GEV.SP": "SP", "GEE.VP": "VP", "GEV.VP": "VP"}
-
     def _mapear_gerencia(valor):
         if valor is None:
             return None
-        return _MAPA_GER.get(str(valor).strip().upper())
+        from core.glossarios import GERENCIAS_CONHECIDAS
+        sigla = str(valor).strip().upper().split(".")[-1]
+        return sigla if sigla in GERENCIAS_CONHECIDAS else None
 
     def _sim_nao(valor) -> bool:
         if valor is None:

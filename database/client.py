@@ -34,4 +34,24 @@ def get_supabase_admin() -> Client:
     service_key = st.secrets["supabase"]["service_key"]
     return create_client(url, service_key)
 
+
+def criar_cliente_auth_temporario() -> Client:
+    """
+    Client NOVO (sem @st.cache_resource) só pra validar credenciais em
+    auth/login.py::_autenticar via sign_in_with_password.
+
+    Por quê: get_supabase() é um singleton COMPARTILHADO por todos os
+    usuários simultâneos do processo Streamlit. sign_in_with_password
+    guarda o token de sessão dentro do próprio objeto Client — chamado no
+    client compartilhado, o login de um usuário sobrescreve o "usuário
+    logado" que outro usuário concorrente estava usando naquele momento
+    (e um logout de qualquer um pode derrubar a sessão de outro). Usando
+    um client descartável só para essa checagem, a sessão nunca chega a
+    existir no objeto compartilhado — mesma lógica já aplicada ao reset
+    de senha em auth/recuperar_senha.py.
+    """
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
+
 # endregion

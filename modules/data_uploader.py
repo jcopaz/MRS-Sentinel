@@ -11,6 +11,7 @@ from auth.session import get_id, get_gerencia, get_perfil
 from database.client import get_supabase
 from database.queries import log_acesso
 from core.parser import processar_planilha, df_para_registros_supabase
+from core.glossarios import LISTA_GERENCIAS
 
 
 def _verificar_arquivamento(supabase, gerencia: str, disciplina: str) -> bool:
@@ -83,7 +84,7 @@ def _render_selecao() -> tuple[str, str]:
         if perfil == "admin":
             gerencia = st.selectbox(
                 "🏭 Gerência de destino",
-                ["SP", "VP"],
+                LISTA_GERENCIAS,
                 help="Para qual gerência os dados serão carregados?"
             )
         else:
@@ -456,7 +457,19 @@ def _executar_upload_gerencia(
 
     except Exception as e:
         barra.empty()
-        st.error(f"❌ Falha durante o upload da Gerência {gerencia}: {e}")
+        msg = str(e).lower()
+        if "duplicate" in msg or "unique" in msg:
+            # idx_uploads_historico_ativo_unico (schema_upload_unico.sql)
+            # barrou 2 uploads 'ativo' simultâneos pra mesma Gerência+Disciplina
+            # — provavelmente outra pessoa (ou clique duplicado) subiu ao
+            # mesmo tempo. Não é corrupção de dado, é a trava funcionando.
+            st.error(
+                f"❌ Outro upload para **{gerencia}/{disciplina}** foi concluído "
+                "ao mesmo tempo que este. Para evitar duplicar notas, este foi "
+                "cancelado — recarregue a tela e tente de novo se for necessário."
+            )
+        else:
+            st.error(f"❌ Falha durante o upload da Gerência {gerencia}: {e}")
         st.info(
             "Os dados anteriores **não foram removidos** pois o erro ocorreu antes da substituição.",
             icon="ℹ️"
@@ -587,7 +600,8 @@ def _render_upload_rasf(gerencia: str):
         st.warning("⚠️ Nenhuma linha válida encontrada no export RASF.")
         return
 
-    # Linhas com "Gerência" fora de GEE.SP/GEV.SP/GEE.VP/GEV.VP viram None em
+    # Linhas com "Gerência" cujo código não bate com nenhuma sigla conhecida
+    # (ver GERENCIAS_CONHECIDAS em core/glossarios.py) viram None em
     # core.parser_rasf._mapear_gerencia() — sem este aviso elas desapareceriam
     # silenciosamente do upload (nunca entram em gerencias_presentes abaixo).
     sem_gerencia = df["gerencia"].isna()
@@ -598,10 +612,10 @@ def _render_upload_rasf(gerencia: str):
             if "_gerencia_raw" in df.columns else []
         )
         detalhe = f" (valores encontrados: {', '.join(map(str, valores_originais))})" if valores_originais else ""
+        aceitos = ", ".join(f"GEE.{g}/GEV.{g}" for g in LISTA_GERENCIAS)
         st.warning(
             f"⚠️ **{qtd_sem} linha(s) com gerência não reconhecida** foram descartadas{detalhe}. "
-            f"Só são aceitos: GEE.SP, GEV.SP, GEE.VP, GEV.VP. Verifique a coluna "
-            f"'Gerência' no export se o número parecer alto."
+            f"Só são aceitos: {aceitos}. Verifique a coluna 'Gerência' no export se o número parecer alto."
         )
         df = df[~sem_gerencia].reset_index(drop=True)
         if df.empty:
@@ -794,9 +808,10 @@ def _render_upload_baseline(gerencia: str):
         vals = (df.loc[sem_ger, "_gerencia_raw"].dropna().unique().tolist()
                 if "_gerencia_raw" in df.columns else [])
         detalhe = f" (valores: {', '.join(map(str, vals))})" if vals else ""
+        aceitos = ", ".join(f"GEE.{g}/GEV.{g}" for g in LISTA_GERENCIAS)
         st.warning(
             f"⚠️ **{qtd_sem} linha(s) com gerência não reconhecida** descartadas{detalhe}. "
-            f"Aceitos: GEE.SP, GEV.SP, GEE.VP, GEV.VP."
+            f"Aceitos: {aceitos}."
         )
         df = df[~sem_ger].reset_index(drop=True)
         if df.empty:

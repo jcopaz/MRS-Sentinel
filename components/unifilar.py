@@ -1179,6 +1179,8 @@ def render_tabela_completa_unifilar(df: pd.DataFrame, gerencia: str):
         st.caption(f"📊 Total de notas no recorte: **{len(df_t_ord):,}**")
 
     df_view = df_t_ord if limite == "Todas" else df_t_ord.head(int(limite))
+    if limite == "Todas" and len(df_view) > 5000:
+        st.caption(f"⏳ Renderizando {len(df_view):,} linhas — pode demorar alguns segundos.")
     st.dataframe(df_view, use_container_width=True, height=500, hide_index=True)
 
     buffer = BytesIO()

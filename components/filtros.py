@@ -23,13 +23,17 @@ from datetime import date, timedelta
 
 from core.glossarios import (
     nome_ramal, RAMAIS_MRS, STATUS_BASE, PESO_PRIORIDADE, status_base_efetivo,
+    CENTROS_POR_GERENCIA as _CENTROS_POR_GERENCIA_BASE,
 )
 
-# Centros de trabalho por gerência (fonte: 08_GLOSSARIOS.md)
+# Centros de trabalho por gerência — fonte única em core/glossarios.py
+# (antes havia uma segunda cópia divergente aqui). "GERAL" é a união de
+# todas as gerências conhecidas, calculada em vez de listada à mão, pra
+# não precisar lembrar de atualizar aqui toda vez que uma gerência nova
+# for cadastrada.
 CENTROS_POR_GERENCIA = {
-    "SP":    ["CIPA", "CIPG", "CIJN"],
-    "VP":    ["CFAN", "CFTA", "CFPI"],
-    "GERAL": ["CIPA", "CIPG", "CIJN", "CFAN", "CFTA", "CFPI"],
+    **_CENTROS_POR_GERENCIA_BASE,
+    "GERAL": [c for centros in _CENTROS_POR_GERENCIA_BASE.values() for c in centros],
 }
 
 # Ordem oficial de exibição da prioridade (mais crítica primeiro)

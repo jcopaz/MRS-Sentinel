@@ -638,6 +638,8 @@ def _render_quadro_resumo(df: pd.DataFrame, gerencia: str):
         st.caption(f"📊 Total de notas no filtro: **{len(df_q_ord):,}**")
 
     df_show = df_q_ord if limite == "Todas" else df_q_ord.head(int(limite))
+    if limite == "Todas" and len(df_show) > 5000:
+        st.caption(f"⏳ Renderizando {len(df_show):,} linhas — pode demorar alguns segundos.")
     st.dataframe(df_show, use_container_width=True, height=500, hide_index=True)
 
     buffer = BytesIO()

@@ -29,8 +29,7 @@ try:
 except Exception:  # pragma: no cover
     ECHARTS_OK = False
 
-from auth.session import get_gerencia, get_perfil
-from auth.permissions import can_see_gerencia
+from auth.permissions import gerencias_visiveis
 from database.queries_snapshots import get_snapshots
 
 # region ====================== SESSÃO 1: Config + agregação ===================
@@ -310,20 +309,13 @@ def _bloco_tabela_trecho(df: pd.DataFrame, pa: str, pb: str):
 
 # region ====================== SESSÃO 5: render ===============================
 
-def _gerencias_visiveis() -> list[str]:
-    ger = get_gerencia()
-    if get_perfil() == "admin" or ger is None:
-        return [g for g in ("SP", "VP") if can_see_gerencia(g)]
-    return [ger] if can_see_gerencia(ger) else []
-
-
 def render_evolucao_malha():
     st.markdown("### 📈 Evolução da Malha")
     st.caption("Comparação período a período das notas (base viva), a partir das "
                "fotos semanais automáticas. RASF/EE congelado usa o comparativo "
                "anual (YoY) na aba de Inteligência.")
 
-    gers = _gerencias_visiveis()
+    gers = gerencias_visiveis()
     if not gers:
         st.warning("Sem gerências visíveis para o seu perfil.")
         return

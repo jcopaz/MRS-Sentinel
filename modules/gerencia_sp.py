@@ -201,11 +201,12 @@ def render_gerencia_sp():
         st.markdown("---")
         st.markdown("### 🔧 Gerência SP")
 
-        # Toggle de disciplina
+        # Toggle de disciplina — key= persiste a escolha ao navegar pra
+        # outra tela e voltar (antes resetava sempre pro padrão)
         disciplina_sel = st.radio(
             "📊 Disciplina",
             options=["VP+EE", "VP", "EE"],
-            index=0,
+            key="disciplina_sp",
             horizontal=False,
             help="VP = Via Permanente · EE = Eletroeletrônica · VP+EE = Ambas",
         )

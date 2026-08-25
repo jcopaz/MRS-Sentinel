@@ -15,7 +15,8 @@ import streamlit as st
 import pandas as pd
 
 from database.client  import get_supabase, get_supabase_admin
-from database.queries import get_uploads_historico
+from database.queries import get_uploads_historico, gerar_email_sintetico
+from core.glossarios   import LISTA_GERENCIAS
 
 # region ====================== SESSÃO 1: Guard de acesso =====================
 
@@ -97,12 +98,18 @@ def _render_aba_usuarios(admin_logado: dict) -> None:
     else:
         # Formata para exibição
         df_display = df_users[[c for c in [
-            "nome", "email", "perfil", "gerencia", "ativo",
+            "nome", "matricula", "email", "email_gerado", "perfil", "gerencia", "ativo",
             "ultimo_login", "criado_em",
         ] if c in df_users.columns]].copy()
 
+        # E-mail sintético (login por matrícula) não é um e-mail real — não exibir
+        if "email_gerado" in df_display.columns:
+            df_display.loc[df_display["email_gerado"].fillna(False), "email"] = "— (login por matrícula)"
+            df_display.drop(columns=["email_gerado"], inplace=True)
+
         df_display.rename(columns={
             "nome":         "Nome",
+            "matricula":    "Matrícula",
             "email":        "E-mail",
             "perfil":       "Perfil",
             "gerencia":     "Gerência",
@@ -139,14 +146,22 @@ def _form_criar_usuario(admin_logado: dict) -> None:
     """Formulário para criar novo usuário."""
     with st.expander("➕ Criar Novo Usuário", expanded=False):
         with st.form("form_criar_user"):
-            nome   = st.text_input("Nome completo *", placeholder="Ex: João da Silva")
-            email  = st.text_input("E-mail *", placeholder="joao.silva@mrs.com.br")
+            nome      = st.text_input("Nome completo *", placeholder="Ex: João da Silva")
+            matricula = st.text_input(
+                "Matrícula *", placeholder="Ex: 123456",
+                help="Identificador de login. Não depende de e-mail corporativo.",
+            )
+            email  = st.text_input(
+                "E-mail corporativo (opcional)", placeholder="joao.silva@mrs.com.br",
+                help="Deixe em branco se o colaborador não tiver e-mail — o login "
+                     "será feito só pela matrícula (não há SMTP para recuperação por e-mail).",
+            )
             senha  = st.text_input("Senha provisória *", type="password",
-                                   help="Mínimo 8 caracteres. O usuário poderá alterar depois.")
+                                   help="Mínimo 8 caracteres. Reset futuro é sempre feito pelo admin aqui no painel.")
             perfil = st.selectbox("Perfil *", options=["usuario", "assistente", "admin"])
             gerencia = st.selectbox(
                 "Gerência",
-                options=["", "SP", "VP"],
+                options=[""] + LISTA_GERENCIAS,
                 help="Obrigatório para Assistente. Admin não precisa.",
             )
 
@@ -156,7 +171,9 @@ def _form_criar_usuario(admin_logado: dict) -> None:
             erros = []
             if not nome.strip():
                 erros.append("Nome é obrigatório.")
-            if not email.strip() or "@" not in email:
+            if not matricula.strip():
+                erros.append("Matrícula é obrigatória.")
+            if email.strip() and "@" not in email:
                 erros.append("E-mail inválido.")
             if len(senha) < 8:
                 erros.append("Senha deve ter no mínimo 8 caracteres.")
@@ -169,7 +186,8 @@ def _form_criar_usuario(admin_logado: dict) -> None:
             else:
                 _criar_usuario(
                     nome=nome.strip(),
-                    email=email.strip().lower(),
+                    matricula=matricula.strip(),
+                    email=(email.strip().lower() or None),
                     senha=senha,
                     perfil=perfil,
                     gerencia=gerencia or None,
@@ -185,7 +203,7 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
             return
 
         opcoes = {
-            row["id"]: f"{row.get('nome','?')} ({row.get('email','?')})"
+            row["id"]: f"{row.get('nome','?')} ({row.get('matricula') or row.get('email','?')})"
             for _, row in df_users.iterrows()
         }
 
@@ -200,10 +218,12 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
             row = df_users[df_users["id"] == user_id_sel].iloc[0]
 
             with st.form("form_editar_user"):
+                nova_matricula = st.text_input("Matrícula", value=row.get("matricula") or "")
                 novo_perfil  = st.selectbox("Perfil", ["usuario", "assistente", "admin"],
                                             index=["usuario","assistente","admin"].index(row.get("perfil","usuario")))
-                nova_gerencia = st.selectbox("Gerência", ["", "SP", "VP"],
-                                             index=["","SP","VP"].index(row.get("gerencia","") or ""))
+                opcoes_gerencia = [""] + LISTA_GERENCIAS
+                nova_gerencia = st.selectbox("Gerência", opcoes_gerencia,
+                                             index=opcoes_gerencia.index(row.get("gerencia","") or ""))
                 ativo        = st.checkbox("Usuário ativo", value=bool(row.get("ativo", True)))
 
                 submit_edit = st.form_submit_button("💾 Salvar Alterações", type="primary")
@@ -211,6 +231,7 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
             if submit_edit:
                 _editar_usuario(
                     user_id=user_id_sel,
+                    matricula=(nova_matricula.strip() or None),
                     perfil=novo_perfil,
                     gerencia=nova_gerencia or None,
                     ativo=ativo,
@@ -221,7 +242,8 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
             with st.form("form_resetar_senha"):
                 nova_senha = st.text_input(
                     "Nova senha provisória", type="password",
-                    help="Mínimo 8 caracteres. Repasse ao usuário por um canal seguro.",
+                    help="Mínimo 8 caracteres. Repasse ao usuário por um canal seguro "
+                         "(não há e-mail automático de recuperação — este reset é a única forma).",
                 )
                 submit_reset = st.form_submit_button("🔑 Resetar Senha")
 
@@ -233,6 +255,7 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
                     _resetar_senha(
                         user_id=user_id_sel,
                         email=row.get("email", ""),
+                        auth_user_id=row.get("auth_user_id"),
                         nova_senha=nova_senha,
                         admin_id=admin_logado.get("id"),
                     )
@@ -244,7 +267,7 @@ def _buscar_usuarios() -> pd.DataFrame:
         supabase = get_supabase()
         resp = (
             supabase.table("usuarios")
-            .select("id, nome, email, perfil, gerencia, ativo, ultimo_login, criado_em")
+            .select("id, nome, matricula, email, email_gerado, auth_user_id, perfil, gerencia, ativo, ultimo_login, criado_em")
             .order("criado_em", desc=True)
             .execute()
         )
@@ -256,7 +279,8 @@ def _buscar_usuarios() -> pd.DataFrame:
 
 def _criar_usuario(
     nome: str,
-    email: str,
+    matricula: str,
+    email: str | None,
     senha: str,
     perfil: str,
     gerencia: str | None,
@@ -265,69 +289,88 @@ def _criar_usuario(
     """
     Cria a conta de login (Supabase Auth) e o perfil (tabela 'usuarios').
 
+    Login por matrícula: quando o colaborador não tem e-mail corporativo,
+    geramos um e-mail sintético (nunca enviado) só pra satisfazer o
+    Supabase Auth por baixo dos panos — quem loga digita a matrícula
+    (ver auth/login.py). auth_user_id é salvo direto na criação pra não
+    depender de busca paginada por e-mail no reset de senha.
+
     A senha nunca é armazenada pelo app — ela vive só no Supabase Auth
     (ver database/schema.sql). email_confirm=True libera o acesso na hora,
-    sem precisar de e-mail de confirmação (a MRS ainda não liberou SMTP).
+    sem precisar de e-mail de confirmação (a MRS não tem SMTP disponível).
     """
+    email_gerado = not email
+    email_final = email or gerar_email_sintetico(matricula)
+
     try:
         admin = get_supabase_admin()
-        admin.auth.admin.create_user({
-            "email":         email,
+        resp_auth = admin.auth.admin.create_user({
+            "email":         email_final,
             "password":      senha,
             "email_confirm": True,
         })
+        auth_user_id = resp_auth.user.id if resp_auth and resp_auth.user else None
 
         supabase = get_supabase()
         dados = {
-            "nome":       nome,
-            "email":      email,
-            "perfil":     perfil,
-            "gerencia":   gerencia,
-            "ativo":      True,
-            "criado_por": criado_por,
+            "nome":         nome,
+            "matricula":    matricula,
+            "email":        email_final,
+            "email_gerado": email_gerado,
+            "auth_user_id": auth_user_id,
+            "perfil":       perfil,
+            "gerencia":     gerencia,
+            "ativo":        True,
+            "criado_por":   criado_por,
         }
         supabase.table("usuarios").insert(dados).execute()
 
         # Registra no log de auditoria
         _registrar_log(
             acao="CRIAR_USUARIO",
-            detalhes={"email": email, "perfil": perfil, "gerencia": gerencia},
+            detalhes={"matricula": matricula, "email_gerado": email_gerado, "perfil": perfil, "gerencia": gerencia},
             admin_id=criado_por,
         )
 
-        st.success(f"✅ Usuário **{nome}** criado com sucesso! Já pode logar com a senha provisória.")
+        st.success(
+            f"✅ Usuário **{nome}** criado com sucesso! Login pela matrícula "
+            f"**{matricula}**" + ("" if email_gerado else f" ou e-mail **{email_final}**") +
+            ", com a senha provisória."
+        )
         st.rerun()
 
     except Exception as e:
         msg = str(e).lower()
         if "duplicate" in msg or "unique" in msg or "already been registered" in msg or "already registered" in msg:
-            st.error("❌ E-mail já cadastrado na plataforma.")
+            if "matricula" in msg:
+                st.error("❌ Matrícula já cadastrada na plataforma.")
+            else:
+                st.error("❌ E-mail já cadastrado na plataforma.")
         else:
             st.error(f"❌ Erro ao criar usuário: {e}")
 
 
-def _resetar_senha(user_id: str, email: str, nova_senha: str, admin_id: str | None) -> None:
+def _resetar_senha(
+    user_id: str,
+    email: str,
+    nova_senha: str,
+    admin_id: str | None,
+    auth_user_id: str | None = None,
+) -> None:
     """
     Reseta a senha de um usuário diretamente via API admin do Supabase —
     não depende de SMTP/e-mail de recuperação.
+
+    Usa o auth_user_id salvo na criação da conta quando disponível
+    (rápido e direto). Contas criadas antes desse campo existir caem no
+    fallback: busca paginada por e-mail no Supabase Auth.
     """
     try:
         admin = get_supabase_admin()
 
-        # Localiza o usuário no Supabase Auth pelo e-mail (a API admin não
-        # busca por e-mail diretamente, então paginamos até encontrar).
-        auth_user_id = None
-        pagina = 1
-        while auth_user_id is None:
-            resp = admin.auth.admin.list_users(page=pagina, per_page=200)
-            usuarios_pagina = resp.users if hasattr(resp, "users") else resp
-            if not usuarios_pagina:
-                break
-            for u in usuarios_pagina:
-                if (u.email or "").strip().lower() == email.strip().lower():
-                    auth_user_id = u.id
-                    break
-            pagina += 1
+        if not auth_user_id:
+            from database.queries import buscar_auth_user_id_por_email
+            auth_user_id = buscar_auth_user_id_por_email(email)
 
         if not auth_user_id:
             st.error("❌ Usuário não encontrado no Supabase Auth (conta pode ter sido criada antes da correção — recrie o usuário).")
@@ -349,23 +392,30 @@ def _resetar_senha(user_id: str, email: str, nova_senha: str, admin_id: str | No
 
 def _editar_usuario(
     user_id: str,
+    matricula: str | None,
     perfil: str,
     gerencia: str | None,
     ativo: bool,
 ) -> None:
-    """Atualiza perfil, gerência e status ativo do usuário."""
+    """Atualiza matrícula, perfil, gerência e status ativo do usuário.
+
+    Só atualiza a tabela 'usuarios' — o e-mail de login no Supabase Auth
+    (real ou sintético) não muda aqui, então login por matrícula continua
+    funcionando via get_usuario_by_matricula (auth/login.py).
+    """
     try:
         supabase = get_supabase()
         supabase.table("usuarios").update({
-            "perfil":   perfil,
-            "gerencia": gerencia,
-            "ativo":    ativo,
+            "matricula": matricula,
+            "perfil":    perfil,
+            "gerencia":  gerencia,
+            "ativo":     ativo,
         }).eq("id", user_id).execute()
 
         admin = st.session_state.get("usuario", {})
         _registrar_log(
             acao="EDITAR_USUARIO",
-            detalhes={"user_id": user_id, "perfil": perfil, "ativo": ativo},
+            detalhes={"user_id": user_id, "matricula": matricula, "perfil": perfil, "ativo": ativo},
             admin_id=admin.get("id"),
         )
 
@@ -491,17 +541,18 @@ def _render_aba_configuracoes() -> None:
 
     # ── 4.1: Extensão da malha ────────────────────────────────────────────────
     with st.expander("🗺️ Extensão da Malha (km)", expanded=True):
-        c1, c2 = st.columns(2)
-        km_sp = c1.number_input("Km — Gerência SP", min_value=1.0, max_value=2000.0,
-                                 value=float(_get_config("SP", "km_malha", 320.0)),
-                                 step=1.0, key="cfg_km_sp")
-        km_vp = c2.number_input("Km — Gerência VP", min_value=1.0, max_value=2000.0,
-                                 value=float(_get_config("VP", "km_malha", 410.0)),
-                                 step=1.0, key="cfg_km_vp")
+        km_por_gerencia = {}
+        cols_km = st.columns(len(LISTA_GERENCIAS))
+        for col, ger in zip(cols_km, LISTA_GERENCIAS):
+            km_por_gerencia[ger] = col.number_input(
+                f"Km — Gerência {ger}", min_value=1.0, max_value=2000.0,
+                value=float(_get_config(ger, "km_malha", 200.0)),
+                step=1.0, key=f"cfg_km_{ger.lower()}",
+            )
 
         if st.button("💾 Salvar Km de Malha", key="btn_km"):
-            _salvar_config("SP", "km_malha", km_sp)
-            _salvar_config("VP", "km_malha", km_vp)
+            for ger, valor in km_por_gerencia.items():
+                _salvar_config(ger, "km_malha", valor)
             st.success("✅ Km de malha atualizados!")
 
     # ── 4.2: Limites de alerta IMT ────────────────────────────────────────────
@@ -561,17 +612,18 @@ def _render_aba_configuracoes() -> None:
 
     # ── 4.3: Score padrão por gerência ───────────────────────────────────────
     with st.expander("⚖️ Score Padrão — Fator Idade (α)", expanded=False):
-        c5, c6 = st.columns(2)
-        alpha_sp = c5.slider("α — Gerência SP", 0.0, 0.5,
-                              value=float(_get_config("SP", "alpha_idade", 0.10)),
-                              step=0.01, format="%.2f", key="cfg_alpha_sp")
-        alpha_vp = c6.slider("α — Gerência VP", 0.0, 0.5,
-                              value=float(_get_config("VP", "alpha_idade", 0.10)),
-                              step=0.01, format="%.2f", key="cfg_alpha_vp")
+        alpha_por_gerencia = {}
+        cols_alpha = st.columns(len(LISTA_GERENCIAS))
+        for col, ger in zip(cols_alpha, LISTA_GERENCIAS):
+            alpha_por_gerencia[ger] = col.slider(
+                f"α — Gerência {ger}", 0.0, 0.5,
+                value=float(_get_config(ger, "alpha_idade", 0.10)),
+                step=0.01, format="%.2f", key=f"cfg_alpha_{ger.lower()}",
+            )
 
         if st.button("💾 Salvar α Padrão", key="btn_alpha"):
-            _salvar_config("SP", "alpha_idade", alpha_sp)
-            _salvar_config("VP", "alpha_idade", alpha_vp)
+            for ger, valor in alpha_por_gerencia.items():
+                _salvar_config(ger, "alpha_idade", valor)
             st.success("✅ Fator α atualizado!")
 
     # ── 4.4: Alertas Automáticos (Sprint 5) ──────────────────────────────────
@@ -716,7 +768,7 @@ def _render_aba_gestao_dados() -> None:
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
-        ger_del = st.selectbox("Gerência", ["SP", "VP"], key="del_ger")
+        ger_del = st.selectbox("Gerência", LISTA_GERENCIAS, key="del_ger")
     with col2:
         disc_del = st.selectbox("Disciplina", ["VP", "EE", "Todas"], key="del_disc")
 
@@ -765,6 +817,9 @@ def _render_aba_gestao_dados() -> None:
     st.markdown("---")
     _render_secao_apagar_rasf()
 
+    st.markdown("---")
+    _render_secao_resolver_duplicados()
+
 # endregion
 
 
@@ -784,10 +839,10 @@ def _render_secao_apagar_rasf() -> None:
 
     col1, col2 = st.columns([1, 2])
     with col1:
-        ger_del_rasf = st.selectbox("Gerência", ["SP", "VP", "Ambas"], key="del_ger_rasf")
+        ger_del_rasf = st.selectbox("Gerência", LISTA_GERENCIAS + ["Todas"], key="del_ger_rasf")
 
     supabase = get_supabase()
-    ger_filtro = ger_del_rasf if ger_del_rasf != "Ambas" else None
+    ger_filtro = ger_del_rasf if ger_del_rasf != "Todas" else None
 
     # Preview de quantas linhas serão apagadas
     try:
@@ -829,5 +884,172 @@ def _render_secao_apagar_rasf() -> None:
             st.error(f"❌ Erro ao apagar RASF: {ex}")
 
     st.caption("💡 Após apagar, vá para Alimentação de Dados e refaça o upload do export RASF.")
+
+# endregion
+
+
+# region ================ SESSÃO X.2: Resolver uploads duplicados =============
+
+# Mapa disciplina -> tabela onde as linhas de dados daquele upload vivem.
+# Disciplinas fora deste mapa são ignoradas na limpeza (não sabemos onde
+# apagar os dados filhos com segurança).
+_TABELA_POR_DISCIPLINA = {
+    "VP":        "notas",
+    "EE":        "notas",
+    "RASF":      "rasf_ee",
+    "RASF_BASE": "rasf_baseline",
+}
+
+
+def _render_secao_resolver_duplicados() -> None:
+    """
+    Detecta e resolve uploads com status='ativo' duplicados na mesma
+    Gerência+Disciplina — situação que não deveria existir (só 1 upload
+    'ativo' por combinação), mas pode acontecer se o UPDATE de arquivamento
+    em data_uploader.py falhar parcialmente numa rede corporativa instável
+    (ver docstring de _verificar_arquivamento em modules/data_uploader.py).
+
+    A leitura (database/queries*.py) já se blinda disso escolhendo apenas o
+    upload mais recente de cada combinação, mas os registros antigos ficam
+    "presos" como 'ativo' no banco, poluindo o Histórico de Uploads e
+    disparando o aviso ⚠️ toda vez que a tela é aberta. Esta seção resolve
+    de vez: apaga as linhas de dados (notas/rasf_ee/rasf_baseline) e o
+    próprio registro de uploads_historico dos uploads antigos, mantendo só
+    o mais recente de cada Gerência+Disciplina.
+    """
+    st.markdown("#### 🔁 Resolver Uploads Duplicados (status 'ativo' preso)")
+    st.caption(
+        "Detecta uploads que ficaram marcados como 'ativo' quando já deveriam "
+        "ter sido substituídos (falha de rede durante o upload) e apaga os "
+        "antigos — dados e registro do upload — mantendo só o mais recente "
+        "de cada Gerência+Disciplina."
+    )
+
+    supabase = get_supabase()
+
+    try:
+        resp = (
+            supabase.table("uploads_historico")
+            .select("id, gerencia, disciplina, nome_arquivo, total_notas, enviado_em")
+            .eq("status", "ativo")
+            .execute()
+        )
+        registros = resp.data or []
+    except Exception as e:
+        st.error(f"❌ Erro ao buscar uploads: {e}")
+        return
+
+    grupos: dict[tuple[str, str], list[dict]] = {}
+    for r in registros:
+        grupos.setdefault((r["gerencia"], r["disciplina"]), []).append(r)
+
+    a_remover: list[dict] = []
+    for (gerencia, disciplina), lst in grupos.items():
+        if len(lst) <= 1:
+            continue
+        lst_ordenado = sorted(lst, key=lambda r: r.get("enviado_em") or "", reverse=True)
+        for antigo in lst_ordenado[1:]:
+            a_remover.append({**antigo, "gerencia": gerencia, "disciplina": disciplina})
+
+    if not a_remover:
+        st.success("✅ Nenhum upload duplicado encontrado — tudo em ordem.")
+        return
+
+    # Preview com impacto real (linhas filhas que seriam apagadas)
+    linhas_preview = []
+    for item in a_remover:
+        tabela = _TABELA_POR_DISCIPLINA.get(item["disciplina"])
+        qtd_filhas = None
+        if tabela:
+            try:
+                r = (
+                    supabase.table(tabela)
+                    .select("id", count="exact")
+                    .eq("upload_id", item["id"])
+                    .execute()
+                )
+                qtd_filhas = r.count or 0
+            except Exception:
+                qtd_filhas = "?"
+        item["_qtd_filhas"] = qtd_filhas if isinstance(qtd_filhas, int) else 0
+        linhas_preview.append({
+            "Gerência":    item["gerencia"],
+            "Disciplina":  item["disciplina"],
+            "Arquivo":     item["nome_arquivo"],
+            "Enviado em":  item.get("enviado_em"),
+            "Nº notas (registrado no upload)": item.get("total_notas"),
+            "Tabela filha": tabela or "⚠️ desconhecida — não será apagado",
+            "Linhas filhas hoje no banco": qtd_filhas,
+        })
+
+    df_preview = pd.DataFrame(linhas_preview)
+    if "Enviado em" in df_preview.columns:
+        df_preview["Enviado em"] = pd.to_datetime(df_preview["Enviado em"], errors="coerce").dt.strftime("%d/%m/%Y %H:%M")
+
+    st.warning(
+        f"⚠️ {len(a_remover)} upload(s) antigo(s) presos como 'ativo' serão "
+        "**apagados permanentemente** (registro do upload + linhas de dados "
+        "associadas), mantendo apenas o mais recente de cada Gerência+Disciplina.",
+        icon="⚠️",
+    )
+    st.dataframe(df_preview, use_container_width=True, hide_index=True)
+
+    confirmacao_dup = st.text_input(
+        'Digite "CONFIRMAR" para habilitar o botão:',
+        key="dup_confirm_txt",
+    )
+
+    if st.button(
+        f"🗑️ Apagar {len(a_remover)} upload(s) duplicado(s)",
+        type="primary",
+        disabled=(confirmacao_dup.strip().upper() != "CONFIRMAR"),
+        key="btn_resolver_duplicados",
+    ):
+        total_filhas_apagadas = 0
+        erros = []
+        for item in a_remover:
+            tabela = _TABELA_POR_DISCIPLINA.get(item["disciplina"])
+            try:
+                if tabela:
+                    supabase.table(tabela).delete().eq("upload_id", item["id"]).execute()
+                    total_filhas_apagadas += item["_qtd_filhas"]
+                else:
+                    erros.append(
+                        f"Disciplina '{item['disciplina']}' (upload {item['id']}) "
+                        "não tem tabela mapeada — registro de upload não apagado."
+                    )
+                    continue
+
+                supabase.table("uploads_historico").delete().eq("id", item["id"]).execute()
+            except Exception as ex:
+                erros.append(f"upload {item['id']} ({item['nome_arquivo']}): {ex}")
+
+        # Limpa os caches que podem ter dados desses uploads
+        from database.queries import invalidar_cache_notas
+        from database.queries_rasf import invalidar_cache_rasf
+        from database.queries_baseline import invalidar_cache_baseline
+        invalidar_cache_notas()
+        invalidar_cache_rasf()
+        invalidar_cache_baseline()
+
+        admin_logado = st.session_state.get("usuario", {})
+        _registrar_log(
+            acao="RESOLVER_UPLOADS_DUPLICADOS",
+            detalhes={
+                "uploads_removidos": [item["id"] for item in a_remover],
+                "linhas_filhas_apagadas": total_filhas_apagadas,
+                "erros": erros,
+            },
+            admin_id=admin_logado.get("id"),
+        )
+
+        if erros:
+            for e in erros:
+                st.error(f"❌ {e}")
+        st.success(
+            f"✅ {len(a_remover) - len(erros)} upload(s) duplicado(s) apagado(s) "
+            f"({total_filhas_apagadas} linhas de dados removidas)."
+        )
+        st.rerun()
 
 # endregion

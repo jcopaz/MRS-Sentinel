@@ -86,8 +86,11 @@ def init_session():
         "logged_in":       False,
         "pagina":          "login",
         "gerencia_ativa":  None,
-        "sp_disciplina":   "VP",
-        "vp_disciplina":   "VP",
+        # Toggle "Disciplina" (VP+EE/VP/EE) de cada tela de gerência —
+        # com key=, o widget persiste sozinho ao navegar pra outra tela e
+        # voltar (ver modules/gerencia_sp.py e gerencia_vp.py).
+        "disciplina_sp":   "VP+EE",
+        "disciplina_vp":   "VP+EE",
     }
     for key, val in defaults.items():
         st.session_state.setdefault(key, val)

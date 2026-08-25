@@ -197,10 +197,11 @@ def render_gerencia_vp():
         st.markdown("---")
         st.markdown("### 🔧 Gerência VP")
 
+        # key= persiste a escolha ao navegar pra outra tela e voltar
         disciplina_sel = st.radio(
             "📊 Disciplina",
             options=["VP+EE", "VP", "EE"],
-            index=0,
+            key="disciplina_vp",
             horizontal=False,
             help="VP = Via Permanente · EE = Eletroeletrônica · VP+EE = Ambas",
         )

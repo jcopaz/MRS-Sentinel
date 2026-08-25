@@ -19,8 +19,7 @@
 import streamlit as st
 import pandas as pd
 
-from auth.session import get_gerencia, get_perfil
-from auth.permissions import can_see_gerencia
+from auth.permissions import gerencias_visiveis
 
 # region ====================== SESSÃO 1: CSS + helpers ========================
 
@@ -224,13 +223,6 @@ def _bloco_alertas(gerencia: str):
 
 # region ====================== SESSÃO 3: render ===============================
 
-def _gerencias_visiveis() -> list[str]:
-    ger = get_gerencia()
-    if get_perfil() == "admin" or ger is None:
-        return [g for g in ("SP", "VP") if can_see_gerencia(g)]
-    return [ger] if can_see_gerencia(ger) else []
-
-
 def _carregar_notas(gerencia: str) -> pd.DataFrame:
     try:
         from database.queries import get_notas_cached
@@ -247,7 +239,7 @@ def render_visao_campo():
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown("### 📱 Visão de Campo")
 
-    gers = _gerencias_visiveis()
+    gers = gerencias_visiveis()
     if not gers:
         st.warning("Sem gerências visíveis para o seu perfil.")
         return

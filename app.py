@@ -45,6 +45,8 @@ from modules.data_uploader  import render_upload
 from modules.alertas        import render_alertas
 from modules.evolucao_malha import render_evolucao_malha
 from modules.visao_campo   import render_visao_campo
+from modules.selecionar_gg  import render_selecionar_gg
+from modules.gerencia_placeholder import render_gerencia_placeholder
 # endregion
 
 
@@ -192,6 +194,7 @@ def _rotear():
         "gerencia_sp":    render_gerencia_sp,
         "gerencia_vp":    render_gerencia_vp,
         "gerencia_geral": render_gerencia_geral,
+        "selecionar_gg":  render_selecionar_gg,
         "evolucao":       render_evolucao_malha,
         "campo":          render_visao_campo,
         "alertas":        render_alertas,
@@ -199,8 +202,17 @@ def _rotear():
         "admin":          render_admin_panel,
     }
 
-    render_fn = rotas.get(pagina, render_gerencia_sp)
-    render_fn()
+    if pagina in rotas:
+        rotas[pagina]()
+        return
+
+    # "gerencia_<sigla>" sem tela ligada ainda (ex.: gerencia_fn) — mostra
+    # "em construção" em vez de cair por engano no dashboard de SP.
+    if pagina.startswith("gerencia_"):
+        render_gerencia_placeholder(pagina.removeprefix("gerencia_").upper())
+        return
+
+    render_gerencia_sp()
 
 
 def main():

@@ -1,16 +1,16 @@
 # auth/permissions.py — Verificação de permissões RBAC
 # Matriz de permissões (fonte: 04_ARQUITETURA.md):
 #
-#   Ação                  | Admin | Assistente      | Usuário
-#   Ver Gerência SP       | ✅    | Só se ger='SP'  | ✅
-#   Ver Gerência VP       | ✅    | Só se ger='VP'  | ✅
-#   Ver Visão Geral       | ✅    | ✅               | ✅
-#   Upload de dados       | ✅    | Só da sua ger.  | ❌
-#   Criar/editar usuários | ✅    | ❌               | ❌
-#   Ver logs de acesso    | ✅    | ❌               | ❌
+#   Ação                  | Admin | Assistente        | Usuário
+#   Ver uma Gerência       | ✅    | Só a gerência dele | ✅
+#   Ver Visão Geral       | ✅    | ✅                  | ✅
+#   Upload de dados       | ✅    | Só da sua ger.     | ❌
+#   Criar/editar usuários | ✅    | ❌                  | ❌
+#   Ver logs de acesso    | ✅    | ❌                  | ❌
 
 import streamlit as st
 from auth.session import get_usuario, get_perfil, get_gerencia
+from core.glossarios import LISTA_GERENCIAS
 
 
 # region ====================== SESSÃO 1: Verificações Booleanas ======================
@@ -38,6 +38,16 @@ def can_see_gerencia(gerencia_alvo: str) -> bool:
     if perfil == "assistente":
         return get_gerencia() == gerencia_alvo
     return False
+
+
+def gerencias_visiveis() -> list[str]:
+    """
+    Lista de siglas de Gerência que o usuário logado pode ver, na ordem
+    canônica de LISTA_GERENCIAS. Substitui a tupla fixa ("SP","VP") que
+    estava duplicada em modules/alertas.py, evolucao_malha.py e
+    visao_campo.py — agora escala pra qualquer gerência cadastrada.
+    """
+    return [g for g in LISTA_GERENCIAS if can_see_gerencia(g)]
 
 
 def can_upload(gerencia_alvo: str) -> bool:

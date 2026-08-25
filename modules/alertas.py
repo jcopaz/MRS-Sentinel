@@ -18,7 +18,7 @@ import streamlit as st
 import pandas as pd
 
 from auth.session import get_gerencia, get_perfil, get_id
-from auth.permissions import can_see_gerencia, can_manage_alertas, require_login
+from auth.permissions import can_see_gerencia, can_manage_alertas, require_login, gerencias_visiveis
 from database.queries import (
     get_alertas, marcar_alerta_status, contar_alertas_novos, log_acesso,
 )
@@ -64,7 +64,7 @@ def _gerencia_ativa() -> str:
     g = get_gerencia()
     if g:
         return g
-    opcoes = [x for x in ("SP", "VP") if can_see_gerencia(x)] or ["SP"]
+    opcoes = gerencias_visiveis() or ["SP"]
     return st.session_state.get("alertas_ger", opcoes[0])
 
 
@@ -78,7 +78,7 @@ def _barra_acoes(gerencia: str, pode_gerir: bool = True):
 
     with c1:
         if not get_gerencia():
-            opcoes = [x for x in ("SP", "VP") if can_see_gerencia(x)] or ["SP"]
+            opcoes = gerencias_visiveis() or ["SP"]
             st.session_state["alertas_ger"] = st.selectbox(
                 "Gerência", opcoes,
                 index=opcoes.index(gerencia) if gerencia in opcoes else 0,

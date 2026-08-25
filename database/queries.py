@@ -371,6 +371,7 @@ def invalidar_cache_notas() -> None:
         invalidar_cache_notas()  # chamado em data_uploader.py após upload
     """
     get_notas_cached.clear()
+    get_ultima_atualizacao_info.clear()
     st.toast("🔄 Cache de notas atualizado.", icon="✅")
 
 # endregion
@@ -391,6 +392,57 @@ def get_usuario_by_email(email: str) -> dict | None:
         return resp.data[0] if resp.data else None
     except Exception as e:
         st.error(f"❌ Erro ao buscar usuário: {e}")
+        return None
+
+
+# Domínio usado só como identidade interna do Supabase Auth para
+# colaboradores sem e-mail corporativo — nunca recebe e-mail de verdade.
+# Login continua sendo feito pela matrícula (ver auth/login.py).
+EMAIL_SINTETICO_DOMINIO = "matricula.sentinel.local"
+
+
+def gerar_email_sintetico(matricula: str) -> str:
+    """Gera a identidade interna do Supabase Auth para login por matrícula."""
+    return f"mat{matricula.strip()}@{EMAIL_SINTETICO_DOMINIO}"
+
+
+def get_usuario_by_matricula(matricula: str) -> dict | None:
+    try:
+        supabase = get_supabase()
+        resp = (
+            supabase.table("usuarios")
+            .select("*")
+            .eq("matricula", matricula.strip())
+            .eq("ativo", True)
+            .limit(1)
+            .execute()
+        )
+        return resp.data[0] if resp.data else None
+    except Exception as e:
+        st.error(f"❌ Erro ao buscar usuário: {e}")
+        return None
+
+
+def buscar_auth_user_id_por_email(email: str) -> str | None:
+    """
+    Localiza o UUID de um usuário no Supabase Auth pelo e-mail — busca
+    paginada, usada só como fallback para contas criadas antes do campo
+    'usuarios.auth_user_id' existir (contas novas já trazem o id direto).
+    """
+    try:
+        from database.client import get_supabase_admin
+        admin = get_supabase_admin()
+        pagina = 1
+        while True:
+            resp = admin.auth.admin.list_users(page=pagina, per_page=200)
+            usuarios_pagina = resp.users if hasattr(resp, "users") else resp
+            if not usuarios_pagina:
+                return None
+            for u in usuarios_pagina:
+                if (u.email or "").strip().lower() == email.strip().lower():
+                    return u.id
+            pagina += 1
+    except Exception:
         return None
 
 
@@ -423,8 +475,22 @@ def log_acesso(
         }).execute()
     except Exception:
         pass
+
+
+@st.cache_data(ttl=60, show_spinner=False)
 def get_ultima_atualizacao_info() -> dict:
-    """Retorna dict com dados do último upload — usado pelo home.py."""
+    """
+    Retorna dict com dados do último upload — usado pelo home.py.
+
+    ⭐ CACHEADO: render_sidebar() (e portanto esta função) roda em TODO
+    rerun do app — todo clique de qualquer usuário, não só ao navegar pra
+    uma tela nova. Sem cache, isso era uma query ao Supabase a cada
+    interação de cada usuário simultâneo, só pra desenhar um cartão
+    informativo na sidebar. TTL curto (60s) porque o dado é barato de
+    recomputar e idealmente atualiza logo após um upload — mas
+    invalidar_cache_notas() já limpa isso na hora, então o TTL só cobre
+    o caso de outra gerência/disciplina ter subido dado nesse meio-tempo.
+    """
     try:
         supabase = get_supabase()
         resp = (

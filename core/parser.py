@@ -25,7 +25,7 @@ from datetime import datetime
 from core.glossarios import (
     FAMILIAS_VP, FAMILIAS_EE, GLOSSARIO_VP, GLOSSARIO_EE,
     normalizar_coluna_ramal, RAMAIS_MRS, status_base_label,
-    GERENCIA_POR_CENTRO,
+    GERENCIA_POR_CENTRO, GERENCIAS_CONHECIDAS,
 )
 from core.score_engine import aplicar_score_dataframe
 
@@ -431,13 +431,16 @@ def _mapear_peso_prioridade(prio: str) -> int:
 
 def detectar_gerencia_nota(centro_trab, gerencia_origem=None) -> str | None:
     """
-    Detecta a gerência (SP ou VP) de UMA nota — permite subir planilhas com
-    notas de mais de uma gerência de uma vez só (o restante do pipeline
-    ainda recebe uma gerência única por chamada, via parâmetro 'gerencia').
+    Detecta a gerência de UMA nota — permite subir planilhas com notas de
+    mais de uma gerência de uma vez só (o restante do pipeline ainda
+    recebe uma gerência única por chamada, via parâmetro 'gerencia').
 
     Ordem de prioridade:
-      1) centro_trab → GERENCIA_POR_CENTRO (mapeamento oficial de centros)
-      2) fallback: texto de 'gerencia_origem' (ex.: "E.SP", "E.VP")
+      1) centro_trab → GERENCIA_POR_CENTRO (mapeamento oficial de centros,
+         hoje só cobre SP/VP no formato de planilha mais antigo)
+      2) fallback: último segmento de 'gerencia_origem' separado por "."
+         (cobre qualquer formato observado: "V.SP", "E.VP", "GEE.FN",
+         "V.RJ" etc. — o código da gerência é sempre o último pedaço)
 
     Retorna None quando não dá pra determinar com segurança — nesse caso
     o chamador usa a gerência selecionada manualmente no upload.
@@ -449,12 +452,9 @@ def detectar_gerencia_nota(centro_trab, gerencia_origem=None) -> str | None:
 
     if gerencia_origem and str(gerencia_origem).strip():
         texto = str(gerencia_origem).strip().upper()
-        tem_sp = "SP" in texto
-        tem_vp = "VP" in texto
-        if tem_sp and not tem_vp:
-            return "SP"
-        if tem_vp and not tem_sp:
-            return "VP"
+        sigla = texto.split(".")[-1]
+        if sigla in GERENCIAS_CONHECIDAS:
+            return sigla
 
     return None
 
