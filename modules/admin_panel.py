@@ -261,6 +261,37 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
                         admin_id=admin_logado.get("id"),
                     )
 
+            st.markdown("---")
+            st.markdown("**🗑️ Excluir Definitivamente**")
+            admin_logado = st.session_state.get("usuario", {})
+            if user_id_sel == admin_logado.get("id"):
+                st.caption("Você não pode excluir a própria conta logada.")
+            else:
+                st.warning(
+                    "⚠️ Apaga o usuário do banco de dados e do login (Supabase Auth) "
+                    "**para sempre** — diferente de desativar, não dá pra desfazer. Só "
+                    "funciona se esse usuário nunca fez upload nem tem log de acesso "
+                    "vinculado (senão a exclusão é bloqueada pra não perder histórico "
+                    "— desative em vez de excluir nesse caso).",
+                    icon="⚠️",
+                )
+                confirma_exclusao = st.text_input(
+                    'Digite "EXCLUIR" para habilitar o botão:',
+                    key=f"confirma_exclusao_{user_id_sel}",
+                )
+                if st.button(
+                    "🗑️ Excluir usuário definitivamente",
+                    type="primary",
+                    disabled=(confirma_exclusao.strip().upper() != "EXCLUIR"),
+                    key=f"btn_excluir_usuario_{user_id_sel}",
+                ):
+                    _excluir_usuario_definitivo(
+                        user_id=user_id_sel,
+                        email=row.get("email", ""),
+                        auth_user_id=row.get("auth_user_id"),
+                        admin_id=admin_logado.get("id"),
+                    )
+
 
 def _buscar_usuarios() -> pd.DataFrame:
     """Busca todos os usuários no banco."""
@@ -425,6 +456,60 @@ def _editar_usuario(
 
     except Exception as e:
         st.error(f"❌ Erro ao editar usuário: {e}")
+
+
+def _excluir_usuario_definitivo(
+    user_id: str,
+    email: str,
+    auth_user_id: str | None,
+    admin_id: str | None,
+) -> None:
+    """
+    Apaga o usuário de vez — da tabela 'usuarios' E do Supabase Auth.
+    Diferente de _editar_usuario(ativo=False), que é reversível.
+
+    Se o usuário já tiver upload/log vinculado, o DELETE em 'usuarios'
+    falha por causa da FK (uploads_historico.usuario_id é NOT NULL,
+    não aceita 'órfão') — nesse caso mostra um erro claro em vez do erro
+    cru do Postgres, orientando a desativar em vez de excluir.
+    """
+    try:
+        supabase = get_supabase()
+        supabase.table("usuarios").delete().eq("id", user_id).execute()
+    except Exception as e:
+        msg = str(e).lower()
+        if "foreign key" in msg or "violates" in msg or "23503" in msg:
+            st.error(
+                "❌ Esse usuário já tem upload ou log de acesso vinculado — "
+                "excluir apagaria esse histórico. Desative a conta em vez de "
+                "excluir (seção acima)."
+            )
+        else:
+            st.error(f"❌ Erro ao excluir usuário: {e}")
+        return
+
+    # Usuário apagado com sucesso da tabela — agora tenta apagar do Auth
+    # também (best-effort: se falhar aqui, o login já não funciona mesmo,
+    # porque get_usuario_by_email/matricula não vai mais achar a linha).
+    try:
+        admin = get_supabase_admin()
+        alvo_id = auth_user_id
+        if not alvo_id and email:
+            from database.queries import buscar_auth_user_id_por_email
+            alvo_id = buscar_auth_user_id_por_email(email)
+        if alvo_id:
+            admin.auth.admin.delete_user(alvo_id)
+    except Exception:
+        pass
+
+    _registrar_log(
+        acao="EXCLUIR_USUARIO",
+        detalhes={"user_id": user_id, "email": email},
+        admin_id=admin_id,
+    )
+
+    st.success("✅ Usuário excluído definitivamente.")
+    st.rerun()
 
 # endregion
 

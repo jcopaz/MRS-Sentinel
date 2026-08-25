@@ -35,5 +35,9 @@
 # 2.0.2, que expunha em texto se um e-mail/matrícula existe no sistema e
 # o erro cru do Supabase — voltou a mostrar só a mensagem genérica. MAJOR
 # pela própria regra acima (correção de segurança).
+# 3.1.0 (2026-08-25): Painel Admin ganha "Excluir Definitivamente" usuário
+# (apaga de usuarios + Supabase Auth, bloqueia com erro claro se o
+# usuário já tiver upload/log vinculado) — funcionalidade nova compatível
+# com o que já existia (desativar continua igual). MINOR.
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
