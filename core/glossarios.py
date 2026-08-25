@@ -140,6 +140,17 @@ NOME_GERENCIA = {
     "LC": "Gerência de Malha Linha do Centro",
 }
 
+# Nome curto/geográfico (sem "Gerência..." na frente) — usado no
+# cabeçalho de modules/gerencia_dashboard.py, formato "Gerência SP — {nome}".
+NOME_CURTO_GERENCIA = {
+    "SP": "São Paulo",
+    "VP": "Vale do Paraíba",
+    "FN": "Frente Norte",
+    "FS": "Frente Sul",
+    "RJ": "Rio de Janeiro",
+    "LC": "Linha do Centro",
+}
+
 # Gerência Geral de cada Gerência — usado na tela "Escolha a Gerência
 # Geral" (modules/selecionar_gg.py) pra agrupar as 6 gerências em 4 GGs.
 GERENCIA_GERAL_DE = {
@@ -151,11 +162,36 @@ GERENCIA_GERAL_DE = {
     "LC": "Linha do Centro",
 }
 
-# Gerências que já têm tela de dashboard ligada (modules/gerencia_sp.py,
-# gerencia_vp.py). As demais caem em modules/gerencia_placeholder.py até
-# ganharem tela própria — atualizar aqui é o ÚNICO lugar a mudar quando
-# isso acontecer (usado por selecionar_gg.py e pela sidebar em home.py).
-GERENCIAS_COM_DASHBOARD = {"SP", "VP"}
+# Coordenações de cada gerência (nomes reais — mesma estrutura semeada em
+# database/schema_organograma.sql) — usado no cabeçalho de
+# modules/gerencia_dashboard.py.
+COORDENACOES_POR_GERENCIA = {
+    "SP": ["Piaçaguera", "Paranapiacaba", "Jundiaí"],
+    "VP": ["Agulhas Negras", "Taubaté", "Pinheirinho"],
+    "FN": ["P1-07", "ZAS", "Belo Vale", "Brumadinho/Barreiro"],
+    "FS": ["São João del Rey", "Bom Jardim", "Quatis"],
+    "RJ": ["Pinheiral", "Brisamar", "Barra do Piraí", "Rocha Sobrinho"],
+    "LC": ["Conselheiro Lafaiete", "Barbacena", "Francisco Bernardino", "Barão de Juparanã"],
+}
+
+# Gradiente de cor de destaque (início, fim) de cada gerência no cabeçalho
+# do dashboard — SP/VP são as cores originais (não mudam); as 4 novas são
+# escolha nossa, só pra diferenciar visualmente. Troque à vontade.
+COR_GERENCIA = {
+    "SP": ("#1e3a5f", "#2d5a8e"),  # azul-marinho (original)
+    "VP": ("#0f4c35", "#1a6b4a"),  # verde-azulado (original)
+    "FN": ("#7c2d12", "#c2410c"),  # terracota
+    "FS": ("#713f12", "#b45309"),  # âmbar
+    "RJ": ("#4c1d95", "#6d28d9"),  # violeta
+    "LC": ("#1e293b", "#475569"),  # grafite
+}
+
+# Gerências que já têm tela de dashboard ligada
+# (modules/gerencia_dashboard.py::render_gerencia). Hoje são todas — mas
+# se uma gerência nova entrar em LISTA_GERENCIAS antes de ter dado real
+# pra mostrar, tirar ela daqui volta a cair em modules/gerencia_placeholder.py
+# (usado por selecionar_gg.py e pela sidebar em home.py).
+GERENCIAS_COM_DASHBOARD = set(LISTA_GERENCIAS)
 
 PATIOS_POR_CENTRO = {
     "CIPA": ["IPA", "IRS", "ICG", "IRG", "IBA", "ICZ",

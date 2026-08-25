@@ -37,8 +37,7 @@ st.set_page_config(
 from auth.session    import is_logged_in, init_session
 from auth.login      import render_login
 from modules.home    import render_sidebar
-from modules.gerencia_sp    import render_gerencia_sp
-from modules.gerencia_vp    import render_gerencia_vp
+from modules.gerencia_dashboard import render_gerencia
 from modules.gerencia_geral import render_gerencia_geral
 from modules.admin_panel    import render_admin_panel
 from modules.data_uploader  import render_upload
@@ -47,6 +46,7 @@ from modules.evolucao_malha import render_evolucao_malha
 from modules.visao_campo   import render_visao_campo
 from modules.selecionar_gg  import render_selecionar_gg
 from modules.gerencia_placeholder import render_gerencia_placeholder
+from core.glossarios import LISTA_GERENCIAS
 # endregion
 
 
@@ -191,8 +191,6 @@ def _rotear():
     pagina = st.session_state.get("pagina", "gerencia_sp")
 
     rotas = {
-        "gerencia_sp":    render_gerencia_sp,
-        "gerencia_vp":    render_gerencia_vp,
         "gerencia_geral": render_gerencia_geral,
         "selecionar_gg":  render_selecionar_gg,
         "evolucao":       render_evolucao_malha,
@@ -206,13 +204,18 @@ def _rotear():
         rotas[pagina]()
         return
 
-    # "gerencia_<sigla>" sem tela ligada ainda (ex.: gerencia_fn) — mostra
-    # "em construção" em vez de cair por engano no dashboard de SP.
+    # "gerencia_<sigla>" — dashboard genérico se a sigla for conhecida
+    # (modules/gerencia_dashboard.py); senão "em construção" em vez de
+    # cair por engano no dashboard de outra gerência.
     if pagina.startswith("gerencia_"):
-        render_gerencia_placeholder(pagina.removeprefix("gerencia_").upper())
+        sigla = pagina.removeprefix("gerencia_").upper()
+        if sigla in LISTA_GERENCIAS:
+            render_gerencia(sigla)
+        else:
+            render_gerencia_placeholder(sigla)
         return
 
-    render_gerencia_sp()
+    render_gerencia("SP")
 
 
 def main():

@@ -1,44 +1,33 @@
 # =============================================================================
-# modules/gerencia_sp.py — Tela da Gerência SP (São Paulo)
-# Sprint 3 — MRS Sentinel
+# modules/gerencia_dashboard.py — Tela genérica de Gerência
 #
-# Estrutura:
+# Substitui modules/gerencia_sp.py + gerencia_vp.py, que eram ~95% código
+# idêntico (só trocava "SP"↔"VP", cor e nome dos centros em ~15 pontos).
+# render_gerencia(sigla) atende qualquer gerência cadastrada em
+# core/glossarios.py (NOME_GERENCIA, COR_GERENCIA, COORDENACOES_POR_GERENCIA)
+# — adicionar uma gerência nova não pede mais um arquivo de tela novo.
+#
 #   Sessão 1: Imports & Config
-#   Sessão 2: Carregamento e preparação de dados
-#   Sessão 3: Sidebar — filtros e toggle VP/EE
-#   Sessão 4: Abas principais (5 abas)
-#     4.1 — Visão Geral (KPIs + Score)
-#     4.2 — Unifilar Dual
-#     4.3 — Heatmap Pátio × Família
-#     4.4 — Ranking Hot-spots
-#     4.5 — Série Temporal
+#   Sessão 2: Carregamento e filtros (genéricos por gerência)
+#   Sessão 3: render_gerencia(sigla) — 7 abas
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Config ======================
 import streamlit as st
 import pandas as pd
-import numpy as np
-from datetime import datetime, date
 
-# Componentes visuais reutilizáveis
 from components.kpi_card import render_kpi_cards
 from components.unifilar import render_unifilar_dual
 from components.heatmap import render_heatmap, render_ranking, render_serie_temporal
 from components.filtros import render_filtros_cascata, aplicar_filtros_atributos
 from components.visao_gerencial import render_visao_gerencial
 
-# Motor de score e indicadores
-from core.score_engine import render_score_sidebar, calcular_score_dataframe
-
-# Glossários e normalização
+from core.score_engine import render_score_sidebar, calcular_score_dataframe, render_painel_transparencia
 from core.glossarios import (
-    normalizar_coluna_ramal,
-    nome_ramal,
-    RAMAIS_MRS,
+    normalizar_coluna_ramal, NOME_CURTO_GERENCIA, COR_GERENCIA, COORDENACOES_POR_GERENCIA,
 )
 
-# Queries do banco
-from database.queries import get_notas_cached, get_kpis_gerencia, get_ranking_hotspots
+from database.queries import get_notas_cached
 
 # endregion
 
@@ -46,16 +35,17 @@ from database.queries import get_notas_cached, get_kpis_gerencia, get_ranking_ho
 # region ====================== SESSÃO 2: Funções auxiliares ====================
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _carregar_dados(disciplina_sel: str) -> pd.DataFrame:
+def _carregar_dados(gerencia: str, disciplina_sel: str) -> pd.DataFrame:
     """
-    Carrega dados do Supabase para a gerência SP.
-    Aplica normalização de aliases (ASP→VSU) antes de qualquer uso.
+    Carrega dados do Supabase para uma gerência. Aplica normalização de
+    aliases (ASP→VSU) antes de qualquer uso.
 
-    Cacheado por disciplina_sel (5 min) — sem isso, trocar o toggle
-    VP/EE/VP+EE refazia a concatenação + normalização do zero a cada
-    clique, mesmo quando get_notas_cached já tinha os dados em cache.
+    Cacheado por (gerencia, disciplina_sel) — 5 min. Sem isso, trocar o
+    toggle VP/EE/VP+EE refazia a concatenação + normalização do zero a
+    cada clique, mesmo com get_notas_cached já em cache.
 
     Args:
+        gerencia: sigla da gerência (SP, VP, FN, FS, RJ, LC, ...)
         disciplina_sel: 'VP', 'EE' ou 'VP+EE'
 
     Returns:
@@ -66,13 +56,13 @@ def _carregar_dados(disciplina_sel: str) -> pd.DataFrame:
     # get_notas_cached (st.cache_data) já retorna uma cópia isolada do cache
     # a cada chamada — seguro mutar direto, sem custo extra de memória.
     if disciplina_sel in ("VP", "VP+EE"):
-        df_vp = get_notas_cached("SP", "VP")
+        df_vp = get_notas_cached(gerencia, "VP")
         if not df_vp.empty:
             df_vp["disciplina_label"] = "VP"
             frames.append(df_vp)
 
     if disciplina_sel in ("EE", "VP+EE"):
-        df_ee = get_notas_cached("SP", "EE")
+        df_ee = get_notas_cached(gerencia, "EE")
         if not df_ee.empty:
             df_ee["disciplina_label"] = "EE"
             frames.append(df_ee)
@@ -85,11 +75,8 @@ def _carregar_dados(disciplina_sel: str) -> pd.DataFrame:
     # ⭐ ESSENCIAL: normaliza aliases antes de qualquer agrupamento
     df = normalizar_coluna_ramal(df, "ramal")
 
-    # Garante coluna de data como datetime
     if "data_nota" in df.columns:
         df["data_nota"] = pd.to_datetime(df["data_nota"], errors="coerce")
-
-    # Garante lead_time numérico
     if "lead_time_dias" in df.columns:
         df["lead_time_dias"] = pd.to_numeric(df["lead_time_dias"], errors="coerce")
 
@@ -99,34 +86,31 @@ def _carregar_dados(disciplina_sel: str) -> pd.DataFrame:
 def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     """
     Aplica os filtros retornados pelo componente de filtros em cascata.
-    Defensivo contra colunas ausentes e listas vazias.
+    Defensivo contra colunas ausentes e listas vazias. Não depende de
+    gerência — é a mesma lógica pra qualquer uma.
     """
     if df.empty:
         return df
 
-    # Filtro de Centro de Trabalho
     centros = filtros.get("centros", [])
     if centros and "centro_trab" in df.columns:
         df = df[df["centro_trab"].isin(centros)]
 
-    # Filtro de Ramal (siglas canônicas)
     ramais = filtros.get("ramais", [])
     if ramais and "ramal" in df.columns:
         df = df[df["ramal"].isin(ramais)]
 
-    # Filtro de Trecho
     trechos = filtros.get("trechos", [])
     if trechos and "trecho" in df.columns:
         df = df[df["trecho"].isin(trechos)]
 
-    # Filtro de Pátio (origem)
     patios = filtros.get("patios", [])
     if patios and "origem" in df.columns:
         df = df[df["origem"].isin(patios)]
 
-    # Filtro de KM Início/Fim (mesmo eixo do gráfico Unifilar).
-    # Só filtra quando o usuário estreitou o intervalo (filtro_km_ativo) —
-    # senão notas sem km_real (fora da cobertura do KMZ) seriam descartadas.
+    # Filtro de KM Início/Fim (mesmo eixo do gráfico Unifilar). Só filtra
+    # quando o usuário estreitou o intervalo (filtro_km_ativo) — senão
+    # notas sem km_real (fora da cobertura do KMZ) seriam descartadas.
     if filtros.get("filtro_km_ativo") and "km_real" in df.columns:
         col_km = pd.to_numeric(df["km_real"], errors="coerce")
         km_ini = filtros.get("km_ini")
@@ -136,8 +120,7 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         if km_fim is not None:
             df = df[col_km <= km_fim]
 
-    # Filtro de Abertura da Nota
-    # Usa dt.date() para evitar bug de meia-noite (pd.Timestamp corta notas do dia)
+    # Filtro de Abertura da Nota — dt.date() evita bug de meia-noite
     data_ab_ini = filtros.get("data_abertura_ini") or filtros.get("data_ini")
     data_ab_fim = filtros.get("data_abertura_fim") or filtros.get("data_fim")
     if "data_nota" in df.columns:
@@ -147,9 +130,8 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         if data_ab_fim:
             df = df[col.dt.date <= data_ab_fim]
 
-    # Filtro de Encerramento da Nota (opcional — coluna pode não existir)
-    # Só entra em ação se o usuário estreitou o período (filtro_enc_ativo),
-    # senão notas ainda em aberto (sem data_encerramento) seriam descartadas.
+    # Filtro de Encerramento — só entra em ação se o usuário estreitou o
+    # período (filtro_enc_ativo), senão notas ainda em aberto seriam descartadas.
     data_enc_ini = filtros.get("data_enc_ini")
     data_enc_fim = filtros.get("data_enc_fim")
     if "data_encerramento" in df.columns and filtros.get("filtro_enc_ativo"):
@@ -159,8 +141,7 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         if data_enc_fim:
             df = df[col_enc.dt.date <= data_enc_fim]
 
-    # Filtros de atributo: Prioridade, Família, Tipo de inspeção, Status Base
-    # (Sprint 4.5 — recuperados do app1.py)
+    # Prioridade, Família, Tipo de inspeção, Status Base
     df = aplicar_filtros_atributos(df, filtros)
 
     return df.copy()
@@ -168,28 +149,31 @@ def _aplicar_filtros(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
 # endregion
 
 
-# region ====================== SESSÃO 3: Função principal =====================
+# region ====================== SESSÃO 3: render_gerencia(sigla) ================
 
-def render_gerencia_sp():
+def render_gerencia(sigla: str) -> None:
     """
-    Ponto de entrada da tela da Gerência SP.
-    Chamado diretamente pelo app.py quando o usuário navega para esta gerência.
+    Ponto de entrada da tela de uma Gerência. Chamado por app.py com a
+    sigla certa (ex.: render_gerencia("SP"), render_gerencia("FN")).
     """
+    nome_curto = NOME_CURTO_GERENCIA.get(sigla, sigla)
+    cor_ini, cor_fim = COR_GERENCIA.get(sigla, ("#1e3a5f", "#2d5a8e"))
+    coordenacoes = " · ".join(COORDENACOES_POR_GERENCIA.get(sigla, []))
 
     # ── Cabeçalho ──────────────────────────────────────────────────────────────
     st.markdown(
-        """
+        f"""
         <div style='
-            background: linear-gradient(135deg, #1e3a5f 0%, #2d5a8e 100%);
+            background: linear-gradient(135deg, {cor_ini} 0%, {cor_fim} 100%);
             padding: 20px 24px;
             border-radius: 12px;
             margin-bottom: 20px;
         '>
             <h2 style='color: #ffb000; margin: 0; font-size: 1.6rem;'>
-                🏭 Gerência SP — São Paulo
+                🏭 Gerência {sigla} — {nome_curto}
             </h2>
             <p style='color: #cbd5e1; margin: 4px 0 0 0; font-size: 0.9rem;'>
-                Centros: CIPA · CIPG · CIJN &nbsp;|&nbsp; Disciplinas: VP + EE integradas
+                Coordenações: {coordenacoes} &nbsp;|&nbsp; Disciplinas: VP + EE integradas
             </p>
         </div>
         """,
@@ -199,32 +183,28 @@ def render_gerencia_sp():
     # ── Sidebar — Toggle VP/EE e Score ────────────────────────────────────────
     with st.sidebar:
         st.markdown("---")
-        st.markdown("### 🔧 Gerência SP")
+        st.markdown(f"### 🔧 Gerência {sigla}")
 
-        # Toggle de disciplina — key= persiste a escolha ao navegar pra
-        # outra tela e voltar (antes resetava sempre pro padrão)
+        # key= persiste a escolha ao navegar pra outra tela e voltar
         disciplina_sel = st.radio(
             "📊 Disciplina",
             options=["VP+EE", "VP", "EE"],
-            key="disciplina_sp",
+            key=f"disciplina_{sigla.lower()}",
             horizontal=False,
             help="VP = Via Permanente · EE = Eletroeletrônica · VP+EE = Ambas",
         )
 
         st.markdown("---")
-
-        # Configuração de score (retorna ScoreConfig)
-        score_cfg = render_score_sidebar(gerencia="SP")
-
+        score_cfg = render_score_sidebar(gerencia=sigla)
         st.markdown("---")
 
     # ── Carrega dados ─────────────────────────────────────────────────────────
-    with st.spinner("⏳ Carregando dados da Gerência SP..."):
-        df_raw = _carregar_dados(disciplina_sel)
+    with st.spinner(f"⏳ Carregando dados da Gerência {sigla}..."):
+        df_raw = _carregar_dados(sigla, disciplina_sel)
 
     if df_raw.empty:
         st.warning(
-            "⚠️ Nenhum dado encontrado para a Gerência SP. "
+            f"⚠️ Nenhum dado encontrado para a Gerência {sigla}. "
             "Solicite ao assistente que faça o upload das planilhas.",
             icon="📋",
         )
@@ -233,7 +213,7 @@ def render_gerencia_sp():
     # ── Filtros em cascata (sidebar) ──────────────────────────────────────────
     with st.sidebar:
         st.markdown("### 🔍 Filtros")
-        filtros = render_filtros_cascata(df_raw, gerencia="SP", disciplina_sel=disciplina_sel)
+        filtros = render_filtros_cascata(df_raw, gerencia=sigla, disciplina_sel=disciplina_sel)
 
     df = _aplicar_filtros(df_raw, filtros)
 
@@ -241,8 +221,7 @@ def render_gerencia_sp():
         st.info("ℹ️ Nenhuma nota encontrada com os filtros aplicados.")
         return
 
-    # ── Calcula score no DataFrame filtrado ───────────────────────────────────
-    # Feito aqui para que todas as abas usem o mesmo df com score atualizado
+    # ── Score no DataFrame filtrado (todas as abas usam o mesmo df) ──────────
     df = calcular_score_dataframe(df, score_cfg)
 
     # ── Contador rápido na sidebar ────────────────────────────────────────────
@@ -267,34 +246,17 @@ def render_gerencia_sp():
         "🔌 Inteligência EE",
     ])
 
-    # endregion
-
-    # region =================== SESSÃO 4.1: Aba — Visão Geral (KPIs) ==========
     with aba_kpi:
-        st.markdown("#### 📊 KPIs da Gerência SP")
-
-        # KPIs premium com sparkline
-        render_kpi_cards(df, gerencia="SP", disciplina=disciplina_sel)
-
-        # Separador
+        st.markdown(f"#### 📊 KPIs da Gerência {sigla}")
+        render_kpi_cards(df, gerencia=sigla, disciplina=disciplina_sel)
         st.markdown("---")
-
-        # Painel de transparência do score (explica pesos ativos)
-        from core.score_engine import render_painel_transparencia
         render_painel_transparencia(score_cfg)
 
-    # endregion
-
-    # region =================== SESSÃO 4.1B: Aba — Visão Gerencial ============
     with aba_ger:
-        render_visao_gerencial(df, gerencia="SP")
+        render_visao_gerencial(df, gerencia=sigla)
 
-    # endregion
-
-    # region =================== SESSÃO 4.2: Aba — Unifilar Dual ===============
     with aba_unif:
         st.markdown("#### 🗺️ Unifilar Dual — VP + EE por Ramal")
-
         col_info, col_legenda = st.columns([3, 1])
         with col_info:
             st.caption(
@@ -307,23 +269,15 @@ def render_gerencia_sp():
                 "<small>🔴 Crítico &nbsp; 🟡 Alerta &nbsp; 🟢 Normal</small>",
                 unsafe_allow_html=True,
             )
+        render_unifilar_dual(df, gerencia=sigla)
 
-        render_unifilar_dual(df, gerencia="SP")
-
-    # endregion
-
-    # region =================== SESSÃO 4.3: Aba — Heatmap ====================
     with aba_heat:
         st.markdown("#### 🌡️ Heatmap — Pátio × Família de Defeito")
         st.caption("Intensidade = score médio das notas naquela combinação Pátio × Família")
-        render_heatmap(df, gerencia="SP")
+        render_heatmap(df, gerencia=sigla)
 
-    # endregion
-
-    # region =================== SESSÃO 4.4: Aba — Ranking ====================
     with aba_rank:
         st.markdown("#### 🏆 Ranking de Hot-spots")
-
         col_n, col_ord = st.columns([1, 2])
         with col_n:
             top_n = st.selectbox("Top N", [5, 10, 15, 20], index=1)
@@ -333,15 +287,10 @@ def render_gerencia_sp():
                 ["Score Total", "Qtd. Notas", "Lead Time Médio (dias)"],
                 index=0,
             )
+        render_ranking(df, top_n=top_n, ordem=ordem, gerencia=sigla)
 
-        render_ranking(df, top_n=top_n, ordem=ordem, gerencia="SP")
-
-    # endregion
-
-    # region =================== SESSÃO 4.5: Aba — Série Temporal =============
     with aba_temp:
         st.markdown("#### 📈 Evolução Temporal")
-
         col_gran, col_met = st.columns(2)
         with col_gran:
             granularidade = st.selectbox(
@@ -355,25 +304,16 @@ def render_gerencia_sp():
                 ["Volume de Notas", "Score Médio", "Lead Time Médio"],
                 index=0,
             )
+        render_serie_temporal(df, granularidade=granularidade, metrica=metrica, gerencia=sigla)
 
-        render_serie_temporal(
-            df,
-            granularidade=granularidade,
-            metrica=metrica,
-            gerencia="SP",
-        )
-
-    # endregion
-
-    # region =================== SESSÃO 4.6: Aba — Inteligência EE (RASF) ======
     with aba_ee:
         from components.inteligencia_ee import render_inteligencia_ee
         from database.queries_rasf import get_rasf_cached
         from database.queries_baseline import get_baseline_cached
 
         with st.spinner("⏳ Carregando base RASF (Eletroeletrônica)..."):
-            df_rasf = get_rasf_cached("SP")
-            df_base_2025 = get_baseline_cached("SP")   # camada YoY (Sprint 7)
-        render_inteligencia_ee(df_rasf, escopo="SP", df_baseline=df_base_2025)
+            df_rasf = get_rasf_cached(sigla)
+            df_base_2025 = get_baseline_cached(sigla)   # camada YoY (Sprint 7)
+        render_inteligencia_ee(df_rasf, escopo=sigla, df_baseline=df_base_2025)
 
-    # endregion
+# endregion

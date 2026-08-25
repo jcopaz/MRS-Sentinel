@@ -1993,8 +1993,8 @@ def render_inteligencia_ee(df: pd.DataFrame, escopo: str = "SP", df_baseline: pd
         )
         return
 
-    rotulo = {"SP": "Gerência SP", "VP": "Gerência VP",
-              "GLOBAL": "Visão Global (SP + VP)"}.get(escopo, escopo)
+    from core.glossarios import NOME_GERENCIA
+    rotulo = "Visão Global (SP + VP)" if escopo == "GLOBAL" else NOME_GERENCIA.get(escopo, escopo)
     st.markdown(
         f"<div style='color:#6b7280;font-size:0.85rem;margin-bottom:10px;'>"
         f"🔌 Inteligência de Falhas de Eletroeletrônica · <b>{rotulo}</b> · "
