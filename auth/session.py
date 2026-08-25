@@ -56,7 +56,7 @@ def clear_session():
     Limpa todos os dados de sessão do usuário (logout).
     Preserva apenas chaves de UI que não são sensíveis.
     """
-    keys_to_clear = ["usuario", "logged_in", "pagina", "gerencia_ativa"]
+    keys_to_clear = ["usuario", "logged_in", "pagina", "gerencia_ativa", "gg_ativa"]
     for key in keys_to_clear:
         st.session_state.pop(key, None)
 
@@ -86,6 +86,10 @@ def init_session():
         "logged_in":       False,
         "pagina":          "login",
         "gerencia_ativa":  None,
+        # Gerência Geral escolhida em modules/selecionar_gg.py — filtra os
+        # botões de gerência da sidebar pra só mostrar as da GG ativa (ver
+        # modules/home.py::_render_nav_buttons). None = ainda não escolheu.
+        "gg_ativa":        None,
         # Toggle "Disciplina" (VP+EE/VP/EE) de cada tela de gerência —
         # com key=, o widget persiste sozinho ao navegar pra outra tela e
         # voltar (ver modules/gerencia_sp.py e gerencia_vp.py).

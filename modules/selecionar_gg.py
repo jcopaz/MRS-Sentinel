@@ -40,6 +40,10 @@ def render_selecionar_gg() -> None:
             tem_dashboard = any(s in GERENCIAS_COM_DASHBOARD for s in siglas)
             rotulo = f"🏭 Gerência Geral {nome_gg}" if tem_dashboard else f"🚧 Gerência Geral {nome_gg}"
             if st.button(rotulo, key=f"btn_gg_{nome_gg}", use_container_width=True):
+                # Guarda a GG escolhida — home.py::_render_nav_buttons usa
+                # isso pra só mostrar na sidebar as gerências dessa GG.
+                st.session_state["gg_ativa"] = nome_gg
+
                 # "São Paulo" tem visão combinada (SP+VP) pronta em
                 # gerencia_geral.py — as demais GGs ainda não têm essa
                 # combinação, então cai na 1ª gerência dela (mostra o

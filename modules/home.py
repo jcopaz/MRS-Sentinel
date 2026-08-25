@@ -8,7 +8,7 @@ import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
 from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis
 from database.queries import log_acesso, contar_alertas_novos
-from core.glossarios import GERENCIAS_COM_DASHBOARD
+from core.glossarios import GERENCIAS_COM_DASHBOARD, GERENCIA_GERAL_DE
 
 # Logo animado — mp4 em vez de gif (mesmo conteúdo, muito mais leve: H.264
 # comprime bem melhor que a paleta do GIF). Servido via static file serving
@@ -201,7 +201,26 @@ def _render_nav_buttons():
         ativo_gg = "🔵 " if pagina_atual == "selecionar_gg" else ""
         nav_items.append(("GG", f"{ativo_gg}🗺️  Trocar Gerência Geral", "selecionar_gg"))
 
-    for sigla in gerencias_visiveis():
+    # Admin/global só vê os botões de gerência DEPOIS de escolher uma
+    # Gerência Geral em modules/selecionar_gg.py, e só as gerências
+    # daquela GG (antes mostrava as 6 juntas, de todas as GGs, o tempo
+    # todo). Quem tem gerência fixa (assistente/usuário) não passa por
+    # essa escolha — gerencias_visiveis() já devolve só a dele mesmo.
+    siglas_ger = gerencias_visiveis()
+    if get_gerencia() is None:
+        gg_ativa = st.session_state.get("gg_ativa")
+        if not gg_ativa and pagina_atual.startswith("gerencia_"):
+            # Sessão antiga/F5 caiu direto numa tela de gerência sem passar
+            # pelo seletor — infere a GG a partir da tela atual em vez de
+            # esconder a navegação (senão o admin fica sem sair dali).
+            sigla_atual = pagina_atual.removeprefix("gerencia_").upper()
+            gg_ativa = GERENCIA_GERAL_DE.get(sigla_atual)
+            if pagina_atual == "gerencia_geral":
+                gg_ativa = "São Paulo"
+            st.session_state["gg_ativa"] = gg_ativa
+        siglas_ger = [s for s in siglas_ger if GERENCIA_GERAL_DE.get(s) == gg_ativa] if gg_ativa else []
+
+    for sigla in siglas_ger:
         pagina_ger = f"gerencia_{sigla.lower()}"
         ativo_ger = "🔵 " if pagina_atual == pagina_ger else ""
         # 🚧 pras gerências sem dashboard ligado ainda — evita que o
