@@ -17,6 +17,7 @@ import pandas as pd
 from database.client  import get_supabase, get_supabase_admin
 from database.queries import get_uploads_historico, gerar_email_sintetico
 from core.glossarios   import LISTA_GERENCIAS
+from core.versao       import APP_VERSION
 
 # region ====================== SESSÃO 1: Guard de acesso =====================
 
@@ -678,12 +679,12 @@ def _render_aba_configuracoes() -> None:
     # ── 4.5: Informações do sistema ───────────────────────────────────────────
     with st.expander("ℹ️ Informações do Sistema", expanded=False):
         st.markdown(
-            """
+            f"""
             | Item | Valor |
             |---|---|
             | **App** | MRS Sentinel |
             | **Stack** | Streamlit + Supabase + ECharts + Plotly |
-            | **Versão** | v1.0 — Sprint 9 (Mobile First, consolidado S5–S9) |
+            | **Versão** | v{APP_VERSION} |
             | **Perfis** | Admin / Assistente / Usuário |
             | **Banco** | Supabase (PostgreSQL) |
             """

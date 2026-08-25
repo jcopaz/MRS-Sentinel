@@ -1,0 +1,25 @@
+# core/versao.py — Versão única do MRS Sentinel (SemVer: MAJOR.MINOR.PATCH)
+#
+# Fonte única — antes existiam 2 constantes "APP_VERSION" hardcoded e
+# desincronizadas (auth/login.py e modules/home.py) mais uma terceira
+# string solta em modules/admin_panel.py, nenhuma delas mudando a cada
+# release. Daqui pra frente, todo commit que muda comportamento do app
+# bump essa versão — mesmo critério já adotado no Gestão_OS/SGO
+# Eletroeletrônica (regra de mercado, mas com MAJOR mais abrangente que o
+# SemVer clássico):
+#   PATCH: correção pontual sem mudar comportamento/fluxo — bugfix, texto,
+#          cor, espaçamento, digitação.
+#   MINOR: funcionalidade nova mas compatível com o que já existia — toggle,
+#          filtro, opção nova num formulário já existente.
+#   MAJOR: tela/aba nova, reorganização de fluxo, correção de segurança,
+#          correção de integridade de dado, ou mudança de schema de banco —
+#          qualquer coisa que mude COMO uma funcionalidade inteira funciona.
+#   Se um commit mistura tipos, sobe pelo nível MAIS ALTO presente.
+#
+# 2.0.0 (2026-08-25): sessão com telas novas (seleção de Gerência Geral,
+# dashboard genérico pras 4 gerências novas), 4 schemas de banco novos,
+# correção de bug de sessão Auth compartilhada entre usuários e correção
+# de integridade de dado (notas de Barão de Juparanã caindo na gerência
+# errada) — MAJOR pela própria regra acima.
+
+APP_VERSION = "2.0.0"

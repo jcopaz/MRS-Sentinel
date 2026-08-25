@@ -12,9 +12,10 @@
 #   3. Adicione o botão em modules/home.py → _render_nav_buttons()
 
 import streamlit as st
+from core.versao import APP_VERSION  # módulo sem nenhuma chamada st.* — seguro importar antes do set_page_config
 
 # region ====================== SESSÃO 1: Configuração da Página ======================
-# ⚠️ st.set_page_config DEVE ser a PRIMEIRA chamada Streamlit — antes de qualquer import
+# ⚠️ st.set_page_config DEVE ser a PRIMEIRA chamada Streamlit — antes de qualquer OUTRA chamada st.*
 st.set_page_config(
     page_title="MRS Sentinel",
     page_icon="🚂",
@@ -26,7 +27,7 @@ st.set_page_config(
         "About": (
             "**MRS Sentinel** — Plataforma de Inteligência de Manutenção da Malha\n\n"
             "MRS Logística · Gerência de Via Permanente e Obras\n\n"
-            "v1.0.0 · Sprint 1 — Fundação"
+            f"v{APP_VERSION}"
         ),
     }
 )

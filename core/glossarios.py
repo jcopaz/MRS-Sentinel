@@ -131,6 +131,17 @@ GERENCIAS_CONHECIDAS = set(LISTA_GERENCIAS)
 # detecção de gerência do upload (core/parser.py, core/parser_rasf.py).
 GERENCIA_CODIGO_LEGADO = {"MG": "LC"}
 
+# Coordenações que mudaram de Gerência dona SEM o código do work center
+# mudar junto — diferente do caso acima (Gerência inteira renomeada), aqui
+# só a coordenação específica migrou. Ex. confirmado: Barão de Juparanã
+# (código de trabalho sempre foi "V.RJ.FBJ") migrou de Rio de Janeiro pra
+# Linha do Centro, mas a coluna "Gerência" do SAP continua vindo "V.RJ"
+# pra ela — GERENCIA_CODIGO_LEGADO não pega esse caso porque não é a
+# Gerência inteira que mudou de código, é só esta coordenação. Chave =
+# último segmento do código de centro de trabalho (ex.: "FBJ" de
+# "V.RJ.FBJ"), valor = sigla da gerência dona hoje.
+COORDENACAO_REALOCADA = {"FBJ": "LC"}
+
 NOME_GERENCIA = {
     "SP": "Gerência de Malha SP",
     "VP": "Gerência de Malha VP",

@@ -9,6 +9,7 @@ from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pag
 from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis
 from database.queries import log_acesso, contar_alertas_novos
 from core.glossarios import GERENCIAS_COM_DASHBOARD, GERENCIA_GERAL_DE
+from core.versao import APP_VERSION
 
 # Logo animado — mp4 em vez de gif (mesmo conteúdo, muito mais leve: H.264
 # comprime bem melhor que a paleta do GIF). Servido via static file serving
@@ -18,7 +19,6 @@ from core.glossarios import GERENCIAS_COM_DASHBOARD, GERENCIA_GERAL_DE
 LOGO_VIDEO_PATH = Path(__file__).resolve().parent.parent / "static" / "Sentinel_logo.mp4"
 LOGO_VIDEO_URL = "app/static/Sentinel_logo.mp4"
 LOGO_WIDTH = 240  # px — mesmo tamanho usado na tela de Login (auth/login.py)
-APP_VERSION = "1.0"  # versão exibida abaixo do logo (manter igual em auth/login.py)
 
 
 # region ====================== SESSÃO 1: CSS da Sidebar ======================
@@ -351,11 +351,10 @@ def _render_logout():
             clear_session()
             st.rerun()
 
-    # Versão no rodapé
-    versao = st.secrets.get("app", {}).get("versao", "1.0.0")
+    # Versão no rodapé — só de core/versao.py (ver comentário em auth/login.py)
     st.sidebar.markdown(
         f"<div style='text-align:center; padding:0.5rem; "
-        f"font-size:0.7rem; color:rgba(255,255,255,0.25);'>v{versao}</div>",
+        f"font-size:0.7rem; color:rgba(255,255,255,0.25);'>v{APP_VERSION}</div>",
         unsafe_allow_html=True
     )
 

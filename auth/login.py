@@ -13,6 +13,7 @@ from database.queries import (
     log_acesso,
 )
 from auth.session import set_usuario, set_pagina
+from core.versao import APP_VERSION
 
 # Logo animado — mp4 em vez de gif (mesmo conteúdo, muito mais leve: H.264
 # comprime bem melhor que a paleta do GIF). Servido via static file serving
@@ -22,7 +23,6 @@ from auth.session import set_usuario, set_pagina
 LOGO_VIDEO_PATH = Path(__file__).resolve().parent.parent / "static" / "Sentinel_logo.mp4"
 LOGO_VIDEO_URL = "app/static/Sentinel_logo.mp4"
 LOGO_WIDTH = 240  # px — mesmo tamanho usado na sidebar (modules/home.py)
-APP_VERSION = "1.0"  # versão exibida abaixo do logo (manter igual em modules/home.py)
 
 
 # region ====================== SESSÃO 1: CSS da Tela de Login ======================
@@ -157,12 +157,11 @@ def _render_card_fim():
     pass
 
 def _render_footer():
-    try:
-        versao = st.secrets.get("app", {}).get("versao", "1.0.0")
-    except Exception:
-        versao = "1.0.0"
+    # Versão vem só de core/versao.py — sem fallback pra secrets.toml, pra
+    # não correr o risco de mostrar um número desatualizado que ninguém
+    # lembrou de sincronizar com o código de verdade.
     html = f"""<div style="text-align:center;margin-top:2rem;color:#9ca3af;font-size:0.8rem;">
-        MRS Logística &nbsp;&bull;&nbsp; v{versao} &nbsp;&bull;&nbsp; Via Permanente
+        MRS Logística &nbsp;&bull;&nbsp; v{APP_VERSION} &nbsp;&bull;&nbsp; Via Permanente
     </div>"""
     try:
         st.html(html)

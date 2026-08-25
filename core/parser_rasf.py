@@ -213,12 +213,25 @@ def status_consenso_origem(valor) -> str:
     return "Pendente"
 
 
-def _mapear_gerencia(valor) -> str | None:
+def _mapear_gerencia(valor, centro_trab=None) -> str | None:
     """GEE.SP -> SP, GEE.VP -> VP, GEE.FN -> FN etc. Código legado (GEE.MG ->
-    LC) traduzido via GERENCIA_CODIGO_LEGADO. Desconhecido/None -> None."""
+    LC) traduzido via GERENCIA_CODIGO_LEGADO. Desconhecido/None -> None.
+
+    centro_trab (opcional): quando informado, checa antes se a coordenação
+    é uma das que mudou de Gerência dona sem o código de trabalho mudar
+    junto (ex.: Barão de Juparanã — ver COORDENACAO_REALOCADA em
+    core/glossarios.py) — tem prioridade sobre o valor de 'valor' (a
+    coluna Gerência bruta do RASF, que nesses casos continua apontando
+    pra Gerência antiga)."""
+    from core.glossarios import GERENCIAS_CONHECIDAS, GERENCIA_CODIGO_LEGADO, COORDENACAO_REALOCADA
+
+    if centro_trab:
+        coord_sigla = str(centro_trab).strip().upper().split(".")[-1]
+        if coord_sigla in COORDENACAO_REALOCADA:
+            return COORDENACAO_REALOCADA[coord_sigla]
+
     if valor is None:
         return None
-    from core.glossarios import GERENCIAS_CONHECIDAS, GERENCIA_CODIGO_LEGADO
     sigla = str(valor).strip().upper().split(".")[-1]
     if sigla in GERENCIAS_CONHECIDAS:
         return sigla
@@ -310,9 +323,16 @@ def processar_rasf(
     else:
         df["thp_min"] = 0.0
 
-    # Gerência canônica + disciplina
-    df["gerencia"] = df.get("_gerencia_raw").map(_mapear_gerencia) \
-        if "_gerencia_raw" in df.columns else None
+    # Gerência canônica + disciplina — passa centro_trab junto pra pegar
+    # coordenação que mudou de dono sem o código de trabalho mudar (ver
+    # docstring de _mapear_gerencia)
+    if "_gerencia_raw" in df.columns:
+        centros = df["centro_trab"] if "centro_trab" in df.columns else [None] * len(df)
+        df["gerencia"] = [
+            _mapear_gerencia(g, c) for g, c in zip(df["_gerencia_raw"], centros)
+        ]
+    else:
+        df["gerencia"] = None
     df["disciplina"] = "EE"
 
     # Flags booleanas

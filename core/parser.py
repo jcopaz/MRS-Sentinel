@@ -438,7 +438,12 @@ def detectar_gerencia_nota(centro_trab, gerencia_origem=None) -> str | None:
     Ordem de prioridade:
       1) centro_trab → GERENCIA_POR_CENTRO (mapeamento oficial de centros,
          hoje só cobre SP/VP no formato de planilha mais antigo)
-      2) fallback: último segmento de 'gerencia_origem' separado por "."
+      2) centro_trab → COORDENACAO_REALOCADA: coordenação que migrou de
+         Gerência dona SEM o código de trabalho mudar junto (ex.: Barão
+         de Juparanã continua "V.RJ.FBJ" mas pertence a Linha do Centro
+         hoje) — checado ANTES do passo 3 porque é mais específico que o
+         código da Gerência inteira.
+      3) fallback: último segmento de 'gerencia_origem' separado por "."
          (cobre qualquer formato observado: "V.SP", "E.VP", "GEE.FN",
          "V.RJ" etc. — o código da gerência é sempre o último pedaço),
          com tradução de código legado (ex.: "MG" → "LC") via
@@ -451,6 +456,9 @@ def detectar_gerencia_nota(centro_trab, gerencia_origem=None) -> str | None:
         centro = str(centro_trab).strip().upper()
         if centro in GERENCIA_POR_CENTRO:
             return GERENCIA_POR_CENTRO[centro]
+        coord_sigla = centro.split(".")[-1]
+        if coord_sigla in COORDENACAO_REALOCADA:
+            return COORDENACAO_REALOCADA[coord_sigla]
 
     if gerencia_origem and str(gerencia_origem).strip():
         texto = str(gerencia_origem).strip().upper()

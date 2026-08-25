@@ -27,10 +27,14 @@ import pandas as pd
 try:
     from core.parser_rasf import _mapear_gerencia, _sim_nao
 except Exception:  # pragma: no cover - fallback defensivo
-    def _mapear_gerencia(valor):
+    def _mapear_gerencia(valor, centro_trab=None):
+        from core.glossarios import GERENCIAS_CONHECIDAS, GERENCIA_CODIGO_LEGADO, COORDENACAO_REALOCADA
+        if centro_trab:
+            coord_sigla = str(centro_trab).strip().upper().split(".")[-1]
+            if coord_sigla in COORDENACAO_REALOCADA:
+                return COORDENACAO_REALOCADA[coord_sigla]
         if valor is None:
             return None
-        from core.glossarios import GERENCIAS_CONHECIDAS, GERENCIA_CODIGO_LEGADO
         sigla = str(valor).strip().upper().split(".")[-1]
         if sigla in GERENCIAS_CONHECIDAS:
             return sigla
