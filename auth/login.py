@@ -5,7 +5,7 @@
 from pathlib import Path
 
 import streamlit as st
-from database.client import criar_cliente_auth_temporario
+from database.client import criar_cliente_auth_temporario, fechar_cliente_temporario
 from database.queries import (
     get_usuario_by_email,
     get_usuario_by_matricula,
@@ -206,8 +206,10 @@ def _autenticar(identificador: str, senha: str) -> tuple[bool, str]:
     # Passo 2: autenticar via Supabase Auth com o e-mail (real ou sintético).
     # Client descartável (não o singleton compartilhado get_supabase()) —
     # ver docstring de criar_cliente_auth_temporario em database/client.py.
+    # SEMPRE fecha no finally — sem isso, cada tentativa de login deixa
+    # uma conexão HTTP aberta no processo (ver fechar_cliente_temporario).
+    auth_client = criar_cliente_auth_temporario()
     try:
-        auth_client = criar_cliente_auth_temporario()
         auth_resp = auth_client.auth.sign_in_with_password({
             "email": usuario["email"],
             "password": senha,
@@ -219,6 +221,8 @@ def _autenticar(identificador: str, senha: str) -> tuple[bool, str]:
         if "invalid" in err or "credentials" in err:
             return False, "Matrícula/e-mail ou senha incorretos."
         return False, "Erro de conexão: verifique sua internet."
+    finally:
+        fechar_cliente_temporario(auth_client)
 
     # Passo 3: salvar na sessão e navegar para home
     set_usuario(usuario)

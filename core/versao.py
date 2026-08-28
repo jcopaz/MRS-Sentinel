@@ -58,4 +58,13 @@
 # misturava tudo numa linha só, o que escondia a comparação entre o que
 # ainda está pendente e o que já foi atuado no mesmo ativo. MINOR.
 
-APP_VERSION = "3.4.0"
+# 3.4.1 (2026-08-28): corrige vazamento de conexao HTTP em
+# criar_cliente_auth_temporario() (auth/login.py) -- cada tentativa de
+# login criava um client novo e nunca fechava; sob varios logins
+# seguidos (comum numa depuracao), acumulava conexoes abertas no
+# processo ate faltar recurso pra chamadas nao relacionadas (ex.: "Erro
+# ao buscar notas: [Errno 11] Resource temporarily unavailable"). Nova
+# fechar_cliente_temporario() em database/client.py, chamada num
+# finally. PATCH -- bugfix, sem mudar comportamento esperado.
+
+APP_VERSION = "3.4.1"

@@ -54,4 +54,33 @@ def criar_cliente_auth_temporario() -> Client:
     key = st.secrets["supabase"]["key"]
     return create_client(url, key)
 
+
+def fechar_cliente_temporario(client: Client) -> None:
+    """
+    Fecha as conexões HTTP internas de um client criado por
+    criar_cliente_auth_temporario() — SEMPRE chamar depois de usar (ver
+    auth/login.py::_autenticar, num finally).
+
+    Por quê: create_client() abre um httpx.Client (pool de conexões TCP
+    persistentes) por baixo dos panos em client.auth._http_client e
+    client.postgrest.session — diferente de get_supabase()/
+    get_supabase_admin() (@st.cache_resource, um único client reciclado
+    pra sempre), um client "descartável" criado a cada tentativa de login
+    nunca mais é referenciado depois — mas o Python só fecha o socket
+    quando o garbage collector passar por ali, o que não é imediato. Sob
+    várias tentativas de login seguidas (comum numa depuração), isso
+    empilha conexões abertas até o processo ficar sem recursos —
+    provável causa real de "[Errno 11] Resource temporarily unavailable"
+    em chamadas totalmente não relacionadas (ex.: buscar notas) logo
+    depois. Fechar explicitamente evita acumular.
+    """
+    for sub_cliente, atributo in [(getattr(client, "auth", None), "_http_client"),
+                                   (getattr(client, "postgrest", None), "session")]:
+        try:
+            http_client = getattr(sub_cliente, atributo, None)
+            if http_client is not None:
+                http_client.close()
+        except Exception:
+            pass
+
 # endregion
