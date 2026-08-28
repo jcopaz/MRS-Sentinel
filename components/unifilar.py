@@ -1162,15 +1162,57 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
 
     option_safe = _sanitize(option)
     altura = 460 if modo_view == "Dual" else 380
-    st_echarts(
+
+    # Captura o dataZoom do gráfico principal (arrastar o slider ou dar
+    # scroll) e devolve pro Python — chart.getOption() sempre lê o estado
+    # ATUAL do zoom, então funciona tanto pro slider quanto pro zoom
+    # "inside" (scroll do mouse), disparando um rerun só quando o zoom
+    # realmente muda (retornar undefined não dispara rerun — ver
+    # streamlit_echarts). Guardado em session_state pra sobreviver a
+    # reruns disparados por outra coisa (ex.: um filtro na sidebar).
+    zoom_key = f"unif_zoom_km_{gerencia}_{str(ramal_view)}"
+    zoom_evt = st_echarts(
         options=option_safe,
         height=f"{altura}px",
         key=f"unif_{gerencia}_{str(ramal_view)}",
+        events={
+            "datazoom": (
+                "function(params){"
+                "var o = chart.getOption();"
+                "var d = (o.dataZoom && o.dataZoom[0]) ? o.dataZoom[0] : null;"
+                "return d ? {start: d.start, end: d.end} : undefined;"
+                "}"
+            )
+        },
     )
+    if isinstance(zoom_evt, dict) and "start" in zoom_evt and "end" in zoom_evt:
+        st.session_state[zoom_key] = zoom_evt
 
     # ── Unifilar de Ativo (mesmo recorte, bolhas por Ativo em vez de KM) ──────
-    render_unifilar_ativo(df_t_completo, gerencia=f"{gerencia}_{str(ramal_view)}",
-                          km_min_global=km_min_global, km_max_global=km_max_global,
+    # Se o usuário já mexeu no zoom do gráfico de KM acima, estreita o
+    # recorte de KM aqui também — "toda vez que eu mexer no range ele
+    # filtrar também a localidade" (pedido do Julio, 2026-08-28).
+    zoom_atual = st.session_state.get(zoom_key)
+    km_ativo_lo, km_ativo_hi = km_min_global, km_max_global
+    df_ativo_recorte = df_t_completo
+    if zoom_atual and km_max_global > km_min_global:
+        pct_ini = max(0.0, min(100.0, zoom_atual.get("start", 0))) / 100.0
+        pct_fim = max(0.0, min(100.0, zoom_atual.get("end", 100))) / 100.0
+        span = km_max_global - km_min_global
+        km_ativo_lo = km_min_global + pct_ini * span
+        km_ativo_hi = km_min_global + pct_fim * span
+        if "km_real" in df_t_completo.columns:
+            df_ativo_recorte = df_t_completo[
+                df_t_completo["km_real"].between(km_ativo_lo, km_ativo_hi)
+            ]
+        st.caption(
+            f"🔍 Unifilar de Ativo filtrado pelo zoom do gráfico acima: "
+            f"KM {km_ativo_lo:.2f} → {km_ativo_hi:.2f}. "
+            f"({zoom_atual.get('start',0):.0f}%–{zoom_atual.get('end',100):.0f}% do range)"
+        )
+
+    render_unifilar_ativo(df_ativo_recorte, gerencia=f"{gerencia}_{str(ramal_view)}",
+                          km_min_global=km_ativo_lo, km_max_global=km_ativo_hi,
                           modo_view=modo_view)
 
     # ── Rankings complementares (Tipo de Inspeção / Família Defeito / Ativo) ──

@@ -67,4 +67,15 @@
 # fechar_cliente_temporario() em database/client.py, chamada num
 # finally. PATCH -- bugfix, sem mudar comportamento esperado.
 
-APP_VERSION = "3.4.1"
+# 3.5.0 (2026-08-28): Unifilar de Ativo agora responde ao zoom do Unifilar
+# por KM -- arrastar o slider (ou dar scroll) no grafico principal
+# estreita automaticamente o recorte de KM do grafico de Ativo logo
+# abaixo, sem precisar de nenhum filtro manual novo. Usa o suporte a
+# eventos do streamlit-echarts (events={"datazoom": ...}) pra capturar o
+# zoom do lado do JS e devolver pro Python, guardado em session_state
+# pra sobreviver a reruns de outra origem. Cada zoom dispara um rerun do
+# Streamlit -- pode ficar um pouco mais lento durante o arrasto continuo
+# do slider, sem jeito simples de evitar com essa biblioteca; reportar
+# se sentir lentidao real de uso. MINOR (funcionalidade nova compativel).
+
+APP_VERSION = "3.5.0"
