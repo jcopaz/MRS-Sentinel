@@ -142,6 +142,31 @@ def _opcoes_familias(df: pd.DataFrame) -> list[str]:
     return sorted([f for f in df["familia_defeito"].dropna().unique().tolist() if f])
 
 
+def _opcoes_tipos_anomalia(df: pd.DataFrame) -> dict[str, str]:
+    """
+    Tipos de anomalia (code_codificacao) presentes nos dados, com rótulo
+    "CÓDIGO — descrição legível" (defeito_legivel, já mapeado pelo
+    parser via GLOSSARIO_VP/GLOSSARIO_EE). Retorna {rótulo: código}, no
+    mesmo formato usado pelo filtro de Status Base logo abaixo.
+    """
+    if "code_codificacao" not in df.columns:
+        return {}
+    codigos = sorted(c for c in df["code_codificacao"].dropna().unique().tolist() if c)
+    if "defeito_legivel" in df.columns:
+        descricao_por_codigo = (
+            df.dropna(subset=["code_codificacao"])
+            .drop_duplicates("code_codificacao")
+            .set_index("code_codificacao")["defeito_legivel"]
+            .to_dict()
+        )
+    else:
+        descricao_por_codigo = {}
+    return {
+        f"{c} — {descricao_por_codigo.get(c, c)}": c
+        for c in codigos
+    }
+
+
 def _opcoes_tipos_inspecao(df: pd.DataFrame) -> list[str]:
     """Tipos de inspeção/atividade presentes nos dados."""
     if "tipo_atividade" not in df.columns:
@@ -191,7 +216,11 @@ def render_filtros_atributos(
 ) -> dict:
     """
     Renderiza os filtros de atributo: Prioridade, Família de defeito,
-    Tipo de inspeção, Status Base VP e Status Base EE.
+    Tipo de anomalia, Tipo de inspeção, Status Base VP e Status Base EE.
+
+    Tipo de anomalia é mais granular que Família de defeito — Família é o
+    prefixo de 2 letras do código (ex.: "DO" → Dormente), Tipo de anomalia
+    é o código completo com a descrição (ex.: "DO01 — Vigota inservível").
 
     Status Base VP e EE são filtros separados porque usam colunas/esquemas
     diferentes (VP: 17 códigos de status_usuario; EE: Aberto/Encerrado de
@@ -201,8 +230,8 @@ def render_filtros_atributos(
     carregada (disciplina_sel = "VP" ou "EE" isolado).
 
     Returns:
-        dict com chaves: prioridades, familias, tipos_inspecao,
-        status_base_vp, status_base_ee (listas — vazio/tudo selecionado =
+        dict com chaves: prioridades, familias, tipos_anomalia,
+        tipos_inspecao, status_base_vp, status_base_ee (listas — vazio/tudo selecionado =
         sem filtro)
     """
     uid = gerencia
@@ -230,6 +259,20 @@ def render_filtros_atributos(
     )
     if not familias_sel:
         familias_sel = opcoes_fam
+
+    st.markdown("**🔬 Tipo de anomalia**")
+    opcoes_anomalia_label = _opcoes_tipos_anomalia(df)
+    anomalias_nome_sel = st.multiselect(
+        "Tipo de anomalia",
+        options=list(opcoes_anomalia_label.keys()),
+        default=list(opcoes_anomalia_label.keys()),
+        key=f"filtro_anomalia_{uid}",
+        label_visibility="collapsed",
+        help="Código de codificação da nota (ex.: DO01 — Vigota inservível), mais granular que a Família de defeito.",
+    )
+    anomalias_sel = [opcoes_anomalia_label[n] for n in anomalias_nome_sel if n in opcoes_anomalia_label]
+    if not anomalias_sel:
+        anomalias_sel = list(opcoes_anomalia_label.values())
 
     st.markdown("**🔍 Tipo de inspeção**")
     opcoes_tipo = _opcoes_tipos_inspecao(df)
@@ -285,6 +328,7 @@ def render_filtros_atributos(
     return {
         "prioridades":     prioridades_sel,
         "familias":        familias_sel,
+        "tipos_anomalia":  anomalias_sel,
         "tipos_inspecao":  tipos_sel,
         "status_base_vp":  status_vp_sel,
         "status_base_ee":  status_ee_sel,
@@ -293,7 +337,7 @@ def render_filtros_atributos(
 
 def aplicar_filtros_atributos(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     """
-    Aplica os 4 filtros de atributo retornados por render_filtros_atributos().
+    Aplica os filtros de atributo retornados por render_filtros_atributos().
     Defensivo: ignora filtros cujas colunas não existem ou vieram vazias.
     """
     if df.empty:
@@ -306,6 +350,10 @@ def aplicar_filtros_atributos(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     familias = filtros.get("familias") or []
     if familias and "familia_defeito" in df.columns:
         df = df[df["familia_defeito"].isin(familias)]
+
+    tipos_anomalia = filtros.get("tipos_anomalia") or []
+    if tipos_anomalia and "code_codificacao" in df.columns:
+        df = df[df["code_codificacao"].isin(tipos_anomalia)]
 
     tipos = filtros.get("tipos_inspecao") or []
     if tipos and "tipo_atividade" in df.columns:

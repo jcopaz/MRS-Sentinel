@@ -39,5 +39,12 @@
 # (apaga de usuarios + Supabase Auth, bloqueia com erro claro se o
 # usuário já tiver upload/log vinculado) — funcionalidade nova compatível
 # com o que já existia (desativar continua igual). MINOR.
+# 3.2.0 (2026-08-28): filtro novo "Tipo de anomalia" (código + descrição,
+# mais granular que Família de defeito) abaixo dele nos filtros de
+# atributo; ranking de Ativo da aba Unifilar passa a usar os campos
+# linha/ativo já decodificados do TPLNR (rótulo "AMV 22 — Linha 2" em vez
+# do TPLNR bruto abreviado) — é o "Unifilar de Ativo" pedido por um
+# técnico na apresentação da ferramenta. Funcionalidade nova/melhorada
+# compatível com o que já existia. MINOR.
 
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"

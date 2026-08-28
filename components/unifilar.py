@@ -33,7 +33,7 @@ except ImportError:
 
 import plotly.graph_objects as go
 
-from core.glossarios import nome_ramal, ativo_curto
+from core.glossarios import nome_ramal, ativo_curto, rotulo_ativo_legivel
 
 # Motor de alertas — usado só para marcar hot-spots CRÔNICOS (anel extra).
 # Import resiliente: se o módulo/dep falhar, o unifilar segue funcionando
@@ -1044,10 +1044,25 @@ def _bloco_ranking_familia_defeito(df: pd.DataFrame, col_fam: str,
 
 
 @st.fragment
-def _bloco_ranking_ativo(df: pd.DataFrame, col_ativo: str, col_fam: str | None,
+def _bloco_ranking_ativo(df: pd.DataFrame, col_fam: str | None,
                           col_prio: str | None, col_insp: str | None,
                           gerencia: str):
+    """
+    Hot-spots de notas concentradas em Ativo (ex.: "AMV 22 — Linha 2"),
+    dentro do mesmo recorte de Ramal/Trecho (e KM, se filtrado na sidebar)
+    já aplicado acima no Unifilar — é o "Unifilar de Ativo" (KM macro +
+    Ativo micro).
+
+    Usa as colunas 'linha'/'ativo' já decodificadas do TPLNR por
+    core/parser.py::decodificar_tplnr (gravadas em notas.linha/notas.ativo
+    — não reprocessa o TPLNR bruto aqui). Cai para local_instalacao
+    abreviado só se essas colunas não existirem (base antiga/incompleta).
+    """
     st.markdown("##### 🚂 Ranking — Ativo × Quantidade Total de Notas")
+    st.caption(
+        "Ativo identificado a partir do Local de Instalação (ex.: "
+        "'MF-SJU-ILA_ILA-L000002-AMV0022' → 'AMV 22 — Linha 2')."
+    )
     opcoes = ["Quantidade Total de Notas"]
     if col_fam:  opcoes.append("Quantidade por Família Defeito")
     if col_prio: opcoes.append("Quantidade por Prioridade")
@@ -1064,10 +1079,24 @@ def _bloco_ranking_ativo(df: pd.DataFrame, col_ativo: str, col_fam: str | None,
     )
 
     d_ativo = df.copy()
-    d_ativo[col_ativo] = d_ativo[col_ativo].apply(
-        lambda v: ativo_curto(v) if pd.notna(v) and str(v).strip() else v
-    )
-    _bar_empilhado_ranking(d_ativo, col_ativo, stack, f"rk_ativo_{gerencia}",
+    col_rotulo = "_rotulo_ativo"
+    if "linha" in d_ativo.columns or "ativo" in d_ativo.columns:
+        col_linha_s = d_ativo["linha"] if "linha" in d_ativo.columns else pd.Series([None] * len(d_ativo), index=d_ativo.index)
+        col_ativo_s = d_ativo["ativo"] if "ativo" in d_ativo.columns else pd.Series([None] * len(d_ativo), index=d_ativo.index)
+        d_ativo[col_rotulo] = [rotulo_ativo_legivel(l, a) for l, a in zip(col_linha_s, col_ativo_s)]
+    elif "local_instalacao" in d_ativo.columns:
+        d_ativo[col_rotulo] = d_ativo["local_instalacao"].apply(
+            lambda v: ativo_curto(v) if pd.notna(v) and str(v).strip() else v
+        )
+    else:
+        return
+
+    d_ativo = d_ativo[d_ativo[col_rotulo] != "—"]
+    if d_ativo.empty:
+        st.caption("Nenhum ativo identificado nas notas deste recorte.")
+        return
+
+    _bar_empilhado_ranking(d_ativo, col_rotulo, stack, f"rk_ativo_{gerencia}",
                            top_n=20)
 
 
@@ -1083,10 +1112,10 @@ def render_rankings_unifilar(df: pd.DataFrame, gerencia: str):
     col_insp  = "tipo_atividade"    if "tipo_atividade"    in df.columns else None
     col_fam   = "familia_defeito"   if "familia_defeito"   in df.columns else (
                 "defeito_legivel"   if "defeito_legivel"   in df.columns else None)
-    col_ativo = "local_instalacao"  if "local_instalacao"  in df.columns else None
+    tem_ativo = "linha" in df.columns or "ativo" in df.columns or "local_instalacao" in df.columns
     col_prio  = "prioridade"        if "prioridade"        in df.columns else None
 
-    if not any([col_insp, col_fam, col_ativo]):
+    if not any([col_insp, col_fam, tem_ativo]):
         return
 
     st.markdown("---")
@@ -1102,8 +1131,8 @@ def render_rankings_unifilar(df: pd.DataFrame, gerencia: str):
     if col_fam:
         _bloco_ranking_familia_defeito(df, col_fam, col_prio, col_insp, gerencia)
 
-    if col_ativo:
-        _bloco_ranking_ativo(df, col_ativo, col_fam, col_prio, col_insp, gerencia)
+    if tem_ativo:
+        _bloco_ranking_ativo(df, col_fam, col_prio, col_insp, gerencia)
 
 # endregion
 

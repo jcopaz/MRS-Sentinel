@@ -522,6 +522,62 @@ def decodificar_tplnr(local_instalacao: str) -> dict:
     return match.groupdict()
 
 
+_RE_CODIGO_ATIVO = re.compile(r"^([A-Za-z]+)0*(\d+)([A-Za-z]*)$")
+
+
+def _formatar_codigo(codigo: str) -> str | None:
+    """
+    'L000001' -> ('L', '1', ''); 'AMV0022' -> ('AMV', '22', '');
+    'AMV258N' -> ('AMV', '258', 'N'). None se não casar o padrão
+    letras+dígitos+letras (aí quem chama usa o valor bruto como fallback).
+    """
+    if not codigo:
+        return None
+    m = _RE_CODIGO_ATIVO.match(str(codigo).strip().upper())
+    if not m:
+        return None
+    prefixo, numero, sufixo = m.groups()
+    return prefixo, numero, sufixo
+
+
+def rotulo_ativo_legivel(linha: str | None, ativo: str | None) -> str:
+    """
+    Rótulo amigável do ativo a partir dos campos 'linha'/'ativo' já
+    extraídos do TPLNR por core/parser.py::decodificar_tplnr (colunas
+    persistidas em notas.linha / notas.ativo — não reprocessa o TPLNR
+    bruto). Usado no ranking de Ativo da aba Unifilar.
+
+    Ex.: linha='L000001', ativo=None       -> "Linha 1"
+         linha='L000002', ativo='AMV0022'  -> "AMV 22 — Linha 2"
+         linha=None, ativo='AMV258N'       -> "AMV 258N"
+         Nenhum dos dois -> "—"
+    """
+    # NaN do pandas (float) é "verdadeiro" em Python — sem esse filtro,
+    # uma coluna com valor ausente vira literalmente o texto "nan" no
+    # rótulo. `x != x` é True só pra NaN (nem precisa importar pandas/math).
+    def _vazio(x) -> bool:
+        return x is None or (isinstance(x, float) and x != x) or not str(x).strip()
+
+    partes = []
+
+    if not _vazio(ativo):
+        parsed = _formatar_codigo(ativo)
+        if parsed:
+            prefixo, numero, sufixo = parsed
+            partes.append(f"{prefixo} {numero}{sufixo}")
+        else:
+            partes.append(str(ativo).strip())
+
+    if not _vazio(linha):
+        parsed = _formatar_codigo(linha)
+        if parsed and parsed[0] == "L":
+            partes.append(f"Linha {parsed[1]}{parsed[2]}")
+        else:
+            partes.append(f"Linha {str(linha).strip()}")
+
+    return " — ".join(partes) if partes else "—"
+
+
 def ativo_curto(local_instalacao: str) -> str:
     """
     Versão resumida do TPLNR pra exibição em telas — remove o prefixo
