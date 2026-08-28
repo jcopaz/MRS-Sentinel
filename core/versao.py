@@ -53,4 +53,9 @@
 # barras adicionado no 3.2.0 — agora dá pra ver visualmente ONDE no KM os
 # ativos problemáticos se concentram, não só a lista ordenada. MINOR.
 
-APP_VERSION = "3.3.0"
+# 3.4.0 (2026-08-28): "Unifilar de Ativo" ganha modo Dual (topo=Abertas,
+# base=Concluídas), espelhando o mesmo modo do Unifilar por KM — antes
+# misturava tudo numa linha só, o que escondia a comparação entre o que
+# ainda está pendente e o que já foi atuado no mesmo ativo. MINOR.
+
+APP_VERSION = "3.4.0"

@@ -407,7 +407,8 @@ def construir_serie_unifilar_ativo(df_base: pd.DataFrame, y_offset: float = 0,
 
 
 def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
-                           km_min_global: float | None, km_max_global: float | None) -> None:
+                           km_min_global: float | None, km_max_global: float | None,
+                           modo_view: str = "Empilhado") -> None:
     """
     "Unifilar de Ativo" — mesma visualização de bolhas por KM do Unifilar
     principal, mas cada bolha é um ATIVO específico (ex.: "AMV 22 — Linha
@@ -416,27 +417,20 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
     específicos. Eixo de KM alinhado com o Unifilar principal, pra
     comparar visão macro (KM) com a micro (Ativo) lado a lado.
 
+    modo_view="Dual" espelha o mesmo modo do Unifilar principal — topo
+    (y=+1) = Abertas, base (y=-1) = Concluídas, pra comparar o que ainda
+    está pendente com o que já foi atuado no mesmo ativo. Precisa da
+    coluna 'origem_base' (calculada no Unifilar principal); sem ela cai
+    pro modo Empilhado (tudo numa linha só).
+
     Pedido de melhoria de um técnico na apresentação da ferramenta
-    (2026-08-28).
+    (2026-08-28); Dual pedido pelo Julio logo em seguida, pra manter
+    consistência com o Unifilar por KM.
     """
     if not ECHARTS_OK or ("linha" not in df.columns and "ativo" not in df.columns):
         return
 
-    pn, pp, pc, agreg, kmm, kmx = construir_serie_unifilar_ativo(
-        df, y_offset=0, label=f"🔧 Ativos — {gerencia}"
-    )
-    if not pn and not pp:
-        return
-
-    st.markdown("---")
-    st.markdown("#### 🔧 Unifilar de Ativo — Hot-spots por Ativo")
-    st.caption(
-        f"{len(agreg):,} ativo(s) identificado(s) neste recorte. "
-        "Tamanho = volume de notas · Cor = score médio · Pulso = hot-spot crítico."
-    )
-
-    km_lo = km_min_global if km_min_global is not None and pd.notna(km_min_global) else (kmm if kmm is not None else 0.0)
-    km_hi = km_max_global if km_max_global is not None and pd.notna(km_max_global) else (kmx if kmx is not None else 100.0)
+    usar_dual = modo_view == "Dual" and "origem_base" in df.columns
 
     series = []
     indices_score = []
@@ -445,18 +439,77 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
         indices_score.append(len(series))
         series.append(s)
 
-    series.append({
-        "name": "Via", "type": "line",
-        "data": [[km_lo, 0], [km_hi, 0]],
-        "lineStyle": {"color": "#374151", "width": 3},
-        "symbol": "none", "silent": True, "tooltip": {"show": False},
-    })
+    if usar_dual:
+        df_a = df[df["origem_base"] == "Abertas"]
+        df_c = df[df["origem_base"] == "Concluídas"]
+        pn_a, pp_a, pc_a, agreg_a, kma_min, kma_max = construir_serie_unifilar_ativo(
+            df_a, y_offset=1, label=f"📋 Abertas — {gerencia}"
+        )
+        pn_c, pp_c, pc_c, agreg_c, kmc_min, kmc_max = construir_serie_unifilar_ativo(
+            df_c, y_offset=-1, label=f"✅ Concluídas — {gerencia}"
+        )
+        pn, pp, pc = pn_a + pn_c, pp_a + pp_c, pc_a + pc_c
+        agreg = pd.concat([agreg_a, agreg_c], ignore_index=True) if len(agreg_a) or len(agreg_c) else agreg_a
+        kmm = min([v for v in (kma_min, kmc_min) if v is not None and pd.notna(v)], default=None)
+        kmx = max([v for v in (kma_max, kmc_max) if v is not None and pd.notna(v)], default=None)
+    else:
+        pn, pp, pc, agreg, kmm, kmx = construir_serie_unifilar_ativo(
+            df, y_offset=0, label=f"🔧 Ativos — {gerencia}"
+        )
 
-    if pn:
-        _add_score_series({
-            "name": "Ativos", "type": "scatter", "data": pn,
-            "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85},
+    if not pn and not pp:
+        return
+
+    st.markdown("---")
+    st.markdown("#### 🔧 Unifilar de Ativo — Hot-spots por Ativo")
+    if usar_dual:
+        st.caption(
+            f"{len(agreg_a):,} ativo(s) com nota Aberta · {len(agreg_c):,} ativo(s) com nota Concluída "
+            "neste recorte. Tamanho = volume de notas · Cor = score médio · Pulso = hot-spot crítico."
+        )
+    else:
+        st.caption(
+            f"{len(agreg):,} ativo(s) identificado(s) neste recorte. "
+            "Tamanho = volume de notas · Cor = score médio · Pulso = hot-spot crítico."
+        )
+
+    km_lo = km_min_global if km_min_global is not None and pd.notna(km_min_global) else (kmm if kmm is not None else 0.0)
+    km_hi = km_max_global if km_max_global is not None and pd.notna(km_max_global) else (kmx if kmx is not None else 100.0)
+
+    if usar_dual:
+        series += [
+            {"name": "Via (Abertas)", "type": "line",
+             "data": [[km_lo, 1], [km_hi, 1]],
+             "lineStyle": {"color": "#374151", "width": 3},
+             "symbol": "none", "silent": True, "tooltip": {"show": False}},
+            {"name": "Via (Concluídas)", "type": "line",
+             "data": [[km_lo, -1], [km_hi, -1]],
+             "lineStyle": {"color": "#374151", "width": 3},
+             "symbol": "none", "silent": True, "tooltip": {"show": False}},
+        ]
+        if pn_a:
+            _add_score_series({
+                "name": "📋 Ativos Abertos", "type": "scatter", "data": pn_a,
+                "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85},
+            })
+        if pn_c:
+            _add_score_series({
+                "name": "✅ Ativos Concluídos", "type": "scatter", "data": pn_c,
+                "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85},
+            })
+    else:
+        series.append({
+            "name": "Via", "type": "line",
+            "data": [[km_lo, 0], [km_hi, 0]],
+            "lineStyle": {"color": "#374151", "width": 3},
+            "symbol": "none", "silent": True, "tooltip": {"show": False},
         })
+        if pn:
+            _add_score_series({
+                "name": "Ativos", "type": "scatter", "data": pn,
+                "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85},
+            })
+
     if pc:
         series.append({
             "name": "♻️ Crônicos", "type": "scatter", "data": pc,
@@ -467,7 +520,22 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
             },
             "emphasis": {"disabled": True}, "tooltip": {"show": False}, "z": 3,
         })
-    if pp:
+    if usar_dual:
+        if pp_a:
+            _add_score_series({
+                "name": "🔥 Abertos Críticos", "type": "effectScatter", "data": pp_a,
+                "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
+                "showEffectOn": "render",
+                "itemStyle": {"borderColor": "#fff", "borderWidth": 2},
+            })
+        if pp_c:
+            _add_score_series({
+                "name": "🔥 Concluídos Críticos", "type": "effectScatter", "data": pp_c,
+                "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
+                "showEffectOn": "render",
+                "itemStyle": {"borderColor": "#fff", "borderWidth": 2},
+            })
+    elif pp:
         _add_score_series({
             "name": "🔥 Ativos Críticos", "type": "effectScatter", "data": pp,
             "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
@@ -517,7 +585,10 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}},
         },
         "yAxis": {
-            "type": "value", "min": -1.2, "max": 1.2, "show": False,
+            "type": "value",
+            "min": -2.5 if usar_dual else -1.2,
+            "max":  2.5 if usar_dual else  1.2,
+            "show": False,
             "axisLine": {"show": False}, "splitLine": {"show": False},
         },
         "dataZoom": [
@@ -530,7 +601,8 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
         "series": series,
     }
 
-    st_echarts(options=_sanitize(option), height="320px", key=f"unif_ativo_{gerencia}")
+    altura_ativo = 380 if usar_dual else 280
+    st_echarts(options=_sanitize(option), height=f"{altura_ativo}px", key=f"unif_ativo_{gerencia}")
 
 # endregion
 
@@ -1098,7 +1170,8 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
 
     # ── Unifilar de Ativo (mesmo recorte, bolhas por Ativo em vez de KM) ──────
     render_unifilar_ativo(df_t_completo, gerencia=f"{gerencia}_{str(ramal_view)}",
-                          km_min_global=km_min_global, km_max_global=km_max_global)
+                          km_min_global=km_min_global, km_max_global=km_max_global,
+                          modo_view=modo_view)
 
     # ── Rankings complementares (Tipo de Inspeção / Família Defeito / Ativo) ──
     render_rankings_unifilar(df_t_completo, gerencia=f"{gerencia}_{str(ramal_view)}")
