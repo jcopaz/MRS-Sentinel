@@ -46,5 +46,11 @@
 # do TPLNR bruto abreviado) — é o "Unifilar de Ativo" pedido por um
 # técnico na apresentação da ferramenta. Funcionalidade nova/melhorada
 # compatível com o que já existia. MINOR.
+# 3.3.0 (2026-08-28): "Unifilar de Ativo" de verdade — gráfico de bolhas
+# no eixo de KM (igual ao Unifilar principal, eixo alinhado), mas cada
+# bolha é um Ativo específico em vez de um trecho de KM, respeitando o
+# mesmo recorte de Ramal/Trecho/KM já filtrado. Complementa o ranking em
+# barras adicionado no 3.2.0 — agora dá pra ver visualmente ONDE no KM os
+# ativos problemáticos se concentram, não só a lista ordenada. MINOR.
 
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.3.0"

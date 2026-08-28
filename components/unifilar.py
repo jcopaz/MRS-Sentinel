@@ -268,6 +268,270 @@ def construir_serie_unifilar(df_base: pd.DataFrame, bin_km: float,
     return (pontos_normais, pontos_pulsantes, pontos_cronicos,
             agreg, km_min, km_max)
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def construir_serie_unifilar_ativo(df_base: pd.DataFrame, y_offset: float = 0,
+                                    label: str = "") -> tuple:
+    """
+    Mesma lógica de agregação/tamanho/pulso/tooltip de
+    construir_serie_unifilar(), mas agrupando por ATIVO (campos
+    linha/ativo já decodificados do TPLNR por
+    core/parser.py::decodificar_tplnr — ver core/glossarios.rotulo_ativo_legivel)
+    em vez de por bin de KM. Cada bolha é um ativo específico, posicionado
+    no eixo de KM pela média do km_real das notas dele (um ativo físico
+    tem km_real praticamente fixo entre notas — a média é só defensiva
+    contra pequena variação de medição).
+
+    Returns: mesmo formato de construir_serie_unifilar —
+        (pontos_normais, pontos_pulsantes, pontos_cronicos, agreg_df, km_min, km_max)
+    """
+    if len(df_base) == 0:
+        return [], [], [], pd.DataFrame(), None, None
+
+    df_t = df_base.copy()
+    if "linha" not in df_t.columns and "ativo" not in df_t.columns:
+        return [], [], [], pd.DataFrame(), None, None
+
+    col_linha_s = df_t["linha"] if "linha" in df_t.columns else pd.Series([None] * len(df_t), index=df_t.index)
+    col_ativo_s = df_t["ativo"] if "ativo" in df_t.columns else pd.Series([None] * len(df_t), index=df_t.index)
+    df_t["_rotulo_ativo"] = [rotulo_ativo_legivel(l, a) for l, a in zip(col_linha_s, col_ativo_s)]
+    df_t = df_t[df_t["_rotulo_ativo"] != "—"]
+    if "km_real" in df_t.columns:
+        df_t = df_t[df_t["km_real"].notna()]
+    if df_t.empty:
+        return [], [], [], pd.DataFrame(), None, None
+
+    col_nota   = "nota"       if "nota"       in df_t.columns else (
+                 "numero_nota" if "numero_nota" in df_t.columns else None)
+    col_origem = "origem"      if "origem"      in df_t.columns else None
+    col_sub    = "sub_trecho"  if "sub_trecho"  in df_t.columns else (
+                 "trecho"      if "trecho"      in df_t.columns else None)
+    col_def    = "defeito_legivel" if "defeito_legivel" in df_t.columns else (
+                 "familia_defeito" if "familia_defeito" in df_t.columns else None)
+    col_tipo   = "tipo_atividade" if "tipo_atividade" in df_t.columns else None
+    col_lt     = "lead_time_dias" if "lead_time_dias" in df_t.columns else None
+
+    if "score"      not in df_t.columns: df_t["score"]      = 1.0
+    if "prioridade" not in df_t.columns: df_t["prioridade"] = "3-Média"
+
+    agg_dict = {"km_pos": ("km_real", "mean")}
+    if col_nota: agg_dict["qtd_notas"] = (col_nota, "count")
+    else:        agg_dict["qtd_notas"] = ("score",  "count")
+    agg_dict["score_total"] = ("score", "sum")
+    agg_dict["score_medio"] = ("score", "mean")
+    agg_dict["prio_1"] = ("prioridade", lambda x: (x == "1-Muito alta").sum())
+    agg_dict["prio_2"] = ("prioridade", lambda x: (x == "2-Alta").sum())
+    if col_origem: agg_dict["patios"]      = (col_origem, _patios_unicos)
+    if col_sub:    agg_dict["sub_trechos"] = (col_sub,    _patios_unicos)
+    if col_def:    agg_dict["defeitos"]    = (col_def,    _top5_defeitos)
+    if col_tipo:   agg_dict["tipos_insp"] = (col_tipo,   _top3_inspecoes)
+    if col_lt:     agg_dict["lt_medio"]   = (col_lt,
+                                             lambda x: x.dropna().mean()
+                                             if x.dropna().any() else None)
+    tem_cronico = "is_cronico" in df_t.columns
+    if tem_cronico:
+        agg_dict["n_cronicos"] = ("is_cronico", "sum")
+
+    agreg = df_t.groupby("_rotulo_ativo").agg(**agg_dict).reset_index()
+    if len(agreg) == 0:
+        return [], [], [], pd.DataFrame(), None, None
+
+    qtd_max = agreg["qtd_notas"].max()
+    limiar = agreg["score_total"].quantile(0.90) if len(agreg) >= 10 else agreg["score_total"].max()
+
+    def calc_tamanho(qtd):
+        return 12 + (qtd / qtd_max) * 43   # 12–55 px — mesma escala do KM
+
+    pontos_normais, pontos_pulsantes, pontos_cronicos = [], [], []
+
+    for _, row in agreg.iterrows():
+        tamanho = calc_tamanho(row["qtd_notas"])
+
+        n_cron = int(row["n_cronicos"]) if (tem_cronico
+                 and pd.notna(row.get("n_cronicos"))) else 0
+        cron_txt = (
+            f"<div style='margin-top:6px;padding:4px 8px;"
+            f"background:rgba(124,58,237,0.08);border-left:3px solid "
+            f"{COR_CRONICO};border-radius:4px;font-size:12px;color:#5b21b6;'>"
+            f"♻️ <b>Hot-spot CRÔNICO</b> — {n_cron} nota(s) recorrente(s) "
+            f"neste ativo</div>"
+            if n_cron > 0 else ""
+        )
+        lt_txt = (
+            f"⏱️ Lead time médio: <b>{row['lt_medio']:.0f} dias</b><br/>"
+            if "lt_medio" in row.index and pd.notna(row.get("lt_medio")) else ""
+        )
+        patios_txt = row.get("patios",      "—")
+        subtrc_txt = row.get("sub_trechos", "—")
+        def_txt    = row.get("defeitos",    "—")
+        tipo_txt   = row.get("tipos_insp",  "—")
+
+        hover = (
+            f"<div style='min-width:220px;'>"
+            f"<div style='font-size:13px;color:#9ca3af;margin-bottom:4px;'>{label}</div>"
+            f"<div style='font-size:15px;font-weight:700;color:#1e3a5f;margin-bottom:6px;'>"
+            f"🔧 {row['_rotulo_ativo']} &nbsp;"
+            f"<span style='font-weight:400;color:#6b7280;font-size:12px;'>"
+            f"(KM {row['km_pos']:.2f})</span></div>"
+            f"<hr style='border:0;border-top:1px solid #e5e7eb;margin:6px 0;'/>"
+            f"📋 <b>{row['qtd_notas']}</b> notas<br/>"
+            f"⚡ Score: <b>{row['score_total']:.0f}</b><br/>"
+            f"🔴 Muito alta: <b>{row['prio_1']}</b> &nbsp;|&nbsp; "
+            f"🟠 Alta: <b>{row['prio_2']}</b><br/>"
+            f"{lt_txt}"
+            f"📍 Pátio(s): <b>{patios_txt}</b><br/>"
+            f"🚂 Trecho(s): <b>{subtrc_txt}</b><br/>"
+            f"🔍 Inspeção(ões): <b>{tipo_txt}</b><br/>"
+            f"<div style='margin-top:6px;font-size:12px;color:#6b7280;'>"
+            f"<b>Top defeitos:</b></div>"
+            f"<div style='font-size:12px;'>{def_txt}</div>"
+            f"{cron_txt}"
+            f"</div>"
+        )
+
+        valor = [float(row["km_pos"]), y_offset, float(row["score_total"]), int(row["qtd_notas"])]
+        ponto = {"value": valor, "symbolSize": tamanho, "tooltipHTML": hover}
+
+        if row["score_total"] >= limiar:
+            pontos_pulsantes.append(ponto)
+        else:
+            pontos_normais.append(ponto)
+
+        if n_cron > 0:
+            pontos_cronicos.append({"value": valor, "symbolSize": tamanho + RING_DELTA})
+
+    km_min = float(agreg["km_pos"].min()) if len(agreg) else None
+    km_max = float(agreg["km_pos"].max()) if len(agreg) else None
+    return (pontos_normais, pontos_pulsantes, pontos_cronicos,
+            agreg, km_min, km_max)
+
+
+def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
+                           km_min_global: float | None, km_max_global: float | None) -> None:
+    """
+    "Unifilar de Ativo" — mesma visualização de bolhas por KM do Unifilar
+    principal, mas cada bolha é um ATIVO específico (ex.: "AMV 22 — Linha
+    2"), não um trecho de KM. Mostra onde, dentro do recorte de KM/Ramal/
+    Trecho já filtrado acima, as notas se concentram em ativos
+    específicos. Eixo de KM alinhado com o Unifilar principal, pra
+    comparar visão macro (KM) com a micro (Ativo) lado a lado.
+
+    Pedido de melhoria de um técnico na apresentação da ferramenta
+    (2026-08-28).
+    """
+    if not ECHARTS_OK or ("linha" not in df.columns and "ativo" not in df.columns):
+        return
+
+    pn, pp, pc, agreg, kmm, kmx = construir_serie_unifilar_ativo(
+        df, y_offset=0, label=f"🔧 Ativos — {gerencia}"
+    )
+    if not pn and not pp:
+        return
+
+    st.markdown("---")
+    st.markdown("#### 🔧 Unifilar de Ativo — Hot-spots por Ativo")
+    st.caption(
+        f"{len(agreg):,} ativo(s) identificado(s) neste recorte. "
+        "Tamanho = volume de notas · Cor = score médio · Pulso = hot-spot crítico."
+    )
+
+    km_lo = km_min_global if km_min_global is not None and pd.notna(km_min_global) else (kmm if kmm is not None else 0.0)
+    km_hi = km_max_global if km_max_global is not None and pd.notna(km_max_global) else (kmx if kmx is not None else 100.0)
+
+    series = []
+    indices_score = []
+
+    def _add_score_series(s):
+        indices_score.append(len(series))
+        series.append(s)
+
+    series.append({
+        "name": "Via", "type": "line",
+        "data": [[km_lo, 0], [km_hi, 0]],
+        "lineStyle": {"color": "#374151", "width": 3},
+        "symbol": "none", "silent": True, "tooltip": {"show": False},
+    })
+
+    if pn:
+        _add_score_series({
+            "name": "Ativos", "type": "scatter", "data": pn,
+            "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85},
+        })
+    if pc:
+        series.append({
+            "name": "♻️ Crônicos", "type": "scatter", "data": pc,
+            "symbol": "circle", "silent": True,
+            "itemStyle": {
+                "color": "rgba(0,0,0,0)", "borderColor": COR_CRONICO,
+                "borderWidth": 3, "shadowBlur": 6, "shadowColor": "rgba(124,58,237,0.5)",
+            },
+            "emphasis": {"disabled": True}, "tooltip": {"show": False}, "z": 3,
+        })
+    if pp:
+        _add_score_series({
+            "name": "🔥 Ativos Críticos", "type": "effectScatter", "data": pp,
+            "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
+            "showEffectOn": "render",
+            "itemStyle": {"borderColor": "#fff", "borderWidth": 2},
+        })
+
+    score_max_global = float(agreg["score_total"].max()) if len(agreg) else 100.0
+
+    option = {
+        "tooltip": {
+            "trigger": "item",
+            "backgroundColor": "rgba(255,255,255,0.98)",
+            "borderColor": COR_PRIMARIA, "borderWidth": 2,
+            "padding": [10, 14],
+            "extraCssText": (
+                "box-shadow:0 6px 20px rgba(0,0,0,0.15);"
+                "border-radius:10px;max-width:320px;"
+            ),
+            "textStyle": {"color": "#1f2937", "fontSize": 12},
+            "formatter": JsCode(
+                "function(params){ return params.data.tooltipHTML || ''; }"
+            ).js_code,
+        },
+        "visualMap": {
+            "min": 0,
+            "max": score_max_global if score_max_global > 0 else 100,
+            "dimension": 2,
+            "seriesIndex": indices_score,
+            "show": True, "orient": "vertical",
+            "right": 10, "top": "middle",
+            "itemHeight": 120, "itemWidth": 14,
+            "calculable": True,
+            "text": ["Crítico", "OK"],
+            "textStyle": {"color": "#1f2937", "fontSize": 11},
+            "inRange": {"color": ["#16a34a", "#84cc16", "#eab308", "#f59e0b", "#dc2626"]},
+        },
+        "grid": {"left": 50, "right": 90, "top": 20, "bottom": 80, "containLabel": True},
+        "xAxis": {
+            "type": "value",
+            "name": "Quilometragem (KM)",
+            "nameLocation": "middle", "nameGap": 32,
+            "nameTextStyle": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
+            "min": km_lo, "max": km_hi,
+            "axisLine": {"lineStyle": {"color": "#9ca3af"}},
+            "axisLabel": {"color": "#374151", "fontSize": 11},
+            "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}},
+        },
+        "yAxis": {
+            "type": "value", "min": -1.2, "max": 1.2, "show": False,
+            "axisLine": {"show": False}, "splitLine": {"show": False},
+        },
+        "dataZoom": [
+            {"type": "slider", "show": True, "xAxisIndex": [0], "bottom": 15, "height": 22,
+             "borderColor": "#d1d5db", "fillerColor": "rgba(30,58,95,0.15)",
+             "handleStyle": {"color": COR_PRIMARIA}, "moveHandleStyle": {"color": COR_PRIMARIA},
+             "textStyle": {"color": "#374151", "fontSize": 10}},
+            {"type": "inside", "xAxisIndex": [0]},
+        ],
+        "series": series,
+    }
+
+    st_echarts(options=_sanitize(option), height="320px", key=f"unif_ativo_{gerencia}")
+
 # endregion
 
 
@@ -831,6 +1095,10 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
         height=f"{altura}px",
         key=f"unif_{gerencia}_{str(ramal_view)}",
     )
+
+    # ── Unifilar de Ativo (mesmo recorte, bolhas por Ativo em vez de KM) ──────
+    render_unifilar_ativo(df_t_completo, gerencia=f"{gerencia}_{str(ramal_view)}",
+                          km_min_global=km_min_global, km_max_global=km_max_global)
 
     # ── Rankings complementares (Tipo de Inspeção / Família Defeito / Ativo) ──
     render_rankings_unifilar(df_t_completo, gerencia=f"{gerencia}_{str(ramal_view)}")
