@@ -96,4 +96,18 @@
 # nova camada de app), MINOR no espirito (100% retrocompativel, APIs publicas
 # preservadas). Adotado 3.6.0 (MINOR) por ser aditivo e nao quebrar nada.
 
-APP_VERSION = "3.6.0"
+# 3.6.1 (2026-08-29): corrige o zoom do Unifilar por KM nunca "pegar" no
+# Unifilar de Ativo (relatado pelo Julio: "nao esta sendo responsivo").
+# Causa raiz real: a cada rerun, o dataZoom do grafico principal era
+# remontado do zero SEM start/end explicitos -- o ECharts entao resetava
+# visualmente o zoom pra 0-100%, o que disparava um NOVO evento "datazoom"
+# (0-100%) que sobrescrevia em session_state o zoom que o usuario tinha
+# acabado de aplicar. O zoom "brigava" com o proprio rerun e nunca ficava
+# de pe. Corrigido persistindo start/end (lidos de session_state) no
+# dataZoom do grafico principal a cada remontagem -- validado em runtime
+# via AppTest com um stub de streamlit_echarts (2 fases: sem zoom salvo =
+# 0/100, com zoom salvo = 20/60 refletido na remontagem). PATCH -- bugfix,
+# sem mudar comportamento esperado (o pedido original do zoom sincronizado
+# ja tinha sido feito no 3.5.0; aqui so' conserta o que estava quebrado).
+
+APP_VERSION = "3.6.1"

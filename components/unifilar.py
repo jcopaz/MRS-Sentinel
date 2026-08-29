@@ -1058,6 +1058,18 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
     if km_min_global == float("inf"):  km_min_global = 0.0
     if km_max_global == float("-inf"): km_max_global = 100.0
 
+    # ── Zoom salvo (sincronização com o Unifilar de Ativo) ────────────────────
+    # BUG real corrigido aqui: o option abaixo era remontado do ZERO a cada
+    # rerun sem informar start/end do dataZoom -- o ECharts então resetava o
+    # zoom pra 0-100% visualmente a cada rerun, o que por sua vez disparava um
+    # NOVO evento "datazoom" (0-100%) que sobrescrevia o session_state salvo
+    # pelo zoom anterior do usuário. Resultado: o zoom "brigava" com o próprio
+    # rerun e nunca ficava de pé, então o Unifilar de Ativo abaixo nunca via
+    # um recorte diferente de 0-100%. Persistindo start/end aqui, o gráfico
+    # é remontado JÁ no zoom onde o usuário o deixou, quebrando o loop.
+    zoom_key = f"unif_zoom_km_{gerencia}_{str(ramal_view)}"
+    zoom_salvo = st.session_state.get(zoom_key) or {"start": 0, "end": 100}
+
     # ── Fallback Plotly ───────────────────────────────────────────────────────
     if not ECHARTS_OK:
         fig = go.Figure()
@@ -1144,10 +1156,14 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
             "show": False,
             "axisLine": {"show": False}, "splitLine": {"show": False},
         },
-        # dataZoom: slider + scroll do mouse — idêntico ao app1
+        # dataZoom: slider + scroll do mouse — idêntico ao app1. start/end
+        # vêm do zoom_salvo (session_state) pra sobreviver ao rerun — ver
+        # comentário acima de "zoom_salvo" (é o que corrige o bug de o zoom
+        # nunca "pegar").
         "dataZoom": [
             {
                 "type": "slider", "show": True, "xAxisIndex": [0],
+                "start": zoom_salvo["start"], "end": zoom_salvo["end"],
                 "bottom": 15, "height": 22,
                 "borderColor": "#d1d5db",
                 "fillerColor": "rgba(30,58,95,0.15)",
@@ -1155,7 +1171,8 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
                 "moveHandleStyle": {"color": COR_PRIMARIA},
                 "textStyle": {"color": "#374151", "fontSize": 10},
             },
-            {"type": "inside", "xAxisIndex": [0]},
+            {"type": "inside", "xAxisIndex": [0],
+             "start": zoom_salvo["start"], "end": zoom_salvo["end"]},
         ],
         "series": series,
     }
@@ -1170,7 +1187,6 @@ def render_unifilar(df: pd.DataFrame, bin_km: float = None,
     # realmente muda (retornar undefined não dispara rerun — ver
     # streamlit_echarts). Guardado em session_state pra sobreviver a
     # reruns disparados por outra coisa (ex.: um filtro na sidebar).
-    zoom_key = f"unif_zoom_km_{gerencia}_{str(ramal_view)}"
     zoom_evt = st_echarts(
         options=option_safe,
         height=f"{altura}px",
