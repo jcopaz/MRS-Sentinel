@@ -32,6 +32,15 @@ except ImportError:
 
 from core.glossarios import nome_ramal
 
+# Altura responsiva (core/ui_global.py, v3.6.0) — import defensivo: se por
+# algum motivo o módulo não estiver disponível, cai de volta pro px fixo
+# original em vez de quebrar a tela.
+try:
+    from core.ui_global import altura_responsiva
+except Exception:  # pragma: no cover - fallback defensivo
+    def altura_responsiva(base: int = 400, min_px: int = 260, max_px: int = 640) -> str:
+        return f"{base}px"
+
 # Paleta MRS
 COR_PRIMARIA = "#1e3a5f"
 COR_GOLD     = "#ffb000"
@@ -516,7 +525,7 @@ def render_serie_temporal(df: pd.DataFrame, granularidade: str = "Mensal",
         "series": series_data,
     }
 
-    st_echarts(opt_serie, height="500px", key=f"serie_temporal_{gerencia}_{granul_serie}")
+    st_echarts(opt_serie, height=altura_responsiva(500), key=f"serie_temporal_{gerencia}_{granul_serie}")
 
     # --- Mini-KPIs (idêntico ao app1) ---
     total_periodo = len(df_t)

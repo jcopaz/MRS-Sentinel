@@ -13,6 +13,7 @@
 
 import streamlit as st
 from core.versao import APP_VERSION  # módulo sem nenhuma chamada st.* — seguro importar antes do set_page_config
+from core.ui_global import injetar_css_global  # CSS global responsivo (v3.6.0)
 
 # region ====================== SESSÃO 1: Configuração da Página ======================
 # ⚠️ st.set_page_config DEVE ser a PRIMEIRA chamada Streamlit — antes de qualquer OUTRA chamada st.*
@@ -31,6 +32,10 @@ st.set_page_config(
         ),
     }
 )
+
+# CSS global responsivo (core/ui_global.py) — idempotente, precisa rodar
+# antes de qualquer tela para o CSS já valer no primeiro paint (v3.6.0).
+injetar_css_global()
 # endregion
 
 
@@ -72,16 +77,16 @@ def _inject_global_css():
         background-color: #f8fafc;
     }
 
-    /* ── Área de conteúdo principal ──────────────────────────────── */
-    /* ⚠️ ".main .block-container" é seletor de versões antigas do
-       Streamlit — a partir do 1.5x o container principal usa data-testid
-       "stMainBlockContainer" (sem a classe "main" como ancestral). Mantém
-       os dois seletores pra funcionar em qualquer versão instalada. */
+    /* ── Área de conteúdo principal (só o que a v3.6.0 não cobre) ──── */
+    /* padding-top/left/right e max-width agora vêm de
+       core/ui_global.py::injetar_css_global() (fonte única de
+       responsividade, chamada 1x logo após set_page_config). Aqui só o
+       padding inferior, que aquele CSS não define. Mantém os dois
+       seletores (".main .block-container" = Streamlit antigo;
+       "stMainBlockContainer" = 1.5x+) pra funcionar em qualquer versão. */
     .main .block-container,
     [data-testid="stMainBlockContainer"] {
-        padding-top:    1.5rem;
         padding-bottom: 3rem;
-        max-width:      1400px;
     }
 
     /* ── Header nativo do Streamlit (ocultar o vermelho padrão) ─── */
@@ -143,29 +148,19 @@ def _inject_global_css():
     [data-testid="stDataFrame"], [data-testid="stTable"] { overflow-x: auto; }
 
     /* ═══════════════ RESPONSIVIDADE GLOBAL (Mobile First) ═══════════ */
+    /* padding/max-width do container e empilhamento de st.columns() já
+       ficam a cargo de core/ui_global.py::injetar_css_global() (breakpoints
+       tablet<=1200px / mobile<=768px). Aqui só o que aquele CSS não cobre:
+       tabs roláveis e o ajuste fino de métricas/títulos/botões/inputs. */
     /* Tablets e telas médias */
     @media (max-width: 992px) {
-        .main .block-container,
-        [data-testid="stMainBlockContainer"] {
-            padding-left: 1rem; padding-right: 1rem; max-width: 100%;
-        }
         /* Tabs roláveis em vez de espremidas */
         .stTabs [data-baseweb="tab-list"] {
             overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch;
         }
     }
-    /* Celulares: colunas empilham em uma só */
+    /* Celulares: ajuste fino de tipografia e alvos de toque */
     @media (max-width: 640px) {
-        .main .block-container,
-        [data-testid="stMainBlockContainer"] {
-            padding-top: 0.8rem; padding-left: 0.7rem; padding-right: 0.7rem;
-        }
-        /* st.columns → empilha (cada coluna ocupa 100%) */
-        [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: 0.4rem !important; }
-        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
-        [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-            flex: 1 1 100% !important; width: 100% !important; min-width: 100% !important;
-        }
         /* Métricas e títulos mais compactos */
         [data-testid="stMetricValue"] { font-size: 1.5rem !important; }
         h1 { font-size: 1.5rem !important; }

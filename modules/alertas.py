@@ -1,11 +1,20 @@
-# modules/alertas.py — Tela de Alertas Automáticos (Sprint 5)
+# modules/alertas.py — Tela de Alertas Automáticos (Sprint 5 · repaginação UI v3.6.0)
 #
 # Exibe os alertas persistidos na tabela `alertas`: hot-spots crônicos e
 # reincidências, com severidade 🔴/🟡/🔵, filtros, recálculo manual, marcação
 # de status (visto/resolvido) e exportação CSV/Excel.
 #
-# Granularidade: ramal + origem (pátio). Canal: app (badge + tela) com
-# previsão de e-mail/export.
+# O QUE MUDOU NA REPAGINAÇÃO v3.6.0 (só ESTILO/UX — lógica de negócio intacta)
+# ---------------------------------------------------------------------------
+#   • Cores da FONTE ÚNICA core/tema.py (some COR_CRIT/COR_WARN/... duplicados).
+#   • Cartões-resumo usam .mrs-card (hover) + .mrs-fade-up (entrada suave).
+#   • Cartão de alerta CRÍTICO ganha barra de severidade com leve pulso —
+#     mesmo "DNA radar" do Unifilar, aqui em CSS, sem tocar no unifilar.py.
+#   • Layout responsivo: os cartões-resumo passam a usar a grid fluida global
+#     (.mrs-kpi-grid) em vez de st.columns(4) fixo → empilham no mobile.
+#   • RBAC, filtros, recálculo, export: SEM alteração de comportamento.
+#
+# Granularidade: ramal + origem (pátio). Canal: app (badge + tela).
 #
 # Sessão 1: Imports & CSS
 # Sessão 2: Cabeçalho & barra de ações
@@ -23,10 +32,17 @@ from database.queries import (
     get_alertas, marcar_alerta_status, contar_alertas_novos, log_acesso,
 )
 
-COR_CRIT = "#dc2626"
-COR_WARN = "#f59e0b"
-COR_INFO = "#2563eb"
-COR_OK   = "#16a34a"
+# Cores da fonte única (core/tema.py). Import defensivo — mesmo padrão do projeto.
+try:
+    from core.tema import CORES
+    COR_CRIT = CORES["critico"]
+    COR_WARN = CORES["atencao"]
+    COR_INFO = CORES["info"]
+    COR_OK   = CORES["ok"]
+    COR_PRIMARIA = CORES["primaria"]
+except Exception:  # pragma: no cover - fallback defensivo
+    COR_CRIT, COR_WARN, COR_INFO, COR_OK, COR_PRIMARIA = (
+        "#dc2626", "#f59e0b", "#2563eb", "#16a34a", "#1e3a5f")
 
 _SEV_META = {
     "critico": ("🔴", "Crítico",  COR_CRIT),
@@ -40,16 +56,46 @@ _TIPO_LABEL = {
 
 
 def _inject_css():
+    """CSS específico da tela de Alertas.
+
+    Depende do CSS GLOBAL (core/ui_global.injetar_css_global, chamado 1x em
+    app.py) para as animações .mrs-fade-up/.mrs-pulse. Aqui só o que é
+    exclusivo da lista de alertas. Idempotente via flag de sessão.
+    """
+    if st.session_state.get("_css_alertas_injetado"):
+        return
+    st.session_state["_css_alertas_injetado"] = True
     st.markdown("""
     <style>
     .alert-card {
-        border-left: 5px solid #ccc; border-radius: 10px;
-        padding: 12px 16px; margin-bottom: 10px;
+        position: relative;
+        border-left: 5px solid #ccc; border-radius: 12px;
+        padding: 12px 16px 12px 18px; margin-bottom: 10px;
         background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .alert-card:hover {
+        transform: translateX(2px);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.10);
+    }
+    /* Barra de severidade animada no topo do card crítico — "respira"
+       levemente, replicando o pulso do Unifilar em CSS (Unifilar intocado). */
+    .alert-card.critico::before {
+        content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        border-radius: 12px 12px 0 0;
+        background: linear-gradient(90deg, #dc2626, #f87171, #dc2626);
+        background-size: 200% 100%;
+        animation: mrsSweep 2.2s linear infinite;
     }
     .alert-badge {
         display:inline-block; border-radius:20px; padding:1px 10px;
         font-size:0.72rem; font-weight:600; margin-right:6px;
+    }
+    /* Grade fluida dos cartões-resumo (substitui st.columns(4) no mobile). */
+    .alert-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px; margin-bottom: 4px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -147,26 +193,29 @@ def _executar_recalculo(gerencia: str):
 # region ====================== SESSÃO 3: Cartões-resumo ========================
 
 def _cartoes_resumo(df: pd.DataFrame):
+    """4 cartões-resumo. Agora em GRID FLUIDA (empilha no mobile) e com hover."""
     total   = len(df)
     n_crit  = int((df["severidade"] == "critico").sum()) if not df.empty else 0
     n_aten  = int((df["severidade"] == "atencao").sum()) if not df.empty else 0
     n_novos = int((df["status"] == "novo").sum()) if not df.empty else 0
 
-    cols = st.columns(4)
     dados = [
-        ("Total de alertas", total, "#1e3a5f"),
-        ("🔴 Críticos",      n_crit, COR_CRIT),
-        ("🟡 Atenção",       n_aten, COR_WARN),
-        ("🆕 Novos",         n_novos, COR_OK),
+        ("Total de alertas", total, COR_PRIMARIA, ""),
+        ("🔴 Críticos",      n_crit, COR_CRIT, "mrs-pulse" if n_crit > 0 else ""),
+        ("🟡 Atenção",       n_aten, COR_WARN, ""),
+        ("🆕 Novos",         n_novos, COR_OK, ""),
     ]
-    for col, (label, valor, cor) in zip(cols, dados):
-        col.markdown(f"""
-        <div style="background:#fff; border-radius:12px; padding:14px 16px;
-                    border-top:4px solid {cor}; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-            <div style="font-size:0.78rem; color:#6b7280;">{label}</div>
-            <div style="font-size:1.7rem; font-weight:700; color:{cor};">{valor}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Um único bloco HTML com grid fluida — reflui sozinho conforme a largura.
+    cards = "".join(
+        f"""<div class="mrs-card mrs-fade-up {extra}"
+                 style="border-top:4px solid {cor};
+                        --mrs-pulse-color:{cor}55;">
+                <div style="font-size:0.78rem; color:#6b7280;">{label}</div>
+                <div style="font-size:1.7rem; font-weight:700; color:{cor};">{valor}</div>
+            </div>"""
+        for (label, valor, cor, extra) in dados
+    )
+    st.markdown(f'<div class="alert-kpi-grid">{cards}</div>', unsafe_allow_html=True)
 
 # endregion
 
@@ -195,7 +244,8 @@ def _render_lista(df: pd.DataFrame, pode_gerir: bool = True):
         return
 
     for _, r in df.iterrows():
-        icone, sev_lbl, cor = _SEV_META.get(r.get("severidade"), ("🔵", "—", COR_INFO))
+        sev = r.get("severidade")
+        icone, sev_lbl, cor = _SEV_META.get(sev, ("🔵", "—", COR_INFO))
         tipo_lbl = _TIPO_LABEL.get(r.get("tipo"), r.get("tipo", ""))
         ramal  = r.get("ramal") or "—"
         origem = r.get("origem") or "—"
@@ -204,9 +254,12 @@ def _render_lista(df: pd.DataFrame, pode_gerir: bool = True):
         score  = float(r.get("score_acumulado", 0) or 0)
         status = r.get("status", "novo")
 
+        # Classe extra: 'critico' liga a barra animada do topo; fade-up = entrada.
+        classe_sev = "critico" if sev == "critico" else ""
+
         with st.container():
             st.markdown(f"""
-            <div class="alert-card" style="border-left-color:{cor};">
+            <div class="alert-card mrs-fade-up {classe_sev}" style="border-left-color:{cor};">
                 <span class="alert-badge" style="background:{cor}22; color:{cor};">
                     {icone} {sev_lbl}</span>
                 <span class="alert-badge" style="background:#1e3a5f18; color:#1e3a5f;">

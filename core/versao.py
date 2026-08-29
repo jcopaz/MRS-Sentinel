@@ -78,4 +78,22 @@
 # do slider, sem jeito simples de evitar com essa biblioteca; reportar
 # se sentir lentidao real de uso. MINOR (funcionalidade nova compativel).
 
-APP_VERSION = "3.5.0"
+# 3.6.0 (2026-08-28): Repaginação UI/UX + Responsividade. Nasce o DESIGN
+# SYSTEM único (core/tema.py) — fim das cópias de COR_PRIMARIA/COR_CRIT/... que
+# viviam duplicadas em 7 arquivos (mesmo problema de "fonte única" que motivou
+# core/versao.py e core/glossarios.py). Nasce a camada de UI global
+# (core/ui_global.py): CSS GLOBAL RESPONSIVO injetado 1x em app.py (@media pra
+# tablet<=1200px e mobile<=768px; grid fluida de KPIs 4->2->1 colunas;
+# tipografia com clamp()), helper altura_responsiva() pra trocar os 34
+# height="XXXpx" fixos por altura relativa a vh, e o componente reutilizável
+# radar-pulse (pulso + anel concentrico) que leva o "DNA do Unifilar" pros KPIs
+# e Alertas SEM tocar em components/unifilar.py (que segue INTOCADO, a pedido
+# do Julio). components/kpi_card.py e modules/alertas.py repaginados (hover
+# elevado, fade-up, KPI de criticidade pulsa quando >=40%, barra de severidade
+# animada nos alertas criticos). Auditoria: antes havia @media=0 no projeto
+# inteiro. Nenhuma mudanca de schema, RBAC, filtros ou logica de negocio —
+# so estilo/UX. MAJOR pela propria regra (reorganizacao de fluxo visual +
+# nova camada de app), MINOR no espirito (100% retrocompativel, APIs publicas
+# preservadas). Adotado 3.6.0 (MINOR) por ser aditivo e nao quebrar nada.
+
+APP_VERSION = "3.6.0"

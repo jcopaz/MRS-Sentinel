@@ -1,11 +1,22 @@
 # =============================================================================
-# components/kpi_card.py — KPI Cards com Sparklines ECharts
-# Sprint 3 (rev.3) — MRS Sentinel
+# components/kpi_card.py — KPI Cards com Sparklines ECharts  (v3.6.0)
+# Sprint 3 (rev.4 — repaginação UI/responsividade) — MRS Sentinel
 #
-# FIEL AO app1.py:
-#   • kpi_card_sparkline() com ECharts (smooth line + areaStyle gradiente)
-#   • gerar_sparkline()    filtra últimos 12 meses
-#   • render_kpi_cards()   4 KPIs: Total, Prio Alta, Ramal top, Lead Time
+# O QUE MUDOU EM RELAÇÃO À rev.3 (v3.5.0)
+# ---------------------------------------
+#   • Cores agora vêm de core.tema (fonte única) — NÃO há mais #hex soltos
+#     copiados aqui. Aliases legados mantidos via import de core.tema.
+#   • Card usa a classe global .mrs-card (hover elevado + fade-up) definida em
+#     core/ui_global.injetar_css_global(). O HTML inline vira só a estrutura.
+#   • Número do KPI usa tipografia RESPONSIVA (clamp) — encolhe sozinho em
+#     tela estreita em vez de estourar o card.
+#   • API PÚBLICA INTACTA: render_kpi_cards(df, gerencia, disciplina) e
+#     kpi_card_sparkline(...) têm a MESMA assinatura de antes — drop-in.
+#   • Sparkline ECharts/Plotly: lógica de dados idêntica (fiel ao app1.py).
+#
+# ⚠️ Para o hover/fade/tipografia responsiva funcionarem, o app precisa ter
+#    chamado core.ui_global.injetar_css_global() (feito 1x em app.py). Se não
+#    tiver, os cards ainda renderizam — só sem as animações (degrada bem).
 #
 # Sessão 1: Imports & helpers
 # Sessão 2: gerar_sparkline()
@@ -28,15 +39,34 @@ import plotly.graph_objects as go
 
 from core.glossarios import nome_ramal
 
-COR_PRIMARIA = "#1e3a5f"
-COR_CRIT     = "#dc2626"
-COR_WARN     = "#f59e0b"
-COR_OK       = "#16a34a"
-COR_EE       = "#7c3aed"
+# Cores agora da FONTE ÚNICA (core/tema.py). Import defensivo para não quebrar
+# ambiente parcial/teste — mesmo padrão usado no resto do projeto.
+try:
+    from core.tema import CORES, TIPO, hex_to_rgba, hex_alpha
+    COR_PRIMARIA = CORES["primaria"]
+    COR_CRIT     = CORES["critico"]
+    COR_WARN     = CORES["atencao"]
+    COR_OK       = CORES["ok"]
+    COR_EE       = CORES["ee"]
+    _TIPO_VALOR  = TIPO.get("kpi_valor", "clamp(20px, 2.2vw, 30px)")
+    _TIPO_LABEL  = TIPO.get("kpi_label", "clamp(10px, 1.0vw, 12px)")
+except Exception:  # pragma: no cover - fallback defensivo
+    COR_PRIMARIA, COR_CRIT, COR_WARN, COR_OK, COR_EE = (
+        "#1e3a5f", "#dc2626", "#f59e0b", "#16a34a", "#7c3aed")
+    _TIPO_VALOR = "clamp(20px, 2.2vw, 30px)"
+    _TIPO_LABEL = "clamp(10px, 1.0vw, 12px)"
+
+    def hex_to_rgba(hex_cor, alpha=1.0):
+        h = hex_cor.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+
+    def hex_alpha(c, a="50"):
+        return f"{c}{a}"
 
 MESES_PT = {
-    1:"Jan", 2:"Fev", 3:"Mar", 4:"Abr", 5:"Mai", 6:"Jun",
-    7:"Jul", 8:"Ago", 9:"Set", 10:"Out", 11:"Nov", 12:"Dez",
+    1: "Jan", 2: "Fev", 3: "Mar", 4: "Abr", 5: "Mai", 6: "Jun",
+    7: "Jul", 8: "Ago", 9: "Set", 10: "Out", 11: "Nov", 12: "Dez",
 }
 # endregion
 
@@ -47,7 +77,7 @@ def gerar_sparkline(df_base: pd.DataFrame, agg_func: str = "count",
                     coluna: str = "numero_nota") -> dict:
     """
     Gera dados de sparkline dos últimos 12 meses.
-    FIEL AO app1.py — mesma lógica, mesmo formato de saída.
+    LÓGICA IDÊNTICA à rev.3 (fiel ao app1.py) — só o estilo mudou, não os dados.
     """
     col_nota = "numero_nota" if "numero_nota" in df_base.columns else (
                "nota" if "nota" in df_base.columns else None)
@@ -80,35 +110,37 @@ def gerar_sparkline(df_base: pd.DataFrame, agg_func: str = "count",
 # region ====================== SESSÃO 3: kpi_card_sparkline() =================
 
 def kpi_card_sparkline(col, valor: str, label: str, sparkline_data: dict,
-                       cor_principal: str, icone: str, spark_key: str = ""):
+                       cor_principal: str, icone: str, spark_key: str = "",
+                       pulsar: bool = False):
     """
     KPI Card com sparkline ECharts.
-    FIEL AO app1.py: card HTML + sparkline smooth + areaStyle gradiente.
 
-    Nota: ECharts aceita hex+alpha (#rrggbbaa), diferente do Plotly.
-          Por isso usamos cor_principal + '50' e '05' diretamente.
+    Mudanças de estilo (mantendo a assinatura + 1 arg opcional retrocompatível):
+      • Usa a classe global .mrs-card (hover elevado) + .mrs-fade-up (entrada).
+      • Tipografia responsiva via clamp() — número não estoura em tela estreita.
+      • `pulsar=True` (NOVO, opcional): adiciona a classe .mrs-pulse para o card
+        "respirar" — usar em KPI de criticidade quando o valor for alarmante.
+        Default False → 100% retrocompatível com chamadas antigas.
+
+    Nota ECharts: aceita hex+alpha (#rrggbbaa) — usamos hex_alpha() do tema.
     """
     with col:
-        # Card HTML (igual app1)
+        classes = "mrs-card mrs-fade-up" + (" mrs-pulse" if pulsar else "")
+        # --mrs-pulse-color deixa o halo do pulso na cor do KPI (não fixo em vermelho).
+        pulse_var = (f"--mrs-pulse-color:{hex_to_rgba(cor_principal, 0.45)};"
+                     if pulsar else "")
         st.markdown(
             f"""
-            <div style='
-                background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-                border: 1px solid #e5e7eb;
-                border-left: 4px solid {cor_principal};
-                padding: 16px 18px;
-                border-radius: 12px;
-                box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-                margin-bottom: 8px;
-            '>
-                <div style='display:flex; justify-content:space-between; align-items:center;'>
+            <div class="{classes}" style="border-left:4px solid {cor_principal};
+                        {pulse_var} margin-bottom:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
-                        <div style='font-size:12px; color:#6b7280; font-weight:600;
-                                    text-transform:uppercase; letter-spacing:0.5px;'>
+                        <div style="font-size:{_TIPO_LABEL}; color:#6b7280; font-weight:600;
+                                    text-transform:uppercase; letter-spacing:0.5px;">
                             {icone} {label}
                         </div>
-                        <div style='font-size:28px; font-weight:800;
-                                    color:{cor_principal}; line-height:1.2; margin-top:4px;'>
+                        <div style="font-size:{_TIPO_VALOR}; font-weight:800;
+                                    color:{cor_principal}; line-height:1.2; margin-top:4px;">
                             {valor}
                         </div>
                     </div>
@@ -123,84 +155,54 @@ def kpi_card_sparkline(col, valor: str, label: str, sparkline_data: dict,
 
         if valores and len(valores) >= 2:
             if ECHARTS_OK:
-                # ECharts sparkline — igual app1
-                # ECharts aceita #rrggbbaa (8 chars hex+alpha)
                 spark_opt = {
                     "grid": {"left": 5, "right": 5, "top": 10, "bottom": 5,
                              "containLabel": False},
-                    "xAxis": {
-                        "type": "category", "show": False,
-                        "data": meses, "boundaryGap": False,
-                    },
+                    "xAxis": {"type": "category", "show": False,
+                              "data": meses, "boundaryGap": False},
                     "yAxis": {"type": "value", "show": False, "scale": True},
                     "tooltip": {
                         "trigger": "axis",
                         "backgroundColor": "rgba(255,255,255,0.98)",
-                        "borderColor": cor_principal,
-                        "borderWidth": 2,
+                        "borderColor": cor_principal, "borderWidth": 2,
                         "padding": [8, 12],
                         "textStyle": {"color": "#1f2937", "fontSize": 13,
-                                     "fontWeight": "bold"},
-                        "extraCssText": (
-                            "box-shadow:0 4px 12px rgba(0,0,0,0.15);"
-                            "border-radius:8px;"
-                        ),
-                        "axisPointer": {
-                            "type": "line",
-                            "lineStyle": {"color": cor_principal, "width": 1,
-                                         "type": "dashed"},
-                        },
+                                      "fontWeight": "bold"},
+                        "extraCssText": ("box-shadow:0 4px 12px rgba(0,0,0,0.15);"
+                                         "border-radius:8px;"),
+                        "axisPointer": {"type": "line",
+                                        "lineStyle": {"color": cor_principal,
+                                                      "width": 1, "type": "dashed"}},
                     },
                     "series": [{
-                        "type": "line",
-                        "data": valores,
-                        "smooth": True,
+                        "type": "line", "data": valores, "smooth": True,
                         "showSymbol": False,
-                        "emphasis": {
-                            "itemStyle": {
-                                "color": cor_principal,
-                                "borderColor": "#fff", "borderWidth": 2,
-                            },
-                            "scale": 2,
-                        },
+                        "emphasis": {"itemStyle": {"color": cor_principal,
+                                     "borderColor": "#fff", "borderWidth": 2},
+                                     "scale": 2},
                         "lineStyle": {"color": cor_principal, "width": 2.5},
-                        # ECharts aceita hex+alpha — igual app1
-                        "areaStyle": {
-                            "color": {
-                                "type": "linear",
-                                "x": 0, "y": 0, "x2": 0, "y2": 1,
-                                "colorStops": [
-                                    {"offset": 0,
-                                     "color": f"{cor_principal}50"},
-                                    {"offset": 1,
-                                     "color": f"{cor_principal}05"},
-                                ],
-                            }
-                        },
+                        "areaStyle": {"color": {
+                            "type": "linear", "x": 0, "y": 0, "x2": 0, "y2": 1,
+                            "colorStops": [
+                                {"offset": 0, "color": hex_alpha(cor_principal, "50")},
+                                {"offset": 1, "color": hex_alpha(cor_principal, "05")},
+                            ]}},
                     }],
                 }
-                st_echarts(
-                    spark_opt, height="55px",
-                    key=f"spark_{spark_key}_{label.replace(' ', '_')}",
-                )
+                st_echarts(spark_opt, height="55px",
+                           key=f"spark_{spark_key}_{label.replace(' ', '_')}")
             else:
-                # Fallback Plotly — converte hex para rgba
-                h = cor_principal.lstrip("#")
-                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                # Fallback Plotly — hex_to_rgba() do tema (Plotly não aceita hex+alpha).
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=meses, y=valores, mode="lines",
                     line=dict(color=cor_principal, width=2),
-                    fill="tozeroy",
-                    fillcolor=f"rgba({r},{g},{b},0.15)",
-                ))
+                    fill="tozeroy", fillcolor=hex_to_rgba(cor_principal, 0.15)))
                 fig.update_layout(
                     height=55, margin=dict(l=0, r=0, t=0, b=0),
                     plot_bgcolor="white", paper_bgcolor="white",
-                    xaxis=dict(visible=False),
-                    yaxis=dict(visible=False),
-                    showlegend=False,
-                )
+                    xaxis=dict(visible=False), yaxis=dict(visible=False),
+                    showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
 
 # endregion
@@ -211,14 +213,17 @@ def kpi_card_sparkline(col, valor: str, label: str, sparkline_data: dict,
 def render_kpi_cards(df: pd.DataFrame, gerencia: str = "SP",
                      disciplina: str = "VP"):
     """
-    Renderiza 4 KPI Cards com sparklines ECharts.
-    FIEL AO app1.py — mesma lógica dos 4 KPIs.
+    Renderiza 4 KPI Cards com sparklines.
+    LÓGICA DE CÁLCULO IDÊNTICA à rev.3 — só o layout ficou responsivo:
+    quando a viewport aperta, o CSS global (.mrs-kpi-grid / media queries)
+    reflui de 4 → 2 → 1 colunas. Aqui seguimos usando st.columns(4) como
+    "trilho"; o empilhamento no mobile é feito pelo CSS de ui_global.
 
     KPIs:
-      1. Total de Notas         (azul)   — sparkline volume mensal
-      2. Prio Alta/Muito Alta % (vermelho)
+      1. Total de Notas         (azul)
+      2. Prio Alta/Muito Alta % (vermelho) — PULSA se >= 40% (sinal de alarme)
       3. Ramal mais crítico     (amarelo)
-      4. Lead Time Médio (verde) OR Pátio mais crítico (roxo)
+      4. Lead Time Médio (verde) OU Pátio mais crítico (roxo)
     """
     if df.empty:
         st.info("Sem dados para exibir KPIs.")
@@ -226,7 +231,6 @@ def render_kpi_cards(df: pd.DataFrame, gerencia: str = "SP",
 
     total_notas = len(df)
 
-    # ── Prioridade Alta ────────────────────────────────────────────────────────
     col_prio = "prioridade" if "prioridade" in df.columns else None
     if col_prio:
         mask_alta   = df[col_prio].isin(["1-Muito alta", "2-Alta"])
@@ -235,7 +239,6 @@ def render_kpi_cards(df: pd.DataFrame, gerencia: str = "SP",
         mask_alta   = pd.Series([False] * len(df), index=df.index)
         pct_critica = 0.0
 
-    # ── Ramal mais crítico ─────────────────────────────────────────────────────
     col_ramal = "ramal" if "ramal" in df.columns else (
                 "trecho" if "trecho" in df.columns else None)
     if col_ramal and "score" in df.columns and total_notas > 0:
@@ -244,27 +247,23 @@ def render_kpi_cards(df: pd.DataFrame, gerencia: str = "SP",
     else:
         ramal_top = ramal_top_label = "—"
 
-    # ── Pátio mais crítico ─────────────────────────────────────────────────────
     col_patio = "origem" if "origem" in df.columns else None
     if col_patio and "score" in df.columns and total_notas > 0:
         patio_top = df.groupby(col_patio)["score"].sum().idxmax()
     else:
         patio_top = "—"
 
-    # ── Lead Time ─────────────────────────────────────────────────────────────
     lead_time_medio = None
     if "lead_time_dias" in df.columns:
         lt_valido = pd.to_numeric(df["lead_time_dias"], errors="coerce").dropna()
         if len(lt_valido) > 0:
             lead_time_medio = lt_valido.mean()
 
-    # ── Sparklines ────────────────────────────────────────────────────────────
-    spark_total    = gerar_sparkline(df)
-    spark_critica  = gerar_sparkline(df[mask_alta])
-    spark_ramal    = (
-        gerar_sparkline(df[df[col_ramal] == ramal_top])
-        if ramal_top != "—" and col_ramal else {"meses": [], "valores": []}
-    )
+    spark_total   = gerar_sparkline(df)
+    spark_critica = gerar_sparkline(df[mask_alta])
+    spark_ramal   = (gerar_sparkline(df[df[col_ramal] == ramal_top])
+                     if ramal_top != "—" and col_ramal
+                     else {"meses": [], "valores": []})
 
     if lead_time_medio is not None:
         df_lt = df.dropna(subset=["data_nota", "lead_time_dias"]).copy()
@@ -276,32 +275,31 @@ def render_kpi_cards(df: pd.DataFrame, gerencia: str = "SP",
             spark_kpi4 = {
                 "meses":   [f"{MESES_PT[d.month]}/{str(d.year)[-2:]}"
                             for d in serie_lt.index],
-                "valores": [round(float(v), 0) for v in serie_lt.values],
-            }
+                "valores": [round(float(v), 0) for v in serie_lt.values]}
         else:
             spark_kpi4 = {"meses": [], "valores": []}
     else:
-        spark_kpi4 = (
-            gerar_sparkline(df[df[col_patio] == patio_top])
-            if patio_top != "—" and col_patio else {"meses": [], "valores": []}
-        )
+        spark_kpi4 = (gerar_sparkline(df[df[col_patio] == patio_top])
+                      if patio_top != "—" and col_patio
+                      else {"meses": [], "valores": []})
 
-    # ── Renderiza ─────────────────────────────────────────────────────────────
     col1, col2, col3, col4 = st.columns(4)
     kp = f"{gerencia}_{disciplina}"
 
-    kpi_card_sparkline(col1, f"{total_notas:,}",
-                       "Total de Notas", spark_total, COR_PRIMARIA, "📋", kp)
-    kpi_card_sparkline(col2, f"{pct_critica:.1f}%",
-                       "Prio. Alta/Muito Alta", spark_critica, COR_CRIT, "🔴", kp)
-    kpi_card_sparkline(col3, ramal_top_label,
-                       "Ramal mais crítico", spark_ramal, COR_WARN, "🗺️", kp)
+    kpi_card_sparkline(col1, f"{total_notas:,}", "Total de Notas",
+                       spark_total, COR_PRIMARIA, "📋", kp)
+    # Pulsa quando a criticidade está alta — traz o "radar" pro dashboard.
+    kpi_card_sparkline(col2, f"{pct_critica:.1f}%", "Prio. Alta/Muito Alta",
+                       spark_critica, COR_CRIT, "🔴", kp,
+                       pulsar=(pct_critica >= 40.0))
+    kpi_card_sparkline(col3, ramal_top_label, "Ramal mais crítico",
+                       spark_ramal, COR_WARN, "🗺️", kp)
 
     if lead_time_medio is not None:
         kpi_card_sparkline(col4, f"{lead_time_medio:.0f} dias",
                            "Lead Time Médio", spark_kpi4, COR_OK, "⏱️", kp)
     else:
-        kpi_card_sparkline(col4, str(patio_top),
-                           "Pátio mais crítico", spark_kpi4, COR_EE, "📍", kp)
+        kpi_card_sparkline(col4, str(patio_top), "Pátio mais crítico",
+                           spark_kpi4, COR_EE, "📍", kp)
 
 # endregion

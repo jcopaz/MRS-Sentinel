@@ -38,6 +38,15 @@ except ImportError:
 
 from core.glossarios import GLOSSARIO_VP, GLOSSARIO_EE, STATUS_BASE, nome_ramal, status_base_label
 
+# Altura responsiva (core/ui_global.py, v3.6.0) — import defensivo: se por
+# algum motivo o módulo não estiver disponível, cai de volta pro px fixo
+# original em vez de quebrar a tela.
+try:
+    from core.ui_global import altura_responsiva
+except Exception:  # pragma: no cover - fallback defensivo
+    def altura_responsiva(base: int = 400, min_px: int = 260, max_px: int = 640) -> str:
+        return f"{base}px"
+
 # Glossário combinado só para tradução de código de anomalia na UI.
 # Seguro: prefixos VP (TR/TJ/SD/AM/DM/DO/GE/LA/GM/CS) e EE (SN/EN/TE/WS/S1)
 # não colidem.
@@ -106,7 +115,7 @@ def _render_criticidade(df: pd.DataFrame, gerencia: str):
             "barWidth": "55%",
         }],
     }
-    st_echarts(opt, height="320px", key=f"vg_criticidade_{gerencia}")
+    st_echarts(opt, height=altura_responsiva(320), key=f"vg_criticidade_{gerencia}")
 
 # endregion
 
@@ -160,7 +169,7 @@ def _render_status_ordem(df: pd.DataFrame, gerencia: str):
             "data": donut_data,
         }],
     }
-    st_echarts(opt, height="320px", key=f"vg_status_ordem_{gerencia}")
+    st_echarts(opt, height=altura_responsiva(320), key=f"vg_status_ordem_{gerencia}")
 
 # endregion
 
@@ -428,7 +437,7 @@ def _render_notas_periodo(df: pd.DataFrame, gerencia: str):
              "itemStyle": {"color": COR_GOLD}, "symbol": "circle", "symbolSize": 6},
         ],
     }
-    st_echarts(opt, height="400px", key=f"vg_drill_{gerencia}_{granul}")
+    st_echarts(opt, height=altura_responsiva(400), key=f"vg_drill_{gerencia}_{granul}")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric(f"📂 Total Abertas ({granul.lower()})", f"{sum(vals_a):,}")
@@ -548,7 +557,7 @@ def _render_planejado_realizado(df: pd.DataFrame, gerencia: str):
              }},
         ],
     }
-    st_echarts(opt, height="450px", key=f"vg_plan_real_{gerencia}")
+    st_echarts(opt, height=altura_responsiva(450), key=f"vg_plan_real_{gerencia}")
 
     total_plan = sum(vals_plan)
     total_real = sum(vals_real)
