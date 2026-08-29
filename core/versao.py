@@ -110,4 +110,24 @@
 # sem mudar comportamento esperado (o pedido original do zoom sincronizado
 # ja tinha sido feito no 3.5.0; aqui so' conserta o que estava quebrado).
 
-APP_VERSION = "3.6.1"
+# 3.7.0 (2026-08-29): "Unifilar de Ativo" redesenhado de bolhas pra BARRAS
+# ESPELHADAS por KM (ideia do Julio, validada com protótipos comparativos
+# antes de codar -- 4 alternativas avaliadas: treemap, ranking em barras,
+# bolhas com jitter, e a escolhida). Bolhas se atropelavam quando varios
+# ativos ficavam proximos no KM (mesmo bug que motivou a correcao 3.6.1);
+# agora cada ativo vira 1 par de barras de largura FIXA que "empurra" a
+# vizinha (dodge horizontal em KM, ver docstring de render_unifilar_ativo)
+# em vez de se sobrepor. Modo Dual: topo = score das notas Abertas
+# (cresce a partir da linha "Via Abertas"), base = score das Concluidas
+# (espelhado, cresce a partir da linha "Via Concluidas") -- mesmo criterio
+# de score/cor/cronico/top-10% do resto do Unifilar. Nome do ativo agora
+# fica numa etiqueta na faixa vazia ENTRE as duas linhas de referencia
+# (nao mais flutuando em cima da bolha/barra). construir_serie_unifilar_
+# ativo() ganhou 3 colunas novas em `agreg` (tooltipHTML/is_top/is_cronico)
+# -- aditivo, pn/pp/pc do retorno original preservados intactos. Testado
+# em runtime via AppTest (dual/empilhado/vazio, dodge com ativos a 20-50m
+# de distancia, deteccao de hotspot) e a regressao do fix 3.6.1 (zoom
+# sincronizado) re-confirmada intacta. MINOR (repaginação de uma
+# visualização existente, comportamento geral e API preservados).
+
+APP_VERSION = "3.7.0"

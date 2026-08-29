@@ -53,6 +53,36 @@ COR_CRONICO  = "#7c3aed"   # roxo — anel de hot-spot crônico (distinto do pul
 
 # Folga (px) do anel crônico em relação ao diâmetro da bolha que ele circunda.
 RING_DELTA   = 12
+
+# Mesmo gradiente do visualMap usado nos gráficos de bolha (5 stops,
+# interpolação linear entre eles — é o que o ECharts faz sozinho quando
+# "inRange.color" é passado sem "pieces" explícitos). Replicado aqui em
+# Python puro porque o "Unifilar de Ativo" em barras (v3.7.0) tem 2 scores
+# por item (Abertas E Concluídas) — um visualMap só colore por 1 dimensão
+# por série, então cada barra calcula a própria cor em vez de depender do
+# widget do ECharts (que essa visão específica não usa).
+_GRADIENTE_SCORE = [
+    (0.00, (22, 163, 74)),    # #16a34a
+    (0.25, (132, 184, 31)),   # #84cc16
+    (0.50, (234, 179, 8)),    # #eab308
+    (0.75, (245, 158, 11)),   # #f59e0b
+    (1.00, (220, 38, 38)),    # #dc2626
+]
+
+
+def _cor_score(score: float, score_max: float) -> str:
+    """Score -> hex, mesmo gradiente verde->vermelho do visualMap padrão."""
+    t = 0.0 if score_max <= 0 else max(0.0, min(1.0, score / score_max))
+    for i in range(len(_GRADIENTE_SCORE) - 1):
+        t0, c0 = _GRADIENTE_SCORE[i]
+        t1, c1 = _GRADIENTE_SCORE[i + 1]
+        if t0 <= t <= t1:
+            f = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            r = round(c0[0] + f * (c1[0] - c0[0]))
+            g = round(c0[1] + f * (c1[1] - c0[1]))
+            b = round(c0[2] + f * (c1[2] - c0[2]))
+            return f"#{r:02x}{g:02x}{b:02x}"
+    return "#dc2626"
 # endregion
 
 
@@ -343,6 +373,12 @@ def construir_serie_unifilar_ativo(df_base: pd.DataFrame, y_offset: float = 0,
         return 12 + (qtd / qtd_max) * 43   # 12–55 px — mesma escala do KM
 
     pontos_normais, pontos_pulsantes, pontos_cronicos = [], [], []
+    # Colunas extra em `agreg` (tooltip pronto + flags) -- usadas pelo
+    # renderizador de barras espelhadas (render_unifilar_ativo, v3.7.0) em
+    # vez de reconstruir o mesmo HTML/limiar duas vezes. pn/pp/pc continuam
+    # existindo do jeito que estavam -- ninguém mais os usa hoje, mas é
+    # aditivo, não quebra nenhum caller.
+    tooltips_col, is_top_col, is_cronico_col = [], [], []
 
     for _, row in agreg.iterrows():
         tamanho = calc_tamanho(row["qtd_notas"])
@@ -392,13 +428,22 @@ def construir_serie_unifilar_ativo(df_base: pd.DataFrame, y_offset: float = 0,
         valor = [float(row["km_pos"]), y_offset, float(row["score_total"]), int(row["qtd_notas"])]
         ponto = {"value": valor, "symbolSize": tamanho, "tooltipHTML": hover}
 
-        if row["score_total"] >= limiar:
+        eh_top = bool(row["score_total"] >= limiar)
+        if eh_top:
             pontos_pulsantes.append(ponto)
         else:
             pontos_normais.append(ponto)
 
         if n_cron > 0:
             pontos_cronicos.append({"value": valor, "symbolSize": tamanho + RING_DELTA})
+
+        tooltips_col.append(hover)
+        is_top_col.append(eh_top)
+        is_cronico_col.append(n_cron > 0)
+
+    agreg["tooltipHTML"] = tooltips_col
+    agreg["is_top"] = is_top_col
+    agreg["is_cronico"] = is_cronico_col
 
     km_min = float(agreg["km_pos"].min()) if len(agreg) else None
     km_max = float(agreg["km_pos"].max()) if len(agreg) else None
@@ -410,140 +455,206 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
                            km_min_global: float | None, km_max_global: float | None,
                            modo_view: str = "Empilhado") -> None:
     """
-    "Unifilar de Ativo" — mesma visualização de bolhas por KM do Unifilar
-    principal, mas cada bolha é um ATIVO específico (ex.: "AMV 22 — Linha
-    2"), não um trecho de KM. Mostra onde, dentro do recorte de KM/Ramal/
-    Trecho já filtrado acima, as notas se concentram em ativos
-    específicos. Eixo de KM alinhado com o Unifilar principal, pra
-    comparar visão macro (KM) com a micro (Ativo) lado a lado.
+    "Unifilar de Ativo" — 1 par de barras verticais por ativo (topo =
+    Abertas, base = Concluídas, espelhadas em modo Dual), no MESMO eixo de
+    KM do Unifilar principal (responsivo ao zoom — ver render_unifilar).
 
-    modo_view="Dual" espelha o mesmo modo do Unifilar principal — topo
-    (y=+1) = Abertas, base (y=-1) = Concluídas, pra comparar o que ainda
-    está pendente com o que já foi atuado no mesmo ativo. Precisa da
-    coluna 'origem_base' (calculada no Unifilar principal); sem ela cai
-    pro modo Empilhado (tudo numa linha só).
+    v3.7.0 substitui a versão anterior em bolhas (v3.3.0-3.6.0): bolhas se
+    atropelavam quando vários ativos ficavam próximos no KM — bug real
+    relatado pelo Julio, que também redesenhou a solução: barras têm
+    largura FIXA e "empurram" a vizinha (dodge horizontal) em vez de se
+    empilharem no mesmo ponto, e o nome do ativo fica numa etiqueta na
+    faixa vazia ENTRE as duas linhas de referência (Abertas em y=+1,
+    Concluídas em y=-1) — não mais flutuando em cima da barra.
 
-    Pedido de melhoria de um técnico na apresentação da ferramenta
-    (2026-08-28); Dual pedido pelo Julio logo em seguida, pra manter
-    consistência com o Unifilar por KM.
+    modo_view="Dual": topo (y>+1, crescendo pra cima a partir da linha
+    "Via Abertas") = score das notas Abertas do ativo; base (y<-1,
+    crescendo pra baixo a partir da linha "Via Concluídas") = score das
+    Concluídas — mesmo critério de score/cor/crônico/hotspot do resto do
+    Unifilar. Precisa de 'origem_base' (calculada no Unifilar principal);
+    sem ela cai pro modo Empilhado (só Abertas/tudo junto, 1 direção só).
+
+    Limitação assumida conscientemente: o dodge horizontal é calculado em
+    KM (Python), não em pixel real (o Python não sabe a largura renderizada
+    do gráfico, que é responsiva). Usa uma proporção conservadora (assume
+    o pior caso — mobile, ~320px) — sempre erra pro lado de dar espaço
+    demais, nunca de menos, então nunca deveria voltar a sobrepor.
     """
     if not ECHARTS_OK or ("linha" not in df.columns and "ativo" not in df.columns):
         return
 
+    cols = ["_rotulo_ativo", "km_pos", "score_total", "qtd_notas", "is_top", "is_cronico", "tooltipHTML"]
     usar_dual = modo_view == "Dual" and "origem_base" in df.columns
-
-    series = []
-    indices_score = []
-
-    def _add_score_series(s):
-        indices_score.append(len(series))
-        series.append(s)
 
     if usar_dual:
         df_a = df[df["origem_base"] == "Abertas"]
         df_c = df[df["origem_base"] == "Concluídas"]
-        pn_a, pp_a, pc_a, agreg_a, kma_min, kma_max = construir_serie_unifilar_ativo(
+        _, _, _, agreg_a, kma_min, kma_max = construir_serie_unifilar_ativo(
             df_a, y_offset=1, label=f"📋 Abertas — {gerencia}"
         )
-        pn_c, pp_c, pc_c, agreg_c, kmc_min, kmc_max = construir_serie_unifilar_ativo(
+        _, _, _, agreg_c, kmc_min, kmc_max = construir_serie_unifilar_ativo(
             df_c, y_offset=-1, label=f"✅ Concluídas — {gerencia}"
         )
-        pn, pp, pc = pn_a + pn_c, pp_a + pp_c, pc_a + pc_c
-        agreg = pd.concat([agreg_a, agreg_c], ignore_index=True) if len(agreg_a) or len(agreg_c) else agreg_a
+        if agreg_a.empty and agreg_c.empty:
+            return
         kmm = min([v for v in (kma_min, kmc_min) if v is not None and pd.notna(v)], default=None)
         kmx = max([v for v in (kma_max, kmc_max) if v is not None and pd.notna(v)], default=None)
+
+        a = (agreg_a[cols] if len(agreg_a) else pd.DataFrame(columns=cols)).rename(
+            columns={c: f"ab_{c}" for c in cols if c != "_rotulo_ativo"})
+        c = (agreg_c[cols] if len(agreg_c) else pd.DataFrame(columns=cols)).rename(
+            columns={c: f"co_{c}" for c in cols if c != "_rotulo_ativo"})
+        ativos = pd.merge(a, c, on="_rotulo_ativo", how="outer")
+        ativos["km_pos"] = ativos[["ab_km_pos", "co_km_pos"]].mean(axis=1, skipna=True)
+        score_max_local = float(pd.concat([
+            ativos["ab_score_total"].dropna(), ativos["co_score_total"].dropna()
+        ]).max()) if len(ativos) else 0.0
     else:
-        pn, pp, pc, agreg, kmm, kmx = construir_serie_unifilar_ativo(
+        _, _, _, agreg, kmm, kmx = construir_serie_unifilar_ativo(
             df, y_offset=0, label=f"🔧 Ativos — {gerencia}"
         )
+        if agreg.empty:
+            return
+        ativos = agreg[cols].rename(columns={c: f"ab_{c}" for c in cols if c != "_rotulo_ativo"})
+        ativos["km_pos"] = ativos["ab_km_pos"]
+        score_max_local = float(ativos["ab_score_total"].max()) if len(ativos) else 0.0
 
-    if not pn and not pp:
-        return
+    ativos = ativos.sort_values("km_pos").reset_index(drop=True)
 
     st.markdown("---")
     st.markdown("#### 🔧 Unifilar de Ativo — Hot-spots por Ativo")
-    if usar_dual:
-        st.caption(
-            f"{len(agreg_a):,} ativo(s) com nota Aberta · {len(agreg_c):,} ativo(s) com nota Concluída "
-            "neste recorte. Tamanho = volume de notas · Cor = score médio · Pulso = hot-spot crítico."
-        )
-    else:
-        st.caption(
-            f"{len(agreg):,} ativo(s) identificado(s) neste recorte. "
-            "Tamanho = volume de notas · Cor = score médio · Pulso = hot-spot crítico."
-        )
+    st.caption(
+        f"{len(ativos):,} ativo(s) identificado(s) neste recorte. "
+        "Altura da barra = score (mesma escala verde→vermelho do Unifilar principal) · "
+        "borda vermelha grossa = top 10% mais crítico · etiqueta com borda roxa = hot-spot crônico."
+        + (" Topo = notas Abertas · base = notas Concluídas (espelhado)." if usar_dual else "")
+    )
 
     km_lo = km_min_global if km_min_global is not None and pd.notna(km_min_global) else (kmm if kmm is not None else 0.0)
     km_hi = km_max_global if km_max_global is not None and pd.notna(km_max_global) else (kmx if kmx is not None else 100.0)
+    if km_hi <= km_lo:
+        km_hi = km_lo + 1.0
 
+    # ── Dodge horizontal em KM (ver docstring) ─────────────────────────────
+    BAR_W_PX = 16
+    MIN_GAP_PX = BAR_W_PX + 8
+    ASSUMED_PLOT_PX = 320   # pior caso (mobile) — erra sempre pro lado seguro
+    min_gap_km = (km_hi - km_lo) * (MIN_GAP_PX / ASSUMED_PLOT_PX)
+
+    kms_dodged = list(ativos["km_pos"])
+    for i in range(1, len(kms_dodged)):
+        if kms_dodged[i] - kms_dodged[i - 1] < min_gap_km:
+            kms_dodged[i] = kms_dodged[i - 1] + min_gap_km
+    if kms_dodged and kms_dodged[-1] > km_hi:
+        overflow = kms_dodged[-1] - km_hi
+        kms_dodged = [k - overflow for k in kms_dodged]
+    ativos["km_dodge"] = kms_dodged
+
+    # ── Geometria em pixel ──────────────────────────────────────────────────
+    # grid com margens FIXAS (containLabel=False) pra saber exatamente quanto
+    # espaço em px cada barra tem disponível — bar anchora na linha "Via"
+    # (y=+-1) e cresce pra fora; a etiqueta do ativo mora no espaço VAZIO
+    # entre as duas linhas (y=0), que as barras nunca invadem.
+    altura_ativo = 460 if usar_dual else 320
+    grid_top, grid_bottom = 22, 78
+    plot_h_px = altura_ativo - grid_top - grid_bottom
+    y_min, y_max = (-2.5, 2.5) if usar_dual else (-1.2, 1.2)
+    px_por_unidade = plot_h_px / (y_max - y_min)
+    # 0.86 de folga pra sobrar espaço pra borda mais grossa do hotspot sem
+    # encostar na barra da via oposta ou no topo/base do grid.
+    max_bar_px = max(16.0, (y_max - 1) * px_por_unidade * 0.86)
+
+    def _altura_px(score):
+        if score_max_local <= 0:
+            return 4.0
+        return max(4.0, (score / score_max_local) * max_bar_px)
+
+    CHAR_W_PX = 6.2   # largura média de caractere — só pra dimensionar a etiqueta
+
+    serie_abertas, serie_concluidas, serie_labels = [], [], []
+
+    for _, row in ativos.iterrows():
+        km_d = row["km_dodge"]
+        nome = str(row["_rotulo_ativo"])
+        cronico = False
+
+        if pd.notna(row.get("ab_score_total")):
+            h = _altura_px(row["ab_score_total"])
+            top = bool(row.get("ab_is_top"))
+            serie_abertas.append({
+                "value": [km_d, 1 if usar_dual else 0],
+                "symbolSize": [BAR_W_PX, h],
+                "symbolOffset": [0, -h / 2],
+                "itemStyle": {
+                    "color": _cor_score(row["ab_score_total"], score_max_local),
+                    "borderColor": COR_CRIT if top else "#fff",
+                    "borderWidth": 2.5 if top else 1,
+                },
+                "tooltipHTML": row.get("ab_tooltipHTML", ""),
+            })
+            cronico = cronico or bool(row.get("ab_is_cronico"))
+
+        if usar_dual and pd.notna(row.get("co_score_total")):
+            h = _altura_px(row["co_score_total"])
+            top = bool(row.get("co_is_top"))
+            serie_concluidas.append({
+                "value": [km_d, -1],
+                "symbolSize": [BAR_W_PX, h],
+                "symbolOffset": [0, h / 2],
+                "itemStyle": {
+                    "color": _cor_score(row["co_score_total"], score_max_local),
+                    "borderColor": COR_CRIT if top else "#fff",
+                    "borderWidth": 2.5 if top else 1,
+                    "opacity": 0.9,
+                },
+                "tooltipHTML": row.get("co_tooltipHTML", ""),
+            })
+            cronico = cronico or bool(row.get("co_is_cronico"))
+
+        tag_w = max(34.0, len(nome) * CHAR_W_PX + 12)
+        serie_labels.append({
+            "value": [km_d, 0],
+            "symbolSize": [tag_w, 17],
+            "itemStyle": {
+                "color": "#ffffff",
+                "borderColor": COR_CRONICO if cronico else "#d1d5db",
+                "borderWidth": 2 if cronico else 1,
+            },
+            "label": {
+                "show": True, "formatter": nome, "position": "inside",
+                "fontSize": 9.5, "fontWeight": 600, "color": "#374151",
+            },
+        })
+
+    series = [
+        {"name": "Via (Abertas)" if usar_dual else "Via", "type": "line",
+         "data": [[km_lo, 1 if usar_dual else 0], [km_hi, 1 if usar_dual else 0]],
+         "lineStyle": {"color": "#374151", "width": 3},
+         "symbol": "none", "silent": True, "tooltip": {"show": False}},
+    ]
     if usar_dual:
-        series += [
-            {"name": "Via (Abertas)", "type": "line",
-             "data": [[km_lo, 1], [km_hi, 1]],
-             "lineStyle": {"color": "#374151", "width": 3},
-             "symbol": "none", "silent": True, "tooltip": {"show": False}},
-            {"name": "Via (Concluídas)", "type": "line",
-             "data": [[km_lo, -1], [km_hi, -1]],
-             "lineStyle": {"color": "#374151", "width": 3},
-             "symbol": "none", "silent": True, "tooltip": {"show": False}},
-        ]
-        if pn_a:
-            _add_score_series({
-                "name": "📋 Ativos Abertos", "type": "scatter", "data": pn_a,
-                "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85},
-            })
-        if pn_c:
-            _add_score_series({
-                "name": "✅ Ativos Concluídos", "type": "scatter", "data": pn_c,
-                "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85},
-            })
-    else:
         series.append({
-            "name": "Via", "type": "line",
-            "data": [[km_lo, 0], [km_hi, 0]],
+            "name": "Via (Concluídas)", "type": "line",
+            "data": [[km_lo, -1], [km_hi, -1]],
             "lineStyle": {"color": "#374151", "width": 3},
             "symbol": "none", "silent": True, "tooltip": {"show": False},
         })
-        if pn:
-            _add_score_series({
-                "name": "Ativos", "type": "scatter", "data": pn,
-                "itemStyle": {"borderColor": "#fff", "borderWidth": 1.5, "opacity": 0.85},
-            })
-
-    if pc:
+    if serie_abertas:
         series.append({
-            "name": "♻️ Crônicos", "type": "scatter", "data": pc,
-            "symbol": "circle", "silent": True,
-            "itemStyle": {
-                "color": "rgba(0,0,0,0)", "borderColor": COR_CRONICO,
-                "borderWidth": 3, "shadowBlur": 6, "shadowColor": "rgba(124,58,237,0.5)",
-            },
-            "emphasis": {"disabled": True}, "tooltip": {"show": False}, "z": 3,
+            "name": "📋 Abertas" if usar_dual else "Ativos", "type": "scatter",
+            "symbol": "rect", "data": serie_abertas, "z": 4,
         })
-    if usar_dual:
-        if pp_a:
-            _add_score_series({
-                "name": "🔥 Abertos Críticos", "type": "effectScatter", "data": pp_a,
-                "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
-                "showEffectOn": "render",
-                "itemStyle": {"borderColor": "#fff", "borderWidth": 2},
-            })
-        if pp_c:
-            _add_score_series({
-                "name": "🔥 Concluídos Críticos", "type": "effectScatter", "data": pp_c,
-                "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
-                "showEffectOn": "render",
-                "itemStyle": {"borderColor": "#fff", "borderWidth": 2},
-            })
-    elif pp:
-        _add_score_series({
-            "name": "🔥 Ativos Críticos", "type": "effectScatter", "data": pp,
-            "rippleEffect": {"period": 3, "scale": 2.8, "brushType": "stroke"},
-            "showEffectOn": "render",
-            "itemStyle": {"borderColor": "#fff", "borderWidth": 2},
+    if serie_concluidas:
+        series.append({
+            "name": "✅ Concluídas", "type": "scatter",
+            "symbol": "rect", "data": serie_concluidas, "z": 4,
         })
-
-    score_max_global = float(agreg["score_total"].max()) if len(agreg) else 100.0
+    if serie_labels:
+        series.append({
+            "name": "Ativo", "type": "scatter", "symbol": "roundRect",
+            "data": serie_labels, "silent": True, "z": 5,
+            "tooltip": {"show": False},
+        })
 
     option = {
         "tooltip": {
@@ -560,20 +671,7 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
                 "function(params){ return params.data.tooltipHTML || ''; }"
             ).js_code,
         },
-        "visualMap": {
-            "min": 0,
-            "max": score_max_global if score_max_global > 0 else 100,
-            "dimension": 2,
-            "seriesIndex": indices_score,
-            "show": True, "orient": "vertical",
-            "right": 10, "top": "middle",
-            "itemHeight": 120, "itemWidth": 14,
-            "calculable": True,
-            "text": ["Crítico", "OK"],
-            "textStyle": {"color": "#1f2937", "fontSize": 11},
-            "inRange": {"color": ["#16a34a", "#84cc16", "#eab308", "#f59e0b", "#dc2626"]},
-        },
-        "grid": {"left": 50, "right": 90, "top": 20, "bottom": 80, "containLabel": True},
+        "grid": {"left": 20, "right": 20, "top": grid_top, "bottom": grid_bottom, "containLabel": False},
         "xAxis": {
             "type": "value",
             "name": "Quilometragem (KM)",
@@ -585,10 +683,7 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
             "splitLine": {"lineStyle": {"color": "#e5e7eb", "type": "dashed"}},
         },
         "yAxis": {
-            "type": "value",
-            "min": -2.5 if usar_dual else -1.2,
-            "max":  2.5 if usar_dual else  1.2,
-            "show": False,
+            "type": "value", "min": y_min, "max": y_max, "show": False,
             "axisLine": {"show": False}, "splitLine": {"show": False},
         },
         "dataZoom": [
@@ -601,7 +696,6 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
         "series": series,
     }
 
-    altura_ativo = 380 if usar_dual else 280
     st_echarts(options=_sanitize(option), height=f"{altura_ativo}px", key=f"unif_ativo_{gerencia}")
 
 # endregion
