@@ -68,6 +68,58 @@ MESES_PT = {
 
 # region ====================== SESSÃO 2: render_heatmap() =====================
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_heatmap(df: pd.DataFrame, col_patio: str, col_familia: str,
+                   valor_col: str, agg_func: str, top_n_patios: int) -> dict | None:
+    """
+    Cálculo puro (sem st.*/JsCode) — pivot Pátio×Família cacheado por
+    conteúdo do df + parâmetros. Perf 2026-08-30: evita refazer o pivot
+    quando a aba Heatmap (já isolada em @st.fragment) é re-invocada com
+    os MESMOS dados/parâmetros (ex.: outro usuário olhando a mesma
+    gerência, ou o usuário voltando pra uma métrica já vista antes).
+    """
+    df_h = df[[col_patio, col_familia, valor_col]].copy()
+    df_h = df_h.dropna(subset=[col_patio, col_familia])
+    df_h[col_patio]   = df_h[col_patio].astype(str).str.strip()
+    df_h[col_familia] = df_h[col_familia].astype(str).str.strip()
+    df_h = df_h[(df_h[col_patio] != "") & (df_h[col_familia] != "")]
+
+    if df_h.empty:
+        return None
+
+    # --- Pivot com fill_value=0 (idêntico ao app1) ---
+    pivot = df_h.pivot_table(
+        index=col_patio, columns=col_familia,
+        values=valor_col, aggfunc=agg_func, fill_value=0,
+    )
+
+    # Ordena e limita top N pátios
+    pivot["__total__"] = pivot.sum(axis=1)
+    pivot = pivot.sort_values("__total__", ascending=False).drop(columns="__total__")
+    pivot = pivot.head(top_n_patios)
+
+    if pivot.empty:
+        return None
+
+    patios_lista   = pivot.index.tolist()
+    familias_lista = pivot.columns.tolist()
+
+    # --- Dados ECharts: [x_idx, y_idx, valor] ---
+    heat_data = []
+    for y_idx, patio in enumerate(patios_lista):
+        for x_idx, fam in enumerate(familias_lista):
+            v = int(pivot.loc[patio, fam])
+            heat_data.append([x_idx, y_idx, v])
+
+    return {
+        "patios_lista": patios_lista,
+        "familias_lista": familias_lista,
+        "heat_data": heat_data,
+        "valor_max": int(pivot.values.max()),
+        "valor_total": int(pivot.values.sum()),
+    }
+
+
 def render_heatmap(df: pd.DataFrame, gerencia: str = "SP"):
     """
     Heatmap Pátio x Família — ECharts com visualMap e labels nos valores.
@@ -115,42 +167,16 @@ def render_heatmap(df: pd.DataFrame, gerencia: str = "SP"):
         st.info(f"Coluna '{valor_col}' não encontrada.")
         return
 
-    df_h = df[[col_patio, col_familia, valor_col]].copy()
-    df_h = df_h.dropna(subset=[col_patio, col_familia])
-    df_h[col_patio]   = df_h[col_patio].astype(str).str.strip()
-    df_h[col_familia] = df_h[col_familia].astype(str).str.strip()
-    df_h = df_h[(df_h[col_patio] != "") & (df_h[col_familia] != "")]
-
-    if df_h.empty:
+    calc = _calc_heatmap(df, col_patio, col_familia, valor_col, agg_func, top_n_patios)
+    if calc is None:
         st.info("Nenhuma combinação Pátio × Família disponível.")
         return
 
-    # --- Pivot com fill_value=0 (idêntico ao app1) ---
-    pivot = df_h.pivot_table(
-        index=col_patio, columns=col_familia,
-        values=valor_col, aggfunc=agg_func, fill_value=0,
-    )
-
-    # Ordena e limita top N pátios
-    pivot["__total__"] = pivot.sum(axis=1)
-    pivot = pivot.sort_values("__total__", ascending=False).drop(columns="__total__")
-    pivot = pivot.head(top_n_patios)
-
-    if pivot.empty:
-        st.info("Matriz vazia com os filtros atuais.")
-        return
-
-    patios_lista   = pivot.index.tolist()
-    familias_lista = pivot.columns.tolist()
-    valor_max      = int(pivot.values.max())
-    valor_total    = int(pivot.values.sum())
-
-    # --- Dados ECharts: [x_idx, y_idx, valor] ---
-    heat_data = []
-    for y_idx, patio in enumerate(patios_lista):
-        for x_idx, fam in enumerate(familias_lista):
-            v = int(pivot.loc[patio, fam])
-            heat_data.append([x_idx, y_idx, v])
+    patios_lista   = calc["patios_lista"]
+    familias_lista = calc["familias_lista"]
+    heat_data      = calc["heat_data"]
+    valor_max      = calc["valor_max"]
+    valor_total    = calc["valor_total"]
 
     # --- Tooltip JS (idêntico ao app1) ---
     tooltip_js = JsCode("""
@@ -267,12 +293,11 @@ def render_heatmap(df: pd.DataFrame, gerencia: str = "SP"):
 
 # region ====================== SESSAO 3: render_ranking() =====================
 
-def render_ranking(df: pd.DataFrame, top_n: int = 10,
-                   ordem: str = "Score Total", gerencia: str = "SP"):
-    """Ranking de hot-spots por pátio de origem."""
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_ranking_patio(df: pd.DataFrame, top_n: int, ordem: str) -> pd.DataFrame | None:
+    """Cálculo puro (sem st.*) — cacheado por conteúdo do df + parâmetros."""
     if df.empty or "origem" not in df.columns:
-        st.info("Sem dados para o ranking.")
-        return
+        return None
 
     cnt_col = "numero_nota" if "numero_nota" in df.columns else "origem"
     agg_kw  = {"Qtd. Notas": (cnt_col, "count")}
@@ -307,6 +332,17 @@ def render_ranking(df: pd.DataFrame, top_n: int = 10,
         if c in ranking.columns:
             ranking[c] = ranking[c].round(1)
 
+    return ranking
+
+
+def render_ranking(df: pd.DataFrame, top_n: int = 10,
+                   ordem: str = "Score Total", gerencia: str = "SP"):
+    """Ranking de hot-spots por pátio de origem."""
+    ranking = _calc_ranking_patio(df, top_n, ordem)
+    if ranking is None:
+        st.info("Sem dados para o ranking.")
+        return
+
     st.markdown(f"**Top {top_n} Hot-spots — {gerencia}** · Ordenado por: {ordem}")
 
     col_cfg = {}
@@ -338,74 +374,27 @@ def render_ranking(df: pd.DataFrame, top_n: int = 10,
 
 # region ====================== SESSAO 4: render_serie_temporal() ==============
 
-def render_serie_temporal(df: pd.DataFrame, granularidade: str = "Mensal",
-                          metrica: str = "Volume de Notas", gerencia: str = "SP"):
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_serie_temporal(df: pd.DataFrame, col_q: str | None,
+                         top_n_serie: int) -> dict | None:
     """
-    Série temporal ECharts idêntica ao app1.py:
-      - xAxis type: "category" com rótulos "jan/24"
-      - 6 dimensões de quebra (Total/Ramal/Pátio/Família/Prioridade/Tipo)
-      - Top N séries + agregação "Outras"
-      - dataZoom slider + inside
-      - Mini-KPIs: Total, Média mensal, Tendência %, Meses
+    Cálculo puro (sem st.*) — agrupamento mensal + Top N cacheado por
+    conteúdo do df + parâmetros.
     """
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        return
-
     if df.empty or "data_nota" not in df.columns:
-        st.info("Sem dados temporais disponíveis.")
-        return
+        return None
 
-    # --- Prepara datas ---
     df_t = df.copy()
     df_t["data_nota"] = pd.to_datetime(df_t["data_nota"], errors="coerce")
     df_t = df_t.dropna(subset=["data_nota"])
     if df_t.empty:
-        st.info("Sem notas com datas válidas.")
-        return
+        return None
 
     # Usa to_period para agrupamento mensal robusto (idêntico ao app1)
     df_t["ano_mes"] = df_t["data_nota"].dt.to_period("M").dt.to_timestamp()
 
-    # --- Controles de granularidade (idêntico ao app1) ---
-    col_familia = (
-        "familia_defeito" if "familia_defeito" in df_t.columns else
-        "familia_cod"     if "familia_cod"     in df_t.columns else None
-    )
-
-    opcoes_dim = ["Total geral", "Ramal", "Pátio", "Família de defeito",
-                  "Prioridade", "Tipo de inspeção"]
-    # Remove opções sem coluna disponível
-    mapa_dim = {
-        "Total geral":       None,
-        "Ramal":             "ramal"         if "ramal"          in df_t.columns else None,
-        "Pátio":             "origem"        if "origem"         in df_t.columns else None,
-        "Família de defeito":col_familia,
-        "Prioridade":        "prioridade"    if "prioridade"     in df_t.columns else None,
-        "Tipo de inspeção":  "tipo_atividade" if "tipo_atividade" in df_t.columns else None,
-    }
-    # Mantém só as opções com coluna disponível (ou Total geral)
-    opcoes_validas = [o for o in opcoes_dim if o == "Total geral" or mapa_dim.get(o) is not None]
-
-    col_g, col_top = st.columns([2, 1])
-    with col_g:
-        granul_serie = st.radio(
-            "📊 Quebrar por:",
-            opcoes_validas,
-            horizontal=True,
-            key=f"serie_granul_{gerencia}",
-        )
-    with col_top:
-        top_n_serie = st.slider(
-            "Top N séries:",
-            min_value=3, max_value=15, value=8, step=1,
-            key=f"serie_top_n_{gerencia}",
-        )
-
-    col_q = mapa_dim.get(granul_serie)
-
     # --- Agrupa dados ---
-    if col_q is None:
+    if col_q is None or col_q not in df_t.columns:
         # Série única (total geral) — idêntico ao app1
         serie_total = df_t.groupby("ano_mes").size().sort_index()
         meses_serie = serie_total.index.tolist()
@@ -468,8 +457,89 @@ def render_serie_temporal(df: pd.DataFrame, granularidade: str = "Mensal",
             legend_data.append(str(cat))
 
     if not meses_serie:
+        return None
+
+    # --- Mini-KPIs (idêntico ao app1) ---
+    total_periodo = len(df_t)
+    media_mensal  = total_periodo / max(len(meses_serie), 1)
+    if len(meses_serie) >= 2:
+        primeiro_mes  = df_t[df_t["ano_mes"] == meses_serie[0]].shape[0]
+        ultimo_mes    = df_t[df_t["ano_mes"] == meses_serie[-1]].shape[0]
+        tendencia_pct = ((ultimo_mes / primeiro_mes - 1) * 100) if primeiro_mes else 0
+    else:
+        tendencia_pct = 0
+
+    return {
+        "series_data": series_data, "legend_data": legend_data,
+        "rotulos_serie": rotulos_serie, "n_meses": len(meses_serie),
+        "total_periodo": total_periodo, "media_mensal": media_mensal,
+        "tendencia_pct": tendencia_pct,
+    }
+
+
+def render_serie_temporal(df: pd.DataFrame, granularidade: str = "Mensal",
+                          metrica: str = "Volume de Notas", gerencia: str = "SP"):
+    """
+    Série temporal ECharts idêntica ao app1.py:
+      - xAxis type: "category" com rótulos "jan/24"
+      - 6 dimensões de quebra (Total/Ramal/Pátio/Família/Prioridade/Tipo)
+      - Top N séries + agregação "Outras"
+      - dataZoom slider + inside
+      - Mini-KPIs: Total, Média mensal, Tendência %, Meses
+    """
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    if df.empty or "data_nota" not in df.columns:
+        st.info("Sem dados temporais disponíveis.")
+        return
+
+    # --- Controles de granularidade (idêntico ao app1) ---
+    col_familia = (
+        "familia_defeito" if "familia_defeito" in df.columns else
+        "familia_cod"     if "familia_cod"     in df.columns else None
+    )
+
+    opcoes_dim = ["Total geral", "Ramal", "Pátio", "Família de defeito",
+                  "Prioridade", "Tipo de inspeção"]
+    # Remove opções sem coluna disponível
+    mapa_dim = {
+        "Total geral":       None,
+        "Ramal":             "ramal"         if "ramal"          in df.columns else None,
+        "Pátio":             "origem"        if "origem"         in df.columns else None,
+        "Família de defeito":col_familia,
+        "Prioridade":        "prioridade"    if "prioridade"     in df.columns else None,
+        "Tipo de inspeção":  "tipo_atividade" if "tipo_atividade" in df.columns else None,
+    }
+    # Mantém só as opções com coluna disponível (ou Total geral)
+    opcoes_validas = [o for o in opcoes_dim if o == "Total geral" or mapa_dim.get(o) is not None]
+
+    col_g, col_top = st.columns([2, 1])
+    with col_g:
+        granul_serie = st.radio(
+            "📊 Quebrar por:",
+            opcoes_validas,
+            horizontal=True,
+            key=f"serie_granul_{gerencia}",
+        )
+    with col_top:
+        top_n_serie = st.slider(
+            "Top N séries:",
+            min_value=3, max_value=15, value=8, step=1,
+            key=f"serie_top_n_{gerencia}",
+        )
+
+    col_q = mapa_dim.get(granul_serie)
+
+    calc = _calc_serie_temporal(df, col_q, top_n_serie)
+    if calc is None:
         st.info("Série temporal sem dados suficientes.")
         return
+
+    series_data   = calc["series_data"]
+    legend_data   = calc["legend_data"]
+    rotulos_serie = calc["rotulos_serie"]
 
     # --- Opção ECharts (idêntico ao app1) ---
     opt_serie = {
@@ -528,23 +598,14 @@ def render_serie_temporal(df: pd.DataFrame, granularidade: str = "Mensal",
     st_echarts(opt_serie, height=altura_responsiva(500), key=f"serie_temporal_{gerencia}_{granul_serie}")
 
     # --- Mini-KPIs (idêntico ao app1) ---
-    total_periodo = len(df_t)
-    media_mensal  = total_periodo / max(len(meses_serie), 1)
-
-    if len(meses_serie) >= 2:
-        primeiro_mes  = df_t[df_t["ano_mes"] == meses_serie[0]].shape[0]
-        ultimo_mes    = df_t[df_t["ano_mes"] == meses_serie[-1]].shape[0]
-        tendencia_pct = ((ultimo_mes / primeiro_mes - 1) * 100) if primeiro_mes else 0
-        tend_emoji    = "📈" if tendencia_pct > 5 else ("📉" if tendencia_pct < -5 else "➡️")
-    else:
-        tendencia_pct = 0
-        tend_emoji    = "➡️"
+    tendencia_pct = calc["tendencia_pct"]
+    tend_emoji = "📈" if tendencia_pct > 5 else ("📉" if tendencia_pct < -5 else "➡️")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📋 Total no período", f"{total_periodo:,}")
-    c2.metric("📊 Média mensal",     f"{media_mensal:.0f}")
+    c1.metric("📋 Total no período", f"{calc['total_periodo']:,}")
+    c2.metric("📊 Média mensal",     f"{calc['media_mensal']:.0f}")
     c3.metric(f"{tend_emoji} Tendência", f"{tendencia_pct:+.1f}%",
               help="Comparação entre o primeiro e o último mês exibidos.")
-    c4.metric("🗓️ Período coberto",  f"{len(meses_serie)} meses")
+    c4.metric("🗓️ Período coberto",  f"{calc['n_meses']} meses")
 
 # endregion

@@ -160,26 +160,6 @@ def render_gerencia(sigla: str) -> None:
     cor_ini, cor_fim = COR_GERENCIA.get(sigla, ("#1e3a5f", "#2d5a8e"))
     coordenacoes = " · ".join(COORDENACOES_POR_GERENCIA.get(sigla, []))
 
-    # ── Cabeçalho ──────────────────────────────────────────────────────────────
-    st.markdown(
-        f"""
-        <div style='
-            background: linear-gradient(135deg, {cor_ini} 0%, {cor_fim} 100%);
-            padding: 20px 24px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-        '>
-            <h2 style='color: #ffb000; margin: 0; font-size: 1.6rem;'>
-                🏭 Gerência {sigla} — {nome_curto}
-            </h2>
-            <p style='color: #cbd5e1; margin: 4px 0 0 0; font-size: 0.9rem;'>
-                Coordenações: {coordenacoes} &nbsp;|&nbsp; Disciplinas: VP + EE integradas
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
     # ── Sidebar — Toggle VP/EE e Score ────────────────────────────────────────
     with st.sidebar:
         st.markdown("---")
@@ -214,6 +194,44 @@ def render_gerencia(sigla: str) -> None:
     with st.sidebar:
         st.markdown("### 🔍 Filtros")
         filtros = render_filtros_cascata(df_raw, gerencia=sigla, disciplina_sel=disciplina_sel)
+
+    # ── Cabeçalho (só agora, com o período já conhecido dos filtros) ─────────
+    # Pedido do Julio (2026-08-30): deixar claro de que dia a que dia são as
+    # notas mostradas, já que o padrão agora é "ano vigente" (não mais o
+    # histórico completo) — sem isso, alguém abrindo a tela não teria como
+    # saber, só olhando o card, que notas de anos anteriores estão fora.
+    periodo_ini = filtros.get("data_abertura_ini")
+    periodo_fim = filtros.get("data_abertura_fim")
+    periodo_txt = (
+        f"{periodo_ini:%d/%m/%Y} a {periodo_fim:%d/%m/%Y}"
+        if periodo_ini and periodo_fim else "—"
+    )
+    st.markdown(
+        f"""
+        <div style='
+            background: linear-gradient(135deg, {cor_ini} 0%, {cor_fim} 100%);
+            padding: 20px 24px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        '>
+            <h2 style='color: #ffb000; margin: 0; font-size: 1.6rem;'>
+                🏭 Gerência {sigla} — {nome_curto}
+            </h2>
+            <p style='color: #cbd5e1; margin: 4px 0 0 0; font-size: 0.9rem;'>
+                Coordenações: {coordenacoes} &nbsp;|&nbsp; Disciplinas: VP + EE integradas
+            </p>
+            <p style='color: #cbd5e1; margin: 4px 0 0 0; font-size: 0.9rem;'>
+                📅 Período analisado — Notas: <b style='color:#ffb000;'>{periodo_txt}</b>
+                &nbsp;<small>(ajuste no filtro da barra lateral)</small>
+            </p>
+            <p style='color: #cbd5e1; margin: 2px 0 0 0; font-size: 0.78rem;'>
+                RASF (aba Inteligência EE) tem filtro de período próprio, mesmo padrão
+                de ano vigente — confira/ajuste lá dentro.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     df = _aplicar_filtros(df_raw, filtros)
 

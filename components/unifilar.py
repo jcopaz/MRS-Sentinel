@@ -21,7 +21,6 @@
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
 import math
-from io import BytesIO
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -35,6 +34,7 @@ except ImportError:
 import plotly.graph_objects as go
 
 from core.glossarios import nome_ramal, ativo_curto, rotulo_ativo_legivel
+from core.exportacao import gerar_excel_bytes, gerar_csv_bytes
 
 # Motor de alertas — usado só para marcar hot-spots CRÔNICOS (anel extra).
 # Import resiliente: se o módulo/dep falhar, o unifilar segue funcionando
@@ -1384,28 +1384,27 @@ def _gradiente_stack(idx: int, total: int) -> str:
     return _PALETA_CATEGORICA[idx % len(_PALETA_CATEGORICA)]
 
 
-def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None,
-                            chart_key: str, top_n: int = 15,
-                            max_segmentos: int = 8):
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None,
+                   top_n: int = 15, max_segmentos: int = 8) -> dict | None:
     """
-    Barras verticais: Eixo X = ranking de col_cat (top_n por qtd. de notas),
-    Eixo Y = qtd. de notas. Se col_stack for informado, empilha por essa
-    coluna (limitado a max_segmentos + 'Outros').
+    Cálculo puro (sem st.*) do ranking em barras — cacheado por conteúdo
+    do df + parâmetros. Separado de _bar_empilhado_ranking (perf
+    2026-08-30) porque os 3 blocos de ranking já são @st.fragment, mas
+    isso só isola ONDE o rerun acontece — não impede que o pai (o
+    fragment da aba inteira) refaça esse groupby/pivot toda vez que
+    QUALQUER outra coisa na aba mudar (bin_km, zoom, ramal...). Cache
+    evita o recálculo quando os inputs reais não mudaram.
     """
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        return
     if col_cat not in df.columns or df.empty:
-        st.info(f"Coluna '{col_cat}' não disponível nos dados.")
-        return
+        return None
 
     d = df.copy()
     d[col_cat] = d[col_cat].fillna("(Sem informação)").replace("", "(Sem informação)")
 
     contagem_cat = d[col_cat].value_counts()
     if contagem_cat.empty:
-        st.info("Sem dados no filtro atual.")
-        return
+        return None
     ordem_cat = contagem_cat.head(top_n).index.tolist()
     d = d[d[col_cat].isin(ordem_cat)]
 
@@ -1486,10 +1485,33 @@ def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None
         ],
         "series": series,
     }
-    opt = _sanitize(opt)
-    st_echarts(opt, height="400px", key=chart_key)
+    return {"opt": _sanitize(opt), "total_dist": int(contagem_cat.shape[0])}
 
-    total_dist = int(contagem_cat.shape[0])
+
+def _bar_empilhado_ranking(df: pd.DataFrame, col_cat: str, col_stack: str | None,
+                            chart_key: str, top_n: int = 15,
+                            max_segmentos: int = 8):
+    """
+    Barras verticais: Eixo X = ranking de col_cat (top_n por qtd. de notas),
+    Eixo Y = qtd. de notas. Se col_stack for informado, empilha por essa
+    coluna (limitado a max_segmentos + 'Outros'). Cálculo em _calc_ranking
+    (cacheado); aqui só a parte com efeito colateral Streamlit.
+    """
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    calc = _calc_ranking(df, col_cat, col_stack, top_n, max_segmentos)
+    if calc is None:
+        if col_cat not in df.columns or df.empty:
+            st.info(f"Coluna '{col_cat}' não disponível nos dados.")
+        else:
+            st.info("Sem dados no filtro atual.")
+        return
+
+    st_echarts(calc["opt"], height="400px", key=chart_key)
+
+    total_dist = calc["total_dist"]
     if total_dist > top_n:
         st.caption(
             f"⚠️ Mostrando os **{top_n} com mais notas**. "
@@ -1651,24 +1673,6 @@ _COLS_DATA_UNIFILAR = [
 ]
 
 
-# Cacheados por conteúdo do DataFrame (hash nativo do st.cache_data pra
-# pandas) — antes, o Excel/CSV do recorte era regerado do zero em TODO
-# rerun da aba, mesmo quando o usuário só mudou "Mostrar: 50→100" (que nem
-# afeta o que é exportado, só o que é exibido na tabela) ou mexeu em
-# qualquer widget de OUTRA parte da tela. Perf 2026-08-30 (Julio: "site
-# muito pesado e demorado no celular").
-@st.cache_data(ttl=300, show_spinner=False)
-def _gerar_excel_unifilar(df: pd.DataFrame) -> bytes:
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Notas Unifilar")
-    return buffer.getvalue()
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def _gerar_csv_unifilar(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False, sep=";").encode("utf-8-sig")
-
 
 @st.fragment
 def render_tabela_completa_unifilar(df: pd.DataFrame, gerencia: str):
@@ -1735,14 +1739,15 @@ def render_tabela_completa_unifilar(df: pd.DataFrame, gerencia: str):
     col_dl1, col_dl2 = st.columns(2)
     with col_dl1:
         st.download_button(
-            "⬇️ Baixar Notas do Recorte (Excel)", data=_gerar_excel_unifilar(df_t_ord),
+            "⬇️ Baixar Notas do Recorte (Excel)",
+            data=gerar_excel_bytes(df_t_ord, sheet_name="Notas Unifilar"),
             file_name=f"notas_unifilar_{gerencia}_{datetime.now():%Y%m%d_%H%M}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"unif_dl_xlsx_{gerencia}",
         )
     with col_dl2:
         st.download_button(
-            "⬇️ Baixar Notas do Recorte (CSV)", data=_gerar_csv_unifilar(df_t_ord),
+            "⬇️ Baixar Notas do Recorte (CSV)", data=gerar_csv_bytes(df_t_ord),
             file_name=f"notas_unifilar_{gerencia}_{datetime.now():%Y%m%d_%H%M}.csv",
             mime="text/csv", key=f"unif_dl_csv_{gerencia}",
         )

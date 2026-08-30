@@ -23,12 +23,13 @@
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
-from io import BytesIO
 from datetime import datetime
 
 import streamlit as st
 import pandas as pd
 import numpy as np
+
+from core.exportacao import gerar_excel_bytes, gerar_csv_bytes
 
 try:
     from streamlit_echarts import st_echarts, JsCode
@@ -74,20 +75,16 @@ MESES_PT_ABREV = {
 
 # region ====================== SESSÃO 2: Quantidade por Criticidade ===========
 
-def _render_criticidade(df: pd.DataFrame, gerencia: str):
-    st.markdown("##### 📊 Quantidade por Criticidade")
-
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_criticidade(df: pd.DataFrame) -> dict | None:
+    """Cálculo puro (sem st.*) — cacheado por conteúdo do df. Devolve o
+    `opt` do ECharts pronto, ou None se não houver dado de prioridade."""
     if "prioridade" not in df.columns or df["prioridade"].dropna().empty:
-        st.info("Sem dados de prioridade no filtro atual.")
-        return
-
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        return
+        return None
 
     crit_counts = df["prioridade"].value_counts().reindex(ORDEM_PRIORIDADE, fill_value=0)
 
-    opt = {
+    return {
         "tooltip": {
             "trigger": "axis", "axisPointer": {"type": "shadow"},
             "backgroundColor": "rgba(255,255,255,0.98)",
@@ -115,6 +112,28 @@ def _render_criticidade(df: pd.DataFrame, gerencia: str):
             "barWidth": "55%",
         }],
     }
+
+
+@st.fragment
+def _render_criticidade(df: pd.DataFrame, gerencia: str):
+    """
+    @st.fragment (perf 2026-08-30): esta e as outras 6 seções da Visão
+    Gerencial viviam numa função só — o widget de qualquer UMA delas (o
+    drill-down de período, o "mostrar N" do quadro resumo) recalculava as
+    outras 6 seções inteiras a cada interação. Isoladas, cada uma reage só
+    aos próprios widgets (quando ela tem algum).
+    """
+    st.markdown("##### 📊 Quantidade por Criticidade")
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    opt = _calc_criticidade(df)
+    if opt is None:
+        st.info("Sem dados de prioridade no filtro atual.")
+        return
+
     st_echarts(opt, height=altura_responsiva(320), key=f"vg_criticidade_{gerencia}")
 
 # endregion
@@ -122,13 +141,8 @@ def _render_criticidade(df: pd.DataFrame, gerencia: str):
 
 # region ====================== SESSÃO 3: Status Concluída — Ordem =============
 
-def _render_status_ordem(df: pd.DataFrame, gerencia: str):
-    st.markdown("##### 🎯 Status Concluída — Ordem")
-
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        return
-
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_status_ordem(df: pd.DataFrame) -> dict | None:
     tem_status_ordem = (
         "status_nota_ordem" in df.columns
         and df["status_nota_ordem"].astype(str).str.strip().replace("nan", "").any()
@@ -139,8 +153,7 @@ def _render_status_ordem(df: pd.DataFrame, gerencia: str):
     elif "status_usuario" in df.columns:
         status_counts = df["status_usuario"].apply(status_base_label).value_counts()
     else:
-        st.info("Sem dados de status no filtro atual.")
-        return
+        return None
 
     cores_status = {
         "NOK": COR_PRIMARIA, "OK": COR_GOLD,
@@ -153,7 +166,7 @@ def _render_status_ordem(df: pd.DataFrame, gerencia: str):
          "itemStyle": {"color": cores_status.get(str(k), "#6b7280")}}
         for k, v in status_counts.items()
     ]
-    opt = {
+    return {
         "tooltip": {
             "trigger": "item", "formatter": "{b}: <b>{c}</b> ({d}%)",
             "backgroundColor": "rgba(255,255,255,0.98)",
@@ -169,6 +182,21 @@ def _render_status_ordem(df: pd.DataFrame, gerencia: str):
             "data": donut_data,
         }],
     }
+
+
+@st.fragment
+def _render_status_ordem(df: pd.DataFrame, gerencia: str):
+    st.markdown("##### 🎯 Status Concluída — Ordem")
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    opt = _calc_status_ordem(df)
+    if opt is None:
+        st.info("Sem dados de status no filtro atual.")
+        return
+
     st_echarts(opt, height=altura_responsiva(320), key=f"vg_status_ordem_{gerencia}")
 
 # endregion
@@ -187,28 +215,17 @@ def _gradiente_azul_dourado(idx: int, total: int) -> str:
     return f"rgb({r},{g},{b})"
 
 
-def _render_tipo_inspecao(df: pd.DataFrame, gerencia: str):
-    st.markdown("##### 🔍 Notas por Tipo de Inspeção")
-    st.caption(
-        "Distribuição das notas pela origem — como foi descoberta a anomalia "
-        "(Ronda, Drone, Trackstar, Inspeção técnica de AMV etc.)."
-    )
-
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        return
-
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_tipo_inspecao(df: pd.DataFrame) -> dict | None:
     if "tipo_atividade" not in df.columns:
-        st.info("Coluna 'tipo_atividade' não disponível nos dados.")
-        return
+        return None
 
     df_ta = df.copy()
     df_ta["tipo_atividade"] = df_ta["tipo_atividade"].fillna("(Sem tipo)").replace("", "(Sem tipo)")
     ta_counts = df_ta["tipo_atividade"].value_counts().head(15)
 
     if ta_counts.empty:
-        st.info("Sem dados de tipo de inspeção no filtro atual.")
-        return
+        return None
 
     labels = ta_counts.index.tolist()[::-1]
     valores = [int(v) for v in ta_counts.values.tolist()[::-1]]
@@ -237,11 +254,31 @@ def _render_tipo_inspecao(df: pd.DataFrame, gerencia: str):
         }],
     }
     altura = max(300, 30 * len(labels) + 80)
-    st_echarts(opt, height=f"{altura}px", key=f"vg_tipo_insp_{gerencia}")
+    total_dist = int(df["tipo_atividade"].nunique())
+    return {"opt": opt, "altura": altura, "total_dist": total_dist, "n_labels": len(labels)}
 
-    total_dist = df["tipo_atividade"].nunique()
-    if total_dist > 15:
-        st.caption(f"⚠️ Mostrando os **15 tipos com mais notas**. Total distintos: **{total_dist:,}**.")
+
+@st.fragment
+def _render_tipo_inspecao(df: pd.DataFrame, gerencia: str):
+    st.markdown("##### 🔍 Notas por Tipo de Inspeção")
+    st.caption(
+        "Distribuição das notas pela origem — como foi descoberta a anomalia "
+        "(Ronda, Drone, Trackstar, Inspeção técnica de AMV etc.)."
+    )
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    calc = _calc_tipo_inspecao(df)
+    if calc is None:
+        st.info("Coluna 'tipo_atividade' não disponível ou sem dados no filtro atual.")
+        return
+
+    st_echarts(calc["opt"], height=f"{calc['altura']}px", key=f"vg_tipo_insp_{gerencia}")
+
+    if calc["total_dist"] > 15:
+        st.caption(f"⚠️ Mostrando os **15 tipos com mais notas**. Total distintos: **{calc['total_dist']:,}**.")
 
 # endregion
 
@@ -258,28 +295,17 @@ def _gradiente_vermelho(idx: int, total: int) -> str:
     return f"rgb({r},{g},{b})"
 
 
-def _render_codigo_anomalia(df: pd.DataFrame, gerencia: str):
-    st.markdown("##### 🚨 Quantidade por Código de Anomalia")
-    st.caption(
-        "Top códigos de anomalia (TJ04, AM13, SN63...) com tradução técnica. "
-        "Mostra quais defeitos mais ocorrem na malha filtrada."
-    )
-
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        return
-
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_codigo_anomalia(df: pd.DataFrame) -> dict | None:
     if "code_codificacao" not in df.columns:
-        st.info("Coluna 'code_codificacao' não disponível nos dados.")
-        return
+        return None
 
     df_an = df.copy()
     df_an["code_codificacao"] = df_an["code_codificacao"].fillna("(Sem código)").replace("", "(Sem código)")
     anom_counts = df_an["code_codificacao"].value_counts().head(20)
 
     if anom_counts.empty:
-        st.info("Sem dados de código de anomalia no filtro atual.")
-        return
+        return None
 
     labels = []
     for cod in anom_counts.index.tolist():
@@ -318,11 +344,31 @@ def _render_codigo_anomalia(df: pd.DataFrame, gerencia: str):
         }],
     }
     altura = max(400, 28 * len(labels) + 80)
-    st_echarts(opt, height=f"{altura}px", key=f"vg_anomalia_{gerencia}")
+    total_dist = int(df["code_codificacao"].nunique())
+    return {"opt": opt, "altura": altura, "total_dist": total_dist}
 
-    total_dist = df["code_codificacao"].nunique()
-    if total_dist > 20:
-        st.caption(f"⚠️ Mostrando os **20 códigos com mais ocorrências**. Total distintos: **{total_dist:,}**.")
+
+@st.fragment
+def _render_codigo_anomalia(df: pd.DataFrame, gerencia: str):
+    st.markdown("##### 🚨 Quantidade por Código de Anomalia")
+    st.caption(
+        "Top códigos de anomalia (TJ04, AM13, SN63...) com tradução técnica. "
+        "Mostra quais defeitos mais ocorrem na malha filtrada."
+    )
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    calc = _calc_codigo_anomalia(df)
+    if calc is None:
+        st.info("Coluna 'code_codificacao' não disponível ou sem dados no filtro atual.")
+        return
+
+    st_echarts(calc["opt"], height=f"{calc['altura']}px", key=f"vg_anomalia_{gerencia}")
+
+    if calc["total_dist"] > 20:
+        st.caption(f"⚠️ Mostrando os **20 códigos com mais ocorrências**. Total distintos: **{calc['total_dist']:,}**.")
 
 # endregion
 
@@ -339,28 +385,10 @@ def _fmt_data_drill(d, fmt):
         return str(d)
 
 
-def _render_notas_periodo(df: pd.DataFrame, gerencia: str):
-    st.markdown("##### 📅 Notas por Mês/Semana/Dia — Abertas × Encerradas")
-
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        return
-
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_notas_periodo(df: pd.DataFrame, granul: str) -> dict | None:
     if "data_nota" not in df.columns:
-        st.info("Coluna 'data_nota' não disponível nos dados.")
-        return
-
-    col_g, col_desc = st.columns([1, 3])
-    with col_g:
-        granul = st.radio(
-            "Granularidade:", ["Mês", "Semana", "Dia"], horizontal=False,
-            key=f"vg_granul_{gerencia}",
-        )
-    with col_desc:
-        st.caption(
-            "Azul = notas que **abriram**. Laranja = notas que **encerraram**. "
-            "Quando azul > laranja consistentemente, o backlog cresce."
-        )
+        return None
 
     d = df.copy()
     d["dt_abert"] = pd.to_datetime(d.get("data_nota"), errors="coerce")
@@ -384,8 +412,7 @@ def _render_notas_periodo(df: pd.DataFrame, gerencia: str):
 
     todas_datas = sorted(set(s_a.index) | set(s_e.index))
     if not todas_datas:
-        st.info("Sem dados temporais para a granularidade escolhida.")
-        return
+        return None
 
     rotulos = [_fmt_data_drill(dd, fmt_label) for dd in todas_datas]
     vals_a = [int(s_a.get(dd, 0)) for dd in todas_datas]
@@ -437,39 +464,59 @@ def _render_notas_periodo(df: pd.DataFrame, gerencia: str):
              "itemStyle": {"color": COR_GOLD}, "symbol": "circle", "symbolSize": 6},
         ],
     }
-    st_echarts(opt, height=altura_responsiva(400), key=f"vg_drill_{gerencia}_{granul}")
+    return {
+        "opt": opt, "total_a": sum(vals_a), "total_e": sum(vals_e),
+        "media_a": sum(vals_a) / max(len(vals_a), 1),
+        "media_e": sum(vals_e) / max(len(vals_e), 1),
+    }
+
+
+@st.fragment
+def _render_notas_periodo(df: pd.DataFrame, gerencia: str):
+    st.markdown("##### 📅 Notas por Mês/Semana/Dia — Abertas × Encerradas")
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    if "data_nota" not in df.columns:
+        st.info("Coluna 'data_nota' não disponível nos dados.")
+        return
+
+    col_g, col_desc = st.columns([1, 3])
+    with col_g:
+        granul = st.radio(
+            "Granularidade:", ["Mês", "Semana", "Dia"], horizontal=False,
+            key=f"vg_granul_{gerencia}",
+        )
+    with col_desc:
+        st.caption(
+            "Azul = notas que **abriram**. Laranja = notas que **encerraram**. "
+            "Quando azul > laranja consistentemente, o backlog cresce."
+        )
+
+    calc = _calc_notas_periodo(df, granul)
+    if calc is None:
+        st.info("Sem dados temporais para a granularidade escolhida.")
+        return
+
+    st_echarts(calc["opt"], height=altura_responsiva(400), key=f"vg_drill_{gerencia}_{granul}")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric(f"📂 Total Abertas ({granul.lower()})", f"{sum(vals_a):,}")
-    c2.metric(f"✅ Total Encerradas ({granul.lower()})", f"{sum(vals_e):,}")
-    media_a = sum(vals_a) / max(len(vals_a), 1)
-    media_e = sum(vals_e) / max(len(vals_e), 1)
-    c3.metric(f"📊 Média Abertas/{granul.lower()}", f"{media_a:.1f}")
-    c4.metric(f"📊 Média Encerradas/{granul.lower()}", f"{media_e:.1f}")
+    c1.metric(f"📂 Total Abertas ({granul.lower()})", f"{calc['total_a']:,}")
+    c2.metric(f"✅ Total Encerradas ({granul.lower()})", f"{calc['total_e']:,}")
+    c3.metric(f"📊 Média Abertas/{granul.lower()}", f"{calc['media_a']:.1f}")
+    c4.metric(f"📊 Média Encerradas/{granul.lower()}", f"{calc['media_e']:.1f}")
 
 # endregion
 
 
 # region ====================== SESSÃO 7: Planejado × Realizado ================
 
-def _render_planejado_realizado(df: pd.DataFrame, gerencia: str):
-    st.markdown("##### 📅 Planejado × Realizado — Execução vs Cronograma")
-    st.caption(
-        "Comparativo mensal de notas planejadas (data_planejada) vs realizadas "
-        "(data_encerramento). Aderência = % do realizado sobre o planejado, "
-        "limitada a 150% para evitar distorções."
-    )
-
-    if not ECHARTS_OK:
-        st.warning("streamlit-echarts não instalado.")
-        return
-
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_planejado_realizado(df: pd.DataFrame) -> dict | None:
     if "data_planejada" not in df.columns or df["data_planejada"].dropna().empty:
-        st.info(
-            "ℹ️ Sem dados de planejamento para o filtro atual. "
-            "Esse gráfico exige a coluna `data_planejada` preenchida."
-        )
-        return
+        return None
 
     d = df.copy()
     d["dt_plan"] = pd.to_datetime(d.get("data_planejada"), errors="coerce")
@@ -479,8 +526,7 @@ def _render_planejado_realizado(df: pd.DataFrame, gerencia: str):
     d_real = d.dropna(subset=["dt_real"])
 
     if d_plan.empty and d_real.empty:
-        st.info("Sem dados de planejamento ou encerramento para o filtro atual.")
-        return
+        return None
 
     d_plan = d_plan.copy()
     d_real = d_real.copy()
@@ -557,19 +603,47 @@ def _render_planejado_realizado(df: pd.DataFrame, gerencia: str):
              }},
         ],
     }
-    st_echarts(opt, height=altura_responsiva(450), key=f"vg_plan_real_{gerencia}")
-
     total_plan = sum(vals_plan)
     total_real = sum(vals_real)
     aderencia_global = (total_real / total_plan * 100) if total_plan else 0
-    ader_color = "🟢" if aderencia_global >= 90 else ("🟡" if aderencia_global >= 70 else "🔴")
+    return {
+        "opt": opt, "total_plan": total_plan, "total_real": total_real,
+        "aderencia_global": aderencia_global, "saldo": total_real - total_plan,
+    }
+
+
+@st.fragment
+def _render_planejado_realizado(df: pd.DataFrame, gerencia: str):
+    st.markdown("##### 📅 Planejado × Realizado — Execução vs Cronograma")
+    st.caption(
+        "Comparativo mensal de notas planejadas (data_planejada) vs realizadas "
+        "(data_encerramento). Aderência = % do realizado sobre o planejado, "
+        "limitada a 150% para evitar distorções."
+    )
+
+    if not ECHARTS_OK:
+        st.warning("streamlit-echarts não instalado.")
+        return
+
+    calc = _calc_planejado_realizado(df)
+    if calc is None:
+        st.info(
+            "ℹ️ Sem dados de planejamento para o filtro atual. "
+            "Esse gráfico exige a coluna `data_planejada` preenchida."
+        )
+        return
+
+    st_echarts(calc["opt"], height=altura_responsiva(450), key=f"vg_plan_real_{gerencia}")
+
+    ader = calc["aderencia_global"]
+    ader_color = "🟢" if ader >= 90 else ("🟡" if ader >= 70 else "🔴")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📋 Total Planejado", f"{total_plan:,}")
-    c2.metric("✅ Total Realizado", f"{total_real:,}")
-    c3.metric(f"{ader_color} Aderência Global", f"{aderencia_global:.1f}%",
+    c1.metric("📋 Total Planejado", f"{calc['total_plan']:,}")
+    c2.metric("✅ Total Realizado", f"{calc['total_real']:,}")
+    c3.metric(f"{ader_color} Aderência Global", f"{ader:.1f}%",
               help="(Total Realizado / Total Planejado) × 100")
-    saldo = total_real - total_plan
+    saldo = calc["saldo"]
     c4.metric("📊 Saldo (Real - Plan)", f"{saldo:+,}",
               delta_color="normal" if saldo >= 0 else "inverse")
 
@@ -596,17 +670,11 @@ _COLUNAS_QUADRO = [
 ]
 
 
-def _render_quadro_resumo(df: pd.DataFrame, gerencia: str):
-    st.markdown("##### 📋 Quadro Resumo — Detalhamento Executivo")
-    st.caption(
-        "Tabela com as colunas-chave para reunião de rotina. "
-        "Ordenada por Data da Nota (mais recente primeiro). Exportável."
-    )
-
+@st.cache_data(ttl=300, show_spinner=False)
+def _calc_quadro_resumo(df: pd.DataFrame) -> pd.DataFrame | None:
     cols_existentes = [(orig, novo) for orig, novo in _COLUNAS_QUADRO if orig in df.columns]
     if not cols_existentes:
-        st.info("Nenhuma coluna do quadro resumo disponível nos dados.")
-        return
+        return None
 
     df_q = df[[c[0] for c in cols_existentes]].copy()
     df_q = df_q.rename(columns={c[0]: c[1] for c in cols_existentes})
@@ -637,6 +705,22 @@ def _render_quadro_resumo(df: pd.DataFrame, gerencia: str):
     else:
         df_q_ord = df_q
 
+    return df_q_ord
+
+
+@st.fragment
+def _render_quadro_resumo(df: pd.DataFrame, gerencia: str):
+    st.markdown("##### 📋 Quadro Resumo — Detalhamento Executivo")
+    st.caption(
+        "Tabela com as colunas-chave para reunião de rotina. "
+        "Ordenada por Data da Nota (mais recente primeiro). Exportável."
+    )
+
+    df_q_ord = _calc_quadro_resumo(df)
+    if df_q_ord is None:
+        st.info("Nenhuma coluna do quadro resumo disponível nos dados.")
+        return
+
     col_lim, col_info = st.columns([1, 2])
     with col_lim:
         limite = st.selectbox(
@@ -651,23 +735,18 @@ def _render_quadro_resumo(df: pd.DataFrame, gerencia: str):
         st.caption(f"⏳ Renderizando {len(df_show):,} linhas — pode demorar alguns segundos.")
     st.dataframe(df_show, use_container_width=True, height=500, hide_index=True)
 
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_q_ord.to_excel(writer, index=False, sheet_name="Quadro Resumo")
-    buffer.seek(0)
-
     col_dl1, col_dl2 = st.columns(2)
     with col_dl1:
         st.download_button(
-            "⬇️ Baixar Quadro Resumo (Excel)", data=buffer,
+            "⬇️ Baixar Quadro Resumo (Excel)",
+            data=gerar_excel_bytes(df_q_ord, sheet_name="Quadro Resumo"),
             file_name=f"quadro_resumo_{gerencia}_{datetime.now():%Y%m%d_%H%M}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"vg_dl_xlsx_{gerencia}",
         )
     with col_dl2:
-        csv_bytes = df_q_ord.to_csv(index=False, sep=";").encode("utf-8-sig")
         st.download_button(
-            "⬇️ Baixar Quadro Resumo (CSV)", data=csv_bytes,
+            "⬇️ Baixar Quadro Resumo (CSV)", data=gerar_csv_bytes(df_q_ord),
             file_name=f"quadro_resumo_{gerencia}_{datetime.now():%Y%m%d_%H%M}.csv",
             mime="text/csv", key=f"vg_dl_csv_{gerencia}",
         )

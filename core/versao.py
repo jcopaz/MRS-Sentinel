@@ -175,4 +175,46 @@
 #   app (regra de versionamento: reorganizacao de fluxo = MAJOR, mesmo
 #   sem quebrar nenhuma API publica nem comportamento visivel esperado).
 
-APP_VERSION = "3.8.0"
+# 3.9.0 (2026-08-30): performance, parte 2 -- @st.fragment sozinho só
+# controla ONDE um rerun acontece; não impede que o trabalho seja refeito
+# quando o fragmento é RE-CHAMADO pelo pai (não pelo próprio widget dele).
+# Fechando essa lacuna:
+#   - components/visao_gerencial.py: as 7 seções (Criticidade, Status
+#     Ordem, Tipo de Inspeção, Código de Anomalia, Notas por Período,
+#     Planejado×Realizado, Quadro Resumo) viram @st.fragment cada uma
+#     (mesmo achado que motivou o 3.8.0: mexer no drill-down de período
+#     ou no "mostrar N" do Quadro Resumo recalculava as outras 6 seções
+#     inteiras). Cada seção também ganha uma função _calc_*() cacheada
+#     (st.cache_data) separada da renderização -- agora, mesmo quando o
+#     fragmento PAI (a aba inteira) re-invoca as 7 seções por outro
+#     motivo, o cálculo pesado (groupby/pivot/opt do ECharts) só roda de
+#     novo se o conteúdo real mudou.
+#   - components/heatmap.py: mesmo tratamento nas 3 funções (heatmap,
+#     ranking de pátio, série temporal) -- aqui sem fragment extra (cada
+#     uma já É uma aba inteira), só separação cálculo/render + cache.
+#   - components/unifilar.py: _bar_empilhado_ranking() (usada pelos 3
+#     rankings, já fragmentados desde antes) ganha o mesmo tratamento —
+#     _calc_ranking() cacheado.
+#   - core/exportacao.py (novo): gerar_excel_bytes()/gerar_csv_bytes()
+#     cacheados, fonte única -- substituem os helpers duplicados que o
+#     3.8.0 tinha criado só dentro de unifilar.py; agora reusados também
+#     no Quadro Resumo de visao_gerencial.py (fim da duplicação).
+#   - modules/gerencia_dashboard.py: o card de cabeçalho ("Gerência X —
+#     Coordenações...") ganha uma linha com o período de Abertura da Nota
+#     realmente aplicado (e uma nota de que o RASF tem filtro de período
+#     próprio, mesmo padrão de ano vigente) -- pedido do Julio pra deixar
+#     explícito de que dia a que dia são as notas mostradas, ainda mais
+#     relevante depois do default de "ano vigente" do 3.8.0.
+#   Testado em runtime: os 11 _calc_*() novos (7 de visao_gerencial + 3 de
+#   heatmap + 1 de unifilar) chamados 2x com o mesmo df/parâmetros dão
+#   resultado idêntico e não lançam exceção (cache-safe); os fluxos
+#   completos de render_gerencia()/render_gerencia_geral() (agora com as
+#   7 seções internas também fragmentadas) continuam rodando ponta a
+#   ponta sem exceção; regressões de zoom (3.6.1) e barras espelhadas
+#   (3.7.0) re-confirmadas intactas. Mesma limitação de teste do 3.8.0
+#   registrada lá: o AppTest não simula fragment-only-rerun -- a redução
+#   de reprocessamento em si só é confirmável no navegador real. MINOR --
+#   aditivo (funções _calc_*/módulo exportacao.py novos, nenhuma API
+#   pública das telas mudou de assinatura).
+
+APP_VERSION = "3.9.0"
