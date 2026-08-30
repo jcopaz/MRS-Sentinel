@@ -527,7 +527,8 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
     st.caption(
         f"{len(ativos):,} ativo(s) identificado(s) neste recorte. "
         "Altura da barra = score (mesma escala verde→vermelho do Unifilar principal) · "
-        "borda vermelha grossa = top 10% mais crítico · ponto roxo = hot-spot crônico."
+        "borda vermelha grossa = top 10% mais crítico · aura roxa ao redor da barra = "
+        "hot-spot crônico (mesma linguagem do anel roxo do Unifilar por KM)."
         + (" Topo = notas Abertas · base = notas Concluídas (espelhado)." if usar_dual else "")
     )
 
@@ -543,8 +544,8 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
     # etiqueta, que varia muito mais). Texto na diagonal ocupa bem menos
     # largura horizontal por ativo, então a barra e o espaçamento mínimo
     # entre elas encolheram também — mais ativos cabem sem sobrepor.
-    BAR_W_PX = 10
-    MIN_GAP_PX = BAR_W_PX + 6
+    BAR_W_PX = 7
+    MIN_GAP_PX = BAR_W_PX + 4
     ASSUMED_PLOT_PX = 320   # pior caso (mobile) — erra sempre pro lado seguro
     min_gap_km = (km_hi - km_lo) * (MIN_GAP_PX / ASSUMED_PLOT_PX)
 
@@ -580,7 +581,11 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
             return 4.0
         return max(4.0, (score / score_max_local) * max_bar_px)
 
-    serie_abertas, serie_concluidas, serie_labels = [], [], []
+    # Folga (px) da aura crônica em relação ao tamanho da barra que ela
+    # circunda — mesma ideia do RING_DELTA usado no Unifilar por KM.
+    AURA_DELTA = 6
+
+    serie_abertas, serie_concluidas, serie_labels, serie_aura = [], [], [], []
 
     for _, row in ativos.iterrows():
         km_d = row["km_dodge"]
@@ -601,7 +606,13 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
                 },
                 "tooltipHTML": row.get("ab_tooltipHTML", ""),
             })
-            cronico = cronico or bool(row.get("ab_is_cronico"))
+            if bool(row.get("ab_is_cronico")):
+                cronico = True
+                serie_aura.append({
+                    "value": [km_d, 1 if usar_dual else 0],
+                    "symbolSize": [BAR_W_PX + AURA_DELTA, h + AURA_DELTA],
+                    "symbolOffset": [0, -h / 2],
+                })
 
         if usar_dual and pd.notna(row.get("co_score_total")):
             h = _altura_px(row["co_score_total"])
@@ -618,25 +629,33 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
                 },
                 "tooltipHTML": row.get("co_tooltipHTML", ""),
             })
-            cronico = cronico or bool(row.get("co_is_cronico"))
+            if bool(row.get("co_is_cronico")):
+                cronico = True
+                serie_aura.append({
+                    "value": [km_d, -1],
+                    "symbolSize": [BAR_W_PX + AURA_DELTA, h + AURA_DELTA],
+                    "symbolOffset": [0, h / 2],
+                })
 
-        # Marcador pequeno (ponto) na faixa central — roxo se crônico, cinza
-        # claro (quase invisível) senão. O nome vira LABEL rotacionado a
-        # 55°, não mais uma etiqueta com caixa (essas se sobrepunham com
-        # muitos ativos — a rotação é o mesmo truque que gráficos de barra
-        # comuns usam pra caber muitos rótulos sem colidir).
+        # O nome vira LABEL rotacionado a 55°, não mais uma etiqueta com
+        # caixa (essas se sobrepunham com muitos ativos — a rotação é o
+        # mesmo truque que gráficos de barra comuns usam pra caber muitos
+        # rótulos sem colidir). O marcador em si fica praticamente
+        # invisível (só ancora o label) — o sinal de crônico de verdade é
+        # a AURA roxa em volta da BARRA (mesma linguagem do anel roxo do
+        # Unifilar por KM), não mais um ponto colorido perto do nome, que
+        # ficava sutil demais pra notar (relatado pelo Julio 2026-08-30).
         serie_labels.append({
             "value": [km_d, 0],
-            "symbolSize": 6 if cronico else 3,
-            "itemStyle": {
-                "color": COR_CRONICO if cronico else "#cbd5e1",
-            },
+            "symbolSize": 2,
+            "itemStyle": {"color": "#e2e8f0"},
             "label": {
                 "show": True, "formatter": nome,
                 "position": "bottom", "rotate": 55,
                 "align": "right", "verticalAlign": "middle",
                 "offset": [0, 4],
-                "fontSize": 10, "fontWeight": 600, "color": "#374151",
+                "fontSize": 10, "fontWeight": 600,
+                "color": COR_CRONICO if cronico else "#374151",
             },
         })
 
@@ -652,6 +671,22 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
             "data": [[km_lo, -1], [km_hi, -1]],
             "lineStyle": {"color": "#374151", "width": 3},
             "symbol": "none", "silent": True, "tooltip": {"show": False},
+        })
+    if serie_aura:
+        # Aura crônica: retângulo vazado (sem preenchimento) um pouco maior
+        # que a barra correspondente, com brilho — mesma linguagem visual
+        # do anel roxo do Unifilar por KM (_serie_anel_cronico), adaptada
+        # de círculo pra retângulo. z menor que a barra: a barra pinta por
+        # cima do meio, a aura só "vaza" nas bordas.
+        series.append({
+            "name": "♻️ Crônicos", "type": "scatter", "symbol": "rect",
+            "data": serie_aura, "silent": True, "z": 3,
+            "tooltip": {"show": False},
+            "itemStyle": {
+                "color": "rgba(0,0,0,0)", "borderColor": COR_CRONICO,
+                "borderWidth": 3, "shadowBlur": 8,
+                "shadowColor": "rgba(124,58,237,0.6)",
+            },
         })
     if serie_abertas:
         series.append({

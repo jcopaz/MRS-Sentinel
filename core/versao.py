@@ -244,4 +244,23 @@
 # hardcoded que o teste antigo tinha. PATCH -- ajuste visual pontual,
 # mesmo comportamento/API, corrige bug real de sobreposição.
 
-APP_VERSION = "3.9.1"
+# 3.9.2 (2026-08-30): ajuste fino do Unifilar de Ativo a partir de print
+# real (Julio, mesmo dia): hot-spot crônico virou uma AURA ROXA em volta
+# da BARRA (retângulo vazado com brilho, mesma linguagem do anel roxo do
+# Unifilar por KM — _serie_anel_cronico), substituindo o pontinho ao lado
+# do nome da v3.9.1, que era sutil demais pra notar e usava uma cor
+# neutra (#cbd5e1) que em telas pequenas lia como "meio roxo" pra
+# QUALQUER ativo, cronico ou não — daí a pergunta certeira do Julio
+# ("não deveria ser roxo piscante..."). Nome do ativo cronico também fica
+# na cor roxa (reforço). Barra ficou ainda mais fina (10px -> 7px) e o
+# espaçamento mínimo do dodge encolheu de novo (pedido do Julio: "diminuir
+# ainda mais o espaçamento entre as barras") — o rótulo rotacionado a 55°
+# (3.9.1) segue absorvendo a folga que a barra fina não precisa mais.
+# Testado em runtime: aura aparece só no ativo com is_cronico=True (não
+# no vizinho sem), maior em largura E altura que a própria barra, cor
+# roxa correta; nome do ativo cronico com label.color roxo, do não-cronico
+# com a cor normal; regressões de zoom, barras (dual/empilhado/vazio) e
+# rótulo rotacionado re-confirmadas intactas após atualizar a constante
+# de espaçamento hardcoded nos testes. PATCH -- ajuste visual pontual.
+
+APP_VERSION = "3.9.2"
