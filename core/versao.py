@@ -130,4 +130,49 @@
 # sincronizado) re-confirmada intacta. MINOR (repaginação de uma
 # visualização existente, comportamento geral e API preservados).
 
-APP_VERSION = "3.7.0"
+# 3.8.0 (2026-08-30): performance -- Julio relatou o site "muito pesado e
+# demorado" no celular, principalmente no Unifilar, a ponto de nao
+# conseguir usar. Causa raiz real: st.tabs() executa o codigo Python de
+# TODAS as abas em TODO rerun -- so' esconde a inativa via CSS (limitacao
+# conhecida do Streamlit, nao bug). Sem isolamento, mexer num widget
+# dentro de UMA aba (ex.: o slider de KM do Unifilar) recalculava as
+# outras 6 abas inteiras a cada interacao -- KPIs, Visao Gerencial,
+# Heatmap, Ranking, Temporal e Inteligencia EE, cada uma com varios
+# graficos ECharts/Plotly. No celular isso travava a tela.
+#   - modules/gerencia_dashboard.py e modules/gerencia_geral.py: as 7
+#     abas de cada tela viram @st.fragment (funcao aninhada, mesmo padrao
+#     ja usado com sucesso nos rankings de components/unifilar.py e nos 6
+#     fragments de components/inteligencia_ee.py -- nao inventei nada
+#     novo, generalizei o que ja funcionava). Interagir com um widget de
+#     UMA aba agora reage sozinho, sem recalcular as outras 6.
+#   - components/unifilar.py: render_tabela_completa_unifilar() tambem
+#     virou @st.fragment (o seletor "Mostrar" nao recalcula mais o
+#     grafico de KM/Ativo/rankings acima); Excel/CSV do recorte
+#     exportavel agora sao cacheados por conteudo (_gerar_excel_unifilar/
+#     _gerar_csv_unifilar, st.cache_data) -- antes eram regerados do zero
+#     em TODO rerun da aba, mesmo sem ninguem clicar em baixar.
+#   - Filtro de "Abertura da Nota" (components/filtros.py) e periodo do
+#     RASF (components/inteligencia_ee.py) agora comecam no ANO VIGENTE
+#     (1o/jan do ano corrente) em vez do historico completo desde 2018 --
+#     menos dado processado por padrao em toda tela (KPIs, graficos,
+#     export), some sozinho ano que vem (deriva de date.today().year).
+#     Gerencia nova (nota mais antiga posterior ao 1o/jan) cai pra data
+#     real, nunca abre um recorte padrao vazio; quem quiser ver anos
+#     anteriores ajusta o filtro manualmente.
+#   Limitacao de teste registrada: o harness AppTest usado pra validar
+#   este projeto NAO simula fragment-only-rerun (sempre reexecuta o
+#   script inteiro a cada .run(), confirmado com um teste minimo
+#   dedicado) -- entao a reducao de reprocessamento em si so' e'
+#   confirmavel no navegador real, nao neste sandbox. O que FOI validado
+#   em runtime: os fluxos completos de render_gerencia() e
+#   render_gerencia_geral() (14 abas fragmentadas) rodam ponta a ponta
+#   sem excecao com dados sinteticos e as funcoes de render REAIS (nao
+#   mockadas); os 3 cenarios do novo default de data (historico desde
+#   2018, gerencia nova, sem coluna data_nota) e o efeito real do filtro
+#   RASF; e as regressoes de zoom sincronizado (3.6.1) e barras
+#   espelhadas (3.7.0) continuam intactas. MAJOR -- reorganizacao de
+#   fluxo de execucao que atinge as 14 abas das duas telas principais do
+#   app (regra de versionamento: reorganizacao de fluxo = MAJOR, mesmo
+#   sem quebrar nenhuma API publica nem comportamento visivel esperado).
+
+APP_VERSION = "3.8.0"

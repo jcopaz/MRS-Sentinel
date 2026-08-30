@@ -21,6 +21,7 @@
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
 import math
+from io import BytesIO
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -1650,16 +1651,42 @@ _COLS_DATA_UNIFILAR = [
 ]
 
 
+# Cacheados por conteúdo do DataFrame (hash nativo do st.cache_data pra
+# pandas) — antes, o Excel/CSV do recorte era regerado do zero em TODO
+# rerun da aba, mesmo quando o usuário só mudou "Mostrar: 50→100" (que nem
+# afeta o que é exportado, só o que é exibido na tabela) ou mexeu em
+# qualquer widget de OUTRA parte da tela. Perf 2026-08-30 (Julio: "site
+# muito pesado e demorado no celular").
+@st.cache_data(ttl=300, show_spinner=False)
+def _gerar_excel_unifilar(df: pd.DataFrame) -> bytes:
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Notas Unifilar")
+    return buffer.getvalue()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _gerar_csv_unifilar(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False, sep=";").encode("utf-8-sig")
+
+
+@st.fragment
 def render_tabela_completa_unifilar(df: pd.DataFrame, gerencia: str):
     """
     Tabela completa (todas as colunas da base) no recorte de Ramal+Trecho
     já selecionado no Unifilar. Mesmo formato do Quadro Resumo (seletor de
     linhas + download Excel/CSV), mas sem curar/renomear colunas.
+
+    @st.fragment (perf 2026-08-30): mesmo padrão já usado nos 3 rankings
+    deste arquivo — o seletor "Mostrar" (único widget interno) não
+    recalcula o gráfico de KM, o de Ativo nem os rankings acima. Se o
+    recorte de dados mudar de verdade (bin_km/modo/ramal/trecho, que
+    moram no fragment PAI — a aba inteira, ver gerencia_dashboard.py), o
+    fragment pai reroda e chama esta função de novo com o `df` novo.
     """
     if df.empty:
         return
 
-    from io import BytesIO
     from datetime import datetime
 
     st.markdown("---")
@@ -1705,23 +1732,17 @@ def render_tabela_completa_unifilar(df: pd.DataFrame, gerencia: str):
         st.caption(f"⏳ Renderizando {len(df_view):,} linhas — pode demorar alguns segundos.")
     st.dataframe(df_view, use_container_width=True, height=500, hide_index=True)
 
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_t_ord.to_excel(writer, index=False, sheet_name="Notas Unifilar")
-    buffer.seek(0)
-
     col_dl1, col_dl2 = st.columns(2)
     with col_dl1:
         st.download_button(
-            "⬇️ Baixar Notas do Recorte (Excel)", data=buffer,
+            "⬇️ Baixar Notas do Recorte (Excel)", data=_gerar_excel_unifilar(df_t_ord),
             file_name=f"notas_unifilar_{gerencia}_{datetime.now():%Y%m%d_%H%M}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"unif_dl_xlsx_{gerencia}",
         )
     with col_dl2:
-        csv_bytes = df_t_ord.to_csv(index=False, sep=";").encode("utf-8-sig")
         st.download_button(
-            "⬇️ Baixar Notas do Recorte (CSV)", data=csv_bytes,
+            "⬇️ Baixar Notas do Recorte (CSV)", data=_gerar_csv_unifilar(df_t_ord),
             file_name=f"notas_unifilar_{gerencia}_{datetime.now():%Y%m%d_%H%M}.csv",
             mime="text/csv", key=f"unif_dl_csv_{gerencia}",
         )

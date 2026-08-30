@@ -423,6 +423,19 @@ def render_filtros_cascata(
             data_min = min(max(candidato, date(2018, 1, 1)), data_max)
             # ⚠️ NÃO sobrescreve data_max — mantém date.today()
 
+    # Padrão do filtro "Abertura da Nota — Início": ANO VIGENTE, não o
+    # histórico completo desde 2018 — pedido do Julio (2026-08-30) pra
+    # reduzir de cara o volume de notas processado (menos dado = filtro,
+    # score, gráficos e exportação mais rápidos, sobretudo no celular) e
+    # simplificar a leitura inicial da tela. Ano seguinte (2027) já nasce
+    # filtrado a partir de 01/01/2027 sozinho, sem precisar mexer em nada
+    # (deriva de date.today().year a cada carregamento). Se a gerência for
+    # nova e a nota mais antiga for POSTERIOR a 1º/jan (data_min > default
+    # de ano vigente), usa a data real — nunca abre um intervalo padrão
+    # sem nenhuma nota dentro. Quem quiser ver anos anteriores ajusta o
+    # campo manualmente (continua editável, min_value = 2018-01-01).
+    data_abertura_ini_default = max(date(data_max.year, 1, 1), data_min)
+
     # ── Botão Limpar (fora do form — limpa session_state e rerun imediato) ───
     if st.button(
         "🗑️ Limpar filtros",
@@ -550,7 +563,7 @@ def render_filtros_cascata(
         with col_ab1:
             data_abertura_ini = st.date_input(
                 "Início",
-                value=data_min,
+                value=data_abertura_ini_default,
                 min_value=date(2018, 1, 1),
                 max_value=data_max,
                 key=f"filtro_ab_ini_{uid}",

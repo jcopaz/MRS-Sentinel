@@ -317,21 +317,11 @@ def render_gerencia_geral():
             unsafe_allow_html=True,
         )
 
-    # ── 6 Abas ────────────────────────────────────────────────────────────────
-    aba_cons, aba_ger, aba_comp, aba_unif, aba_temp, aba_rank, aba_ee = st.tabs([
-        "📊 Consolidado",
-        "🎯 Visão Gerencial",
-        "⚖️ SP × VP",
-        "🗺️ Unifilar Total",
-        "📈 Temporal Global",
-        "🏆 Top Hot-spots",
-        "🔌 Inteligência EE",
-    ])
-
-    # endregion
-
-    # region =================== SESSÃO 5.1: Aba — Consolidado =================
-    with aba_cons:
+    # ── Abas isoladas em @st.fragment (ver mesmo comentário/motivo em
+    # modules/gerencia_dashboard.py::render_gerencia) — sem isso, mexer num
+    # widget de UMA aba recalculava as outras 6 inteiras a cada interação.
+    @st.fragment
+    def _aba_cons_frag():
         st.markdown("#### 📊 Painel Consolidado SP + VP")
 
         # Indicadores IMT / DI / Aderência / Lead Time (core/indicadores.py)
@@ -345,16 +335,12 @@ def render_gerencia_geral():
         st.markdown("#### 📊 KPIs Unificados")
         render_kpi_cards(df_total, gerencia="GERAL", disciplina=disciplina_geral)
 
-    # endregion
-
-    # region =================== SESSÃO 5.1B: Aba — Visão Gerencial ============
-    with aba_ger:
+    @st.fragment
+    def _aba_ger_frag():
         render_visao_gerencial(df_total, gerencia="GERAL")
 
-    # endregion
-
-    # region =================== SESSÃO 5.2: Aba — Comparativo SP × VP =========
-    with aba_comp:
+    @st.fragment
+    def _aba_comp_frag():
         st.markdown("#### ⚖️ Comparativo Gerência SP × VP")
 
         # Linha de métricas rápidas SP vs VP
@@ -419,10 +405,8 @@ def render_gerencia_geral():
         else:
             st.caption("Dados insuficientes para o gráfico.")
 
-    # endregion
-
-    # region =================== SESSÃO 5.3: Aba — Unifilar Total ==============
-    with aba_unif:
+    @st.fragment
+    def _aba_unif_frag():
         st.markdown("#### 🗺️ Unifilar Total — SP + VP Integradas")
         st.caption(
             "Visualização unificada das duas gerências. "
@@ -433,10 +417,8 @@ def render_gerencia_geral():
         # O componente unifilar suporta gerencia='GERAL' para mostrar ambas
         render_unifilar_dual(df_total, gerencia="GERAL")
 
-    # endregion
-
-    # region =================== SESSÃO 5.4: Aba — Temporal Global ============
-    with aba_temp:
+    @st.fragment
+    def _aba_temp_frag():
         st.markdown("#### 📈 Evolução Temporal — SP + VP")
 
         col_gran, col_met, col_split = st.columns(3)
@@ -474,10 +456,8 @@ def render_gerencia_geral():
             # Série unificada
             render_serie_temporal(df_total, granularidade=granularidade, metrica=metrica, gerencia="GERAL")
 
-    # endregion
-
-    # region =================== SESSÃO 5.5: Aba — Top Hot-spots ==============
-    with aba_rank:
+    @st.fragment
+    def _aba_rank_frag():
         st.markdown("#### 🏆 Top Hot-spots — SP + VP Unificados")
 
         col_n, col_ord, col_ger = st.columns(3)
@@ -505,10 +485,8 @@ def render_gerencia_geral():
 
         render_ranking(df_rank, top_n=top_n, ordem=ordem, gerencia="GERAL")
 
-    # endregion
-
-    # region =================== SESSÃO 5.6: Aba — Inteligência EE (Global) ====
-    with aba_ee:
+    @st.fragment
+    def _aba_ee_frag():
         from components.inteligencia_ee import render_inteligencia_ee
         from database.queries_rasf import get_rasf_cached
         from database.queries_baseline import get_baseline_cached
@@ -524,5 +502,31 @@ def render_gerencia_geral():
             df_base_2025 = df_base_2025[df_base_2025["gerencia"].isin(gerencias_vis)]
 
         render_inteligencia_ee(df_rasf, escopo="GLOBAL", df_baseline=df_base_2025)
+
+    # ── 6 Abas ────────────────────────────────────────────────────────────────
+    aba_cons, aba_ger, aba_comp, aba_unif, aba_temp, aba_rank, aba_ee = st.tabs([
+        "📊 Consolidado",
+        "🎯 Visão Gerencial",
+        "⚖️ SP × VP",
+        "🗺️ Unifilar Total",
+        "📈 Temporal Global",
+        "🏆 Top Hot-spots",
+        "🔌 Inteligência EE",
+    ])
+
+    with aba_cons:
+        _aba_cons_frag()
+    with aba_ger:
+        _aba_ger_frag()
+    with aba_comp:
+        _aba_comp_frag()
+    with aba_unif:
+        _aba_unif_frag()
+    with aba_temp:
+        _aba_temp_frag()
+    with aba_rank:
+        _aba_rank_frag()
+    with aba_ee:
+        _aba_ee_frag()
 
     # endregion

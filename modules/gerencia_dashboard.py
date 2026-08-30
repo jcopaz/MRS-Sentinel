@@ -235,27 +235,29 @@ def render_gerencia(sigla: str) -> None:
             unsafe_allow_html=True,
         )
 
-    # ── 7 Abas principais ─────────────────────────────────────────────────────
-    aba_kpi, aba_ger, aba_unif, aba_heat, aba_rank, aba_temp, aba_ee = st.tabs([
-        "📊 Visão Geral",
-        "🎯 Visão Gerencial",
-        "🗺️ Unifilar",
-        "🌡️ Heatmap",
-        "🏆 Ranking",
-        "📈 Temporal",
-        "🔌 Inteligência EE",
-    ])
-
-    with aba_kpi:
+    # ── Abas isoladas em @st.fragment ──────────────────────────────────────────
+    # st.tabs() sempre executa o corpo Python de TODAS as abas a cada rerun —
+    # só esconde via CSS a que não está ativa (limitação conhecida do
+    # Streamlit, não um bug). Sem isolamento, mexer num widget dentro de UMA
+    # aba (ex.: o slider de KM do Unifilar) recalculava as OUTRAS 6 abas
+    # inteiras a cada interação — KPIs, Visão Gerencial, Heatmap, Ranking,
+    # Temporal e Inteligência EE, cada uma com vários gráficos ECharts/
+    # Plotly. No celular isso deixava a tela pesada a ponto de travar
+    # (relatado pelo Julio, 2026-08-30). @st.fragment faz cada aba reagir só
+    # aos PRÓPRIOS widgets — interagir com uma não recalcula as outras 6.
+    @st.fragment
+    def _aba_kpi_frag():
         st.markdown(f"#### 📊 KPIs da Gerência {sigla}")
         render_kpi_cards(df, gerencia=sigla, disciplina=disciplina_sel)
         st.markdown("---")
         render_painel_transparencia(score_cfg)
 
-    with aba_ger:
+    @st.fragment
+    def _aba_ger_frag():
         render_visao_gerencial(df, gerencia=sigla)
 
-    with aba_unif:
+    @st.fragment
+    def _aba_unif_frag():
         st.markdown("#### 🗺️ Unifilar Dual — VP + EE por Ramal")
         col_info, col_legenda = st.columns([3, 1])
         with col_info:
@@ -271,12 +273,14 @@ def render_gerencia(sigla: str) -> None:
             )
         render_unifilar_dual(df, gerencia=sigla)
 
-    with aba_heat:
+    @st.fragment
+    def _aba_heat_frag():
         st.markdown("#### 🌡️ Heatmap — Pátio × Família de Defeito")
         st.caption("Intensidade = score médio das notas naquela combinação Pátio × Família")
         render_heatmap(df, gerencia=sigla)
 
-    with aba_rank:
+    @st.fragment
+    def _aba_rank_frag():
         st.markdown("#### 🏆 Ranking de Hot-spots")
         col_n, col_ord = st.columns([1, 2])
         with col_n:
@@ -289,7 +293,8 @@ def render_gerencia(sigla: str) -> None:
             )
         render_ranking(df, top_n=top_n, ordem=ordem, gerencia=sigla)
 
-    with aba_temp:
+    @st.fragment
+    def _aba_temp_frag():
         st.markdown("#### 📈 Evolução Temporal")
         col_gran, col_met = st.columns(2)
         with col_gran:
@@ -306,7 +311,8 @@ def render_gerencia(sigla: str) -> None:
             )
         render_serie_temporal(df, granularidade=granularidade, metrica=metrica, gerencia=sigla)
 
-    with aba_ee:
+    @st.fragment
+    def _aba_ee_frag():
         from components.inteligencia_ee import render_inteligencia_ee
         from database.queries_rasf import get_rasf_cached
         from database.queries_baseline import get_baseline_cached
@@ -315,5 +321,31 @@ def render_gerencia(sigla: str) -> None:
             df_rasf = get_rasf_cached(sigla)
             df_base_2025 = get_baseline_cached(sigla)   # camada YoY (Sprint 7)
         render_inteligencia_ee(df_rasf, escopo=sigla, df_baseline=df_base_2025)
+
+    # ── 7 Abas principais ─────────────────────────────────────────────────────
+    aba_kpi, aba_ger, aba_unif, aba_heat, aba_rank, aba_temp, aba_ee = st.tabs([
+        "📊 Visão Geral",
+        "🎯 Visão Gerencial",
+        "🗺️ Unifilar",
+        "🌡️ Heatmap",
+        "🏆 Ranking",
+        "📈 Temporal",
+        "🔌 Inteligência EE",
+    ])
+
+    with aba_kpi:
+        _aba_kpi_frag()
+    with aba_ger:
+        _aba_ger_frag()
+    with aba_unif:
+        _aba_unif_frag()
+    with aba_heat:
+        _aba_heat_frag()
+    with aba_rank:
+        _aba_rank_frag()
+    with aba_temp:
+        _aba_temp_frag()
+    with aba_ee:
+        _aba_ee_frag()
 
 # endregion

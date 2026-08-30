@@ -333,9 +333,15 @@ def _render_filtros(df: pd.DataFrame, escopo: str) -> pd.DataFrame:
                 data_max = date.today()  # SEMPRE hoje — nunca derivar dos dados
                 datas_validas = pd.to_datetime(df.get("data_nota"), errors="coerce").dropna()
                 data_min_disp = datas_validas.min().date() if not datas_validas.empty else date(2018, 1, 1)
+                # Padrão ANO VIGENTE (não o histórico completo) — mesmo
+                # critério do filtro principal de notas (components/filtros.py),
+                # pedido do Julio 2026-08-30. Se a base RASF só tiver dado
+                # anterior ao ano corrente, cai pra data_min_disp (nunca abre
+                # um período padrão vazio).
+                data_ini_default = max(date(data_max.year, 1, 1), data_min_disp)
                 periodo = st.date_input(
                     "Período (data da nota)",
-                    value=(data_min_disp, data_max),
+                    value=(data_ini_default, data_max),
                     min_value=date(2018, 1, 1),
                     max_value=data_max,
                     format="DD/MM/YYYY",
