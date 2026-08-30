@@ -217,4 +217,31 @@
 #   aditivo (funções _calc_*/módulo exportacao.py novos, nenhuma API
 #   pública das telas mudou de assinatura).
 
-APP_VERSION = "3.9.0"
+# 3.9.1 (2026-08-30): corrige etiquetas do Unifilar de Ativo se
+# sobrepondo em produção (print real do Julio: nomes de ativo colidindo
+# na faixa central com muitos ativos próximos no KM). Causa raiz: o
+# "dodge" horizontal (3.7.0) só garantia espaço pra largura da BARRA
+# (16px) — a largura real da ETIQUETA (que varia com o tamanho do nome,
+# ex. "AMV 334S — Linha 1" bem mais larga que "AMV 1") nunca entrava na
+# conta. Corrigido do mesmo jeito que gráficos de barra comuns resolvem
+# esse problema (o Julio trouxe um exemplo): nome do ativo virou texto
+# ROTACIONADO A 55°, não mais uma etiqueta com caixa branca — texto na
+# diagonal ocupa bem menos largura horizontal por ativo. Isso permitiu
+# afinar a barra (16px -> 10px) e reduzir o espaçamento mínimo do dodge
+# (pedido do próprio Julio: "assim também dá pra diminuir o espaçamento
+# entre as barras") sem voltar a sobrepor. Crônico virou um ponto roxo
+# (era borda da caixa); a altura total do gráfico cresceu (620px dual /
+# 360px empilhado, era 460/320) pra sobrar espaço vertical pro texto
+# diagonal sem encostar na barra da via oposta — estimativa sem medição
+# real de texto (sem navegador neste ambiente); nomes muito longos podem
+# ainda pedir mais altura, a confirmar com o Julio olhando ao vivo.
+# Testado em runtime: 8 ativos com nomes longos a 20m de distância entre
+# si — todos os rótulos com rotate=55/position=bottom confirmados, dodge
+# recalculado com o novo espaçamento mínimo (16px equiv.) continua
+# garantindo que nenhum par de barras fica mais perto que isso; teste de
+# regressão do 3.7.0 (dual/empilhado/vazio) e do 3.6.1 (zoom sincronizado)
+# re-confirmados intactos após ajustar a constante de espaçamento
+# hardcoded que o teste antigo tinha. PATCH -- ajuste visual pontual,
+# mesmo comportamento/API, corrige bug real de sobreposição.
+
+APP_VERSION = "3.9.1"

@@ -527,7 +527,7 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
     st.caption(
         f"{len(ativos):,} ativo(s) identificado(s) neste recorte. "
         "Altura da barra = score (mesma escala verde→vermelho do Unifilar principal) · "
-        "borda vermelha grossa = top 10% mais crítico · etiqueta com borda roxa = hot-spot crônico."
+        "borda vermelha grossa = top 10% mais crítico · ponto roxo = hot-spot crônico."
         + (" Topo = notas Abertas · base = notas Concluídas (espelhado)." if usar_dual else "")
     )
 
@@ -537,8 +537,14 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
         km_hi = km_lo + 1.0
 
     # ── Dodge horizontal em KM (ver docstring) ─────────────────────────────
-    BAR_W_PX = 16
-    MIN_GAP_PX = BAR_W_PX + 8
+    # Rótulo do ativo virou texto rotacionado a 55° (pedido do Julio, depois
+    # de ver etiquetas horizontais se sobrepondo em produção com muitos
+    # ativos — o dodge só garantia espaço pra largura da BARRA, não da
+    # etiqueta, que varia muito mais). Texto na diagonal ocupa bem menos
+    # largura horizontal por ativo, então a barra e o espaçamento mínimo
+    # entre elas encolheram também — mais ativos cabem sem sobrepor.
+    BAR_W_PX = 10
+    MIN_GAP_PX = BAR_W_PX + 6
     ASSUMED_PLOT_PX = 320   # pior caso (mobile) — erra sempre pro lado seguro
     min_gap_km = (km_hi - km_lo) * (MIN_GAP_PX / ASSUMED_PLOT_PX)
 
@@ -554,9 +560,13 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
     # ── Geometria em pixel ──────────────────────────────────────────────────
     # grid com margens FIXAS (containLabel=False) pra saber exatamente quanto
     # espaço em px cada barra tem disponível — bar anchora na linha "Via"
-    # (y=+-1) e cresce pra fora; a etiqueta do ativo mora no espaço VAZIO
-    # entre as duas linhas (y=0), que as barras nunca invadem.
-    altura_ativo = 460 if usar_dual else 320
+    # (y=+-1) e cresce pra fora; o rótulo do ativo mora na faixa vazia entre
+    # as duas linhas (y=0) e desce na diagonal — por isso a altura total do
+    # gráfico cresceu (texto rotacionado ocupa mais altura que a etiqueta
+    # horizontal da v3.7.0). Estimativa sem medição real de texto (não há
+    # navegador neste ambiente) — se nomes muito longos ainda encostarem na
+    # barra de baixo num caso real, é questão de aumentar altura_ativo mais.
+    altura_ativo = 620 if usar_dual else 360
     grid_top, grid_bottom = 22, 78
     plot_h_px = altura_ativo - grid_top - grid_bottom
     y_min, y_max = (-2.5, 2.5) if usar_dual else (-1.2, 1.2)
@@ -569,8 +579,6 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
         if score_max_local <= 0:
             return 4.0
         return max(4.0, (score / score_max_local) * max_bar_px)
-
-    CHAR_W_PX = 6.2   # largura média de caractere — só pra dimensionar a etiqueta
 
     serie_abertas, serie_concluidas, serie_labels = [], [], []
 
@@ -612,18 +620,23 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
             })
             cronico = cronico or bool(row.get("co_is_cronico"))
 
-        tag_w = max(34.0, len(nome) * CHAR_W_PX + 12)
+        # Marcador pequeno (ponto) na faixa central — roxo se crônico, cinza
+        # claro (quase invisível) senão. O nome vira LABEL rotacionado a
+        # 55°, não mais uma etiqueta com caixa (essas se sobrepunham com
+        # muitos ativos — a rotação é o mesmo truque que gráficos de barra
+        # comuns usam pra caber muitos rótulos sem colidir).
         serie_labels.append({
             "value": [km_d, 0],
-            "symbolSize": [tag_w, 17],
+            "symbolSize": 6 if cronico else 3,
             "itemStyle": {
-                "color": "#ffffff",
-                "borderColor": COR_CRONICO if cronico else "#d1d5db",
-                "borderWidth": 2 if cronico else 1,
+                "color": COR_CRONICO if cronico else "#cbd5e1",
             },
             "label": {
-                "show": True, "formatter": nome, "position": "inside",
-                "fontSize": 9.5, "fontWeight": 600, "color": "#374151",
+                "show": True, "formatter": nome,
+                "position": "bottom", "rotate": 55,
+                "align": "right", "verticalAlign": "middle",
+                "offset": [0, 4],
+                "fontSize": 10, "fontWeight": 600, "color": "#374151",
             },
         })
 
@@ -652,7 +665,7 @@ def render_unifilar_ativo(df: pd.DataFrame, gerencia: str,
         })
     if serie_labels:
         series.append({
-            "name": "Ativo", "type": "scatter", "symbol": "roundRect",
+            "name": "Ativo", "type": "scatter", "symbol": "circle",
             "data": serie_labels, "silent": True, "z": 5,
             "tooltip": {"show": False},
         })
