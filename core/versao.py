@@ -307,4 +307,21 @@
 #   100% aditiva e com RBAC fail-closed (admin-only por padrão) -- nenhuma
 #   tela existente muda de comportamento.
 
-APP_VERSION = "4.0.0"
+# 4.1.0 (2026-08-31): senha provisória padronizada em Sentinel@123 (pedido
+# do Julio) -- constante SENHA_PADRAO única em modules/admin_panel.py,
+# usada tanto no formulário de criar usuário (já vem pré-preenchida, pode
+# trocar na hora) quanto no reset, que virou um BOTÃO ÚNICO ("Resetar para
+# a senha padrão") em vez do formulário com campo de texto de antes --
+# não precisa mais digitar nada, um clique já reseta pra Sentinel@123.
+# Registrado explicitamente (não existe hoje): NÃO há obrigatoriedade de
+# troca de senha no primeiro acesso -- sem SMTP confiável pra reset
+# autoatendido (auth/recuperar_senha.py), quem não trocar manualmente
+# fica com a senha padrão indefinidamente. Candidato de próxima
+# funcionalidade se o Julio quiser (campo 'deve_trocar_senha' + tela de
+# troca obrigatória interceptando o pós-login).
+# Testado em runtime: clicar no botão de reset chama _resetar_senha com
+# nova_senha=='Sentinel@123' pro usuário certo (sem exceção, sem mais
+# precisar de texto digitado). MINOR -- simplifica um fluxo existente,
+# não quebra nada, nenhuma tela nova nem mudança de schema.
+
+APP_VERSION = "4.1.0"

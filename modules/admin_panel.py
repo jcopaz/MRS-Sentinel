@@ -19,6 +19,14 @@ from database.queries import get_uploads_historico, gerar_email_sintetico
 from core.glossarios   import LISTA_GERENCIAS
 from core.versao       import APP_VERSION
 
+# Senha provisória padrão — mesma pra toda conta nova E pra todo reset
+# (pedido do Julio, 2026-08-31). Fonte única: usada tanto no formulário de
+# criação quanto no botão de resetar senha, pra nunca dessincronizar.
+# Não há hoje nenhuma obrigatoriedade de troca no primeiro acesso (sem
+# SMTP confiável pra reset autoatendido — ver auth/recuperar_senha.py) —
+# quem não trocar manualmente fica com essa senha indefinidamente.
+SENHA_PADRAO = "Sentinel@123"
+
 # region ====================== SESSÃO 1: Guard de acesso =====================
 
 def render_admin_panel() -> None:
@@ -157,8 +165,13 @@ def _form_criar_usuario(admin_logado: dict) -> None:
                 help="Deixe em branco se o colaborador não tiver e-mail — o login "
                      "será feito só pela matrícula (não há SMTP para recuperação por e-mail).",
             )
-            senha  = st.text_input("Senha provisória *", type="password",
-                                   help="Mínimo 8 caracteres. Reset futuro é sempre feito pelo admin aqui no painel.")
+            senha  = st.text_input(
+                "Senha provisória *", value=SENHA_PADRAO, type="password",
+                help="Mínimo 8 caracteres. Padrão pré-preenchido — troque aqui se "
+                     "quiser outra. Como não há reset por e-mail, quem não trocar "
+                     "fica com essa senha até você resetar manualmente no painel "
+                     "(seção Editar Usuário).",
+            )
             perfil = st.selectbox("Perfil *", options=["usuario", "assistente", "admin"])
             gerencia = st.selectbox(
                 "Gerência",
@@ -255,26 +268,20 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
 
             st.markdown("---")
             st.markdown("**🔑 Resetar Senha**")
-            with st.form("form_resetar_senha"):
-                nova_senha = st.text_input(
-                    "Nova senha provisória", type="password",
-                    help="Mínimo 8 caracteres. Repasse ao usuário por um canal seguro "
-                         "(não há e-mail automático de recuperação — este reset é a única forma).",
+            st.caption(
+                f"Volta a senha para a padrão (`{SENHA_PADRAO}`). Repasse ao "
+                "usuário por um canal seguro — não há e-mail automático de "
+                "recuperação, este é o único jeito de resetar."
+            )
+            if st.button("🔑 Resetar para a senha padrão", key=f"btn_resetar_senha_{user_id_sel}"):
+                admin_logado = st.session_state.get("usuario", {})
+                _resetar_senha(
+                    user_id=user_id_sel,
+                    email=row.get("email", ""),
+                    auth_user_id=row.get("auth_user_id"),
+                    nova_senha=SENHA_PADRAO,
+                    admin_id=admin_logado.get("id"),
                 )
-                submit_reset = st.form_submit_button("🔑 Resetar Senha")
-
-            if submit_reset:
-                if len(nova_senha) < 8:
-                    st.error("❌ Senha deve ter no mínimo 8 caracteres.")
-                else:
-                    admin_logado = st.session_state.get("usuario", {})
-                    _resetar_senha(
-                        user_id=user_id_sel,
-                        email=row.get("email", ""),
-                        auth_user_id=row.get("auth_user_id"),
-                        nova_senha=nova_senha,
-                        admin_id=admin_logado.get("id"),
-                    )
 
             st.markdown("---")
             st.markdown("**🗑️ Excluir Definitivamente**")
