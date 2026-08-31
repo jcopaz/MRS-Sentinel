@@ -6,7 +6,7 @@ from pathlib import Path
 
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
-from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis
+from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis, can_access_modo_tv
 from database.queries import log_acesso, contar_alertas_novos
 from core.glossarios import GERENCIAS_COM_DASHBOARD, GERENCIA_GERAL_DE
 from core.versao import APP_VERSION
@@ -255,6 +255,12 @@ def _render_nav_buttons():
     if can_upload(gerencia_upload) or get_perfil() == "admin":
         ativo_upload = "🔵 " if pagina_atual == "upload" else ""
         nav_items.append(("UPLOAD", f"{ativo_upload}📤  Upload de Dados", "upload"))
+
+    # Modo TV: admin, ou usuário com 'acesso_tv' marcado no Painel Admin
+    # (pensado pra uma TV/monitor de coordenação — ver modules/modo_tv.py)
+    if can_access_modo_tv():
+        ativo_tv = "🔵 " if pagina_atual == "modo_tv" else ""
+        nav_items.append(("MODO_TV", f"{ativo_tv}📺  Modo TV", "modo_tv"))
 
     # Admin Panel: somente admin
     if can_admin_panel():

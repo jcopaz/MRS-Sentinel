@@ -95,6 +95,23 @@ def can_manage_users() -> bool:
     """Somente admin pode criar/editar/desativar usuários."""
     return is_admin()
 
+
+def can_access_modo_tv() -> bool:
+    """
+    Verifica se o usuário pode acessar o Modo TV (painel de exibição em
+    loop, pensado pra TV/monitor de uma coordenação — ex.: TV parada na
+    coordenação de Jundiaí). Admin sempre pode; qualquer outro perfil só
+    se tiver o campo 'acesso_tv' marcado explicitamente no Painel Admin
+    (checkbox "📺 Acesso ao Modo TV") — pensado pra uma conta dedicada de
+    kiosk, sem precisar dar admin completo pra ela. Por enquanto
+    (2026-08-30) só admin de fato usa; o campo já existe pronto pra
+    delegar no futuro.
+    """
+    if is_admin():
+        return True
+    usuario = get_usuario()
+    return bool(usuario and usuario.get("acesso_tv"))
+
 # endregion
 
 
@@ -124,6 +141,14 @@ def require_upload_permission(gerencia_alvo: str):
     require_login()
     if not can_upload(gerencia_alvo):
         st.error(f"🚫 Você não tem permissão para fazer upload na Gerência {gerencia_alvo}.")
+        st.stop()
+
+
+def require_modo_tv():
+    """Guard: para a execução se não tiver acesso ao Modo TV."""
+    require_login()
+    if not can_access_modo_tv():
+        st.error("🚫 Você não tem acesso ao Modo TV.")
         st.stop()
 
 # endregion

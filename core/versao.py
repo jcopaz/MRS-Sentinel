@@ -263,4 +263,48 @@
 # rótulo rotacionado re-confirmadas intactas após atualizar a constante
 # de espaçamento hardcoded nos testes. PATCH -- ajuste visual pontual.
 
-APP_VERSION = "3.9.2"
+# 4.0.0 (2026-08-30): "Modo TV" -- tela nova pra reproduzir em loop numa
+# TV/monitor parado (pedido do Julio, coordenador de Jundiaí: TV parada na
+# coordenação, conectada por HDMI a um PC/notebook, mostrando as notas e o
+# Unifilar do trecho sem ninguém mexer em nada).
+#   - modules/modo_tv.py (novo): 3 slides (KPIs, Unifilar completo, Ranking
+#     de hot-spots por pátio) girando sozinhos a cada 25s, fixo em
+#     Gerência SP / Centro de Trabalho CIJN (Jundiaí). Sidebar e todo
+#     controle interativo (sliders, radios, tabela, downloads) escondidos
+#     via CSS -- é só pra assistir. Fundo escuro + fonte maior, pra
+#     leitura de longe.
+#   - O loop NÃO recarrega a página: o login deste app vive só em
+#     st.session_state, sem cookie/token persistente (auth/session.py) --
+#     um location.reload()/navegação JS derrubaria a sessão a cada troca
+#     de slide. Em vez disso, time.sleep()+st.rerun() DENTRO da mesma
+#     sessão -- login sobrevive, sessão fica aberta indefinidamente no
+#     navegador do PC conectado à TV.
+#   - RBAC (pedido do Julio): acesso restrito a admin por enquanto. Campo
+#     novo 'acesso_tv' em usuarios (database/schema_modo_tv.sql, rodar
+#     manualmente no Supabase) + checkbox "📺 Acesso ao Modo TV" no Painel
+#     Admin (criar E editar usuário) -- já pronto pra delegar acesso a uma
+#     conta dedicada de kiosk no futuro sem dar admin completo pra ela
+#     (auth/permissions.py::can_access_modo_tv: admin sempre acessa,
+#     outro perfil só com o campo marcado). Botão "📺 Modo TV" na sidebar
+#     só aparece pra quem tem acesso.
+#   Limitação consciente desta v1: render_unifilar() hoje é uma função só
+#   (gráfico de KM + de Ativo + rankings + tabela) sem como pedir "só uma
+#   parte" sem duplicar lógica interna arriscada -- por isso "Unifilar por
+#   KM" e "Unifilar de Ativo" saíram como 1 slide só ("Unifilar completo"),
+#   não 2 separados como as outras opções pedidas. Documentado no próprio
+#   módulo; separar em slides distintos fica pra uma iteração futura se
+#   fizer falta na prática.
+#   Testado em runtime: guard bloqueia usuário sem 'acesso_tv' (st.error
+#   visível, sem renderizar nada do painel) e libera usuário comum COM o
+#   campo marcado e admin SEM o campo; filtro de centro_trab=='CIJN'
+#   confirmado (exclui nota de outro centro no dataset de teste); CSS
+#   injetado; giro de slide confirmado 0->1->2->0 ao longo de rodadas
+#   sucessivas (parâmetro _loop=False criado só pra teste -- o AppTest
+#   processa st.rerun() de forma síncrona dentro da MESMA chamada,
+#   diferente do navegador real que faz round-trip de rede a cada rerun;
+#   sem esse parâmetro o teste entrava em loop infinito). MAJOR pela
+#   própria regra (tela nova + mudança de schema de banco), mesmo sendo
+#   100% aditiva e com RBAC fail-closed (admin-only por padrão) -- nenhuma
+#   tela existente muda de comportamento.
+
+APP_VERSION = "4.0.0"
