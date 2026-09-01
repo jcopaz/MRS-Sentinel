@@ -55,13 +55,26 @@ def _inject_sidebar_css():
        que o BaseWeb usa nesse componente — a data estava lá (o widget
        sempre recebe um value), só invisível: texto branco em cima de caixa
        branca (reportado pelo Julio, 2026-09-01, como "campo não aparece
-       preenchido clicando"). Mais específico que a regra genérica -> vence
-       na cascata mesmo com !important dos dois lados. Não mexe no fundo:
-       o branco da caixa é o padrão do próprio BaseWeb, não algo que a gente
-       force — só a cor do texto estava errada. */
+       preenchido clicando"). 1ª tentativa (só `input`) não resolveu —
+       confirmado pelo Julio com print, continuava em branco. Mesma
+       armadilha já registrada com BaseWeb noutro projeto irmão (Gestão_OS):
+       BaseWeb não obedece estilo elemento-por-elemento, precisa "* {color:
+       preto}" pegando TODOS os descendentes (o texto visível pode estar
+       num <div>/<span> interno do BaseWeb, não direto no <input>). Reforça
+       com id extra (o próprio Streamlit) e maior especificidade pra vencer
+       o CSS-in-JS do BaseWeb, que injeta <style> depois do nosso bloco. */
+    [data-testid="stSidebar"] [data-testid="stDateInput"],
+    [data-testid="stSidebar"] [data-testid="stDateInput"] * {
+        color: #000000 !important;
+    }
     [data-testid="stSidebar"] [data-testid="stDateInput"] input {
         color: #000000 !important;
-        background: transparent !important;
+        -webkit-text-fill-color: #000000 !important;
+        caret-color: #000000 !important;
+        background: #ffffff !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stDateInput"] label {
+        color: #ffffff !important;  /* "Início"/"Fim" continuam brancos (fica sobre o fundo escuro da sidebar) */
     }
 
     /* Botões da sidebar — estilo ghost */

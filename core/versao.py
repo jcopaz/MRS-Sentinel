@@ -502,4 +502,20 @@
 # MINOR -- capacidade nova (seletor por Gerência, foto do estado atual,
 # reset ao padrão) sobre a mesma tela introduzida no 5.0.0 no mesmo dia.
 
-APP_VERSION = "5.1.0"
+# 5.1.1 (2026-09-01): o fix de CSS do 5.0.0 pro st.date_input (Abertura/
+# Encerramento da Nota) não resolveu — Julio confirmou com print, campo
+# continuava em branco. A tentativa anterior só forçava `color` no
+# `<input>`; o texto visível do BaseWeb provavelmente está num <div>/<span>
+# interno, não direto no input (mesma armadilha já registrada com BaseWeb
+# no app irmão Gestão_OS: precisa pintar TODOS os descendentes, não
+# elemento por elemento). modules/home.py::_inject_sidebar_css() reforçado:
+# `*` dentro de [data-testid="stDateInput"] pinta tudo de preto, com
+# exceção explícita do <label> ("Início"/"Fim"), que volta a branco (regra
+# mais específica que a wildcard, continua legível sobre o fundo escuro da
+# sidebar); fundo do <input> passa a #ffffff forçado (antes ficava
+# "transparent", dependendo do padrão do próprio BaseWeb — mais frágil).
+# Não pôde ser validado visualmente neste sandbox (sem navegador real) —
+# só sintaxe/CSS revisados; aguardando confirmação do Julio em produção.
+# PATCH -- bugfix (correção de um fix que não pegou).
+
+APP_VERSION = "5.1.1"
