@@ -464,4 +464,42 @@
 # MAJOR -- reorganização de fluxo (Score sai do sidebar, vira config
 # persistida) + restrição de acesso a 2 telas inteiras.
 
-APP_VERSION = "5.0.0"
+# 5.1.0 (2026-09-01): Julio pediu de volta, ainda no mesmo dia, o que o
+# 5.0.0 tinha simplificado pra config única: "pode haver mais de uma
+# configuração distinta para cada Gerência Local". core/score_engine.py::
+# carregar_score_config() ganhou o parâmetro `gerencia` obrigatório — cada
+# Gerência (SP/VP/FN/FS/RJ/LC) e a Geral/Modo TV voltam a ter sua PRÓPRIA
+# linha em `configuracoes` (coluna gerencia = a sigla), como já era antes
+# do 5.0.0, só que agora salvo de verdade (motivo do 5.0.0 original).
+# Todos os 3 callers (gerencia_dashboard.py, gerencia_geral.py, modo_tv.py)
+# passam a sigla certa. O painel em Administração ganhou um seletor
+# "🏭 Configurando a Gerência" (SP/VP/FN/FS/RJ/LC/GERAL) — toda a edição
+# abaixo dele é daquela Gerência; troquei os keys dos widgets pra incluir
+# a Gerência no prefixo (cfg_score_{GER}_...), senão editar SP e trocar
+# pra VP mostraria o valor ainda não salvo de SP (widget com key fixa
+# ignora o value= depois da 1ª renderização).
+#   Dois pedidos extras no mesmo lote: (1) "📸 foto" de como a Gerência
+# selecionada está calculando o score AGORA, mostrada ANTES dos controles
+# de edição — core/score_engine.py::render_conteudo_transparencia() é o
+# conteúdo de render_painel_transparencia() extraído sem o st.expander
+# embutido (Streamlit não permite expander dentro de expander, e o
+# painel de Score já é um expander); (2) botão "♻️ Resetar para o padrão"
+# por Gerência — grava de volta os *_PADRAO de código e limpa os
+# session_state daquela Gerência (senão os widgets, por terem key fixa,
+# continuariam mostrando o valor antigo mesmo com o banco já resetado).
+#   Achado ao testar o reset: number_input com min/max fixo (0–5) quebra a
+# aba INTEIRA se o valor salvo estiver fora da faixa (ex.: editado à mão
+# no Supabase) — StreamlitValueAboveMaxError, e aí o admin nem consegue
+# abrir a tela pra corrigir. Corrigido com _clamp() (novo helper em
+# admin_panel.py) em todo `value=` que lê peso salvo — só afeta a exibição,
+# o cálculo real em core/score_engine.py não impõe faixa nenhuma.
+# Testado em runtime (AppTest): config salva só pra SP não vaza pra VP
+# (isolamento real); painel renderiza com o seletor certo (7 opções,
+# default SP); clique em Salvar grava as 12 chaves com gerencia='SP';
+# clique em Resetar (com SP pré-sujo, inclusive com um peso fora da faixa
+# 0–5) grava os padrões de fábrica e o widget na tela já reflete isso,
+# sem quebrar.
+# MINOR -- capacidade nova (seletor por Gerência, foto do estado atual,
+# reset ao padrão) sobre a mesma tela introduzida no 5.0.0 no mesmo dia.
+
+APP_VERSION = "5.1.0"

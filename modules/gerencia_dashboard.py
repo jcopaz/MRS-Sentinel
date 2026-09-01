@@ -179,7 +179,7 @@ def render_gerencia(sigla: str) -> None:
     # Score: config única definida em Administração → Configurações → 🎯
     # Score (não é mais reconfigurada por sidebar/por tela — ver cabeçalho
     # de core/score_engine.py, decisão de 2026-09-01).
-    score_cfg = carregar_score_config()
+    score_cfg = carregar_score_config(sigla)
 
     # ── Carrega dados ─────────────────────────────────────────────────────────
     with st.spinner(f"⏳ Carregando dados da Gerência {sigla}..."):

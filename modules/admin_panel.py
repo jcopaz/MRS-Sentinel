@@ -23,8 +23,9 @@ from database.queries import (
 from core.glossarios   import LISTA_GERENCIAS
 from core.versao       import APP_VERSION
 from core.score_engine import (
-    carregar_score_config, MULT_FAMILIA_VP_PADRAO, MULT_FAMILIA_EE_PADRAO,
-    ALPHA_PADRAO, BETA_REINCIDENCIA_PADRAO,
+    carregar_score_config, render_conteudo_transparencia,
+    PESO_PRIORIDADE_PADRAO, MULT_FAMILIA_VP_PADRAO, MULT_FAMILIA_EE_PADRAO,
+    MULT_TIPO_PADRAO, ALPHA_PADRAO, BETA_REINCIDENCIA_PADRAO,
     CHAVE_PESO_PRIORIDADE, CHAVE_USAR_IDADE, CHAVE_ALPHA,
     CHAVE_USAR_REINCIDENCIA, CHAVE_BETA_REINCIDENCIA,
     CHAVE_USAR_FAMILIA, CHAVE_MULT_FAMILIA_VP, CHAVE_MULT_FAMILIA_EE,
@@ -650,6 +651,19 @@ def _buscar_uploads() -> pd.DataFrame:
 
 # region ====================== SESSÃO 4: Aba Configurações ===================
 
+def _clamp(valor, minimo, maximo):
+    """
+    Prende `valor` em [minimo, maximo]. Defesa contra StreamlitValueAboveMaxError
+    /BelowMinError: um peso salvo fora da faixa do widget (ex.: editado à mão
+    direto no Supabase, ou faixa do widget reduzida num deploy futuro) faria a
+    aba INTEIRA de Configurações quebrar ao renderizar — e aí o admin nem
+    conseguiria abrir a tela pra corrigir o próprio valor. Clampar no `value=`
+    é só cosmético pra exibição; o cálculo real (core/score_engine.py) não
+    impõe faixa nenhuma, só multiplica.
+    """
+    return max(minimo, min(maximo, valor))
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _catalogo_tipos_inspecao() -> list[str]:
     """
@@ -758,12 +772,15 @@ def _render_aba_configuracoes() -> None:
             _salvar_config(None, "meta_adh_critico", adh_cr)
             st.success("✅ Metas dos indicadores atualizadas! Aplicadas na próxima renderização.")
 
-    # ── 4.3: Score — Pesos e Multiplicadores ─────────────────────────────────
+    # ── 4.3: Score — Pesos e Multiplicadores (POR GERÊNCIA) ──────────────────
     # Migrou do expander "⚙️ Score" que existia na sidebar de cada tela de
     # Gerência (SP/VP/Geral) — pedido do Julio, 2026-09-01: "o item Score -
-    # Geral deverá entrar na aba administração e sair do sidebar". Config
-    # ÚNICA agora (não mais 3 versões independentes que nem eram salvas —
-    # ver decisão registrada no cabeçalho de core/score_engine.py). Toda
+    # Geral deverá entrar na aba administração e sair do sidebar". Passou
+    # rapidamente por uma versão com config única global (mesmo dia) —
+    # revertido a pedido do Julio: "pode haver mais de uma configuração
+    # distinta para cada Gerência Local". Ficou como sempre foi (cada
+    # Gerência com sua própria config), só que agora salvo de verdade —
+    # ver decisão completa no cabeçalho de core/score_engine.py. Toda
     # dimensão que multiplica o score (família, tipo, tipo de inspeção) usa
     # o mesmo padrão: multiselect pra ESCOLHER quais itens entram + peso
     # numérico por item escolhido — pedido explícito do Julio ("todas as
@@ -771,12 +788,40 @@ def _render_aba_configuracoes() -> None:
     # selecionar e ponderar o peso por item selecionado").
     with st.expander("🎯 Score — Pesos e Multiplicadores", expanded=False):
         st.caption(
-            "Config única, vale para SP + VP + Geral (inclusive Modo TV). "
             "Fórmula: Peso Prioridade × Família × Tipo × Tipo de Inspeção × "
             "(1 + α · anos em aberto) × (1 + β · reincidências no local)."
         )
 
-        cfg_atual = carregar_score_config()
+        opcoes_score_ger = list(LISTA_GERENCIAS) + ["GERAL"]
+        ger_sel = st.selectbox(
+            "🏭 Configurando a Gerência",
+            options=opcoes_score_ger,
+            key="cfg_score_ger_sel",
+            help="Cada Gerência (e a Geral/Modo TV) tem sua PRÓPRIA configuração — "
+                 "escolha aqui qual você quer ver/editar.",
+        )
+
+        cfg_atual = carregar_score_config(ger_sel)
+
+        # -- "Foto" de como ESSA Gerência está calculando o score agora ------
+        # (pedido do Julio: "ter o registro de como está configurado ao
+        # configurar" / "ter a foto de como está"). st.container(border=True)
+        # em vez de reaproveitar render_painel_transparencia() direto —
+        # aquela função abre seu PRÓPRIO st.expander, e Streamlit não deixa
+        # expander dentro de expander; render_conteudo_transparencia() é a
+        # mesma tabela/formula sem esse wrapper, feita pra este reuso.
+        st.markdown(f"**📸 Como {ger_sel} está calculando o score agora:**")
+        with st.container(border=True):
+            render_conteudo_transparencia(cfg_atual, gerencia=ger_sel)
+
+        st.markdown("---")
+        st.markdown(f"#### ✏️ Editar — {ger_sel}")
+
+        # Prefixo de key ÚNICO por Gerência — essencial: sem isso, editar o
+        # peso de SP e trocar o seletor pra VP mostraria o valor (ainda não
+        # salvo) que você tinha acabado de digitar pra SP, porque widgets
+        # com key fixa mantêm o valor entre reruns independente do `value=`.
+        pref = f"cfg_score_{ger_sel}_"
 
         # -- Peso de Prioridade (pedido do Julio: junto do score aqui) ------
         st.markdown("**🎯 Peso de Prioridade**")
@@ -784,24 +829,24 @@ def _render_aba_configuracoes() -> None:
         with pcol1:
             p1 = st.number_input(
                 "Muito Alta", min_value=1, max_value=10,
-                value=int(cfg_atual.peso_prioridade.get("1-Muito alta", 4)),
-                step=1, key="cfg_score_p1",
+                value=_clamp(int(cfg_atual.peso_prioridade.get("1-Muito alta", 4)), 1, 10),
+                step=1, key=f"{pref}p1",
             )
             p3 = st.number_input(
                 "Média", min_value=1, max_value=10,
-                value=int(cfg_atual.peso_prioridade.get("3-Média", 2)),
-                step=1, key="cfg_score_p3",
+                value=_clamp(int(cfg_atual.peso_prioridade.get("3-Média", 2)), 1, 10),
+                step=1, key=f"{pref}p3",
             )
         with pcol2:
             p2 = st.number_input(
                 "Alta", min_value=1, max_value=10,
-                value=int(cfg_atual.peso_prioridade.get("2-Alta", 3)),
-                step=1, key="cfg_score_p2",
+                value=_clamp(int(cfg_atual.peso_prioridade.get("2-Alta", 3)), 1, 10),
+                step=1, key=f"{pref}p2",
             )
             p4 = st.number_input(
                 "Baixa", min_value=1, max_value=10,
-                value=int(cfg_atual.peso_prioridade.get("4-Baixa", 1)),
-                step=1, key="cfg_score_p4",
+                value=_clamp(int(cfg_atual.peso_prioridade.get("4-Baixa", 1)), 1, 10),
+                step=1, key=f"{pref}p4",
             )
 
         st.markdown("---")
@@ -809,15 +854,15 @@ def _render_aba_configuracoes() -> None:
         # -- Envelhecimento (idade) ------------------------------------------
         usar_idade = st.checkbox(
             "📅 Penalizar notas antigas", value=cfg_atual.usar_idade,
-            key="cfg_score_usar_idade",
+            key=f"{pref}usar_idade",
             help="Acrescenta peso para notas abertas há mais tempo.",
         )
         alpha = ALPHA_PADRAO
         if usar_idade:
             alpha = st.slider(
                 "α — Acréscimo por ano em aberto", 0.0, 0.5,
-                value=float(cfg_atual.alpha), step=0.01, format="%.2f",
-                key="cfg_score_alpha",
+                value=_clamp(float(cfg_atual.alpha), 0.0, 0.5), step=0.01, format="%.2f",
+                key=f"{pref}alpha",
                 help="0.10 = +10% por ano. Nota com 2 anos → ×1.20",
             )
 
@@ -826,7 +871,7 @@ def _render_aba_configuracoes() -> None:
         # -- Reincidência no local --------------------------------------------
         usar_reinc = st.checkbox(
             "🔁 Penalizar reincidência no mesmo local", value=cfg_atual.usar_reincidencia,
-            key="cfg_score_usar_reinc",
+            key=f"{pref}usar_reinc",
             help="Mesmo ramal+pátio+família com múltiplas notas pesa mais — "
                  "mesma lógica dos hot-spots crônicos (aba Alertas).",
         )
@@ -834,8 +879,8 @@ def _render_aba_configuracoes() -> None:
         if usar_reinc:
             beta = st.slider(
                 "β — Acréscimo por ocorrência repetida", 0.0, 0.5,
-                value=float(cfg_atual.beta_reincidencia), step=0.01, format="%.2f",
-                key="cfg_score_beta",
+                value=_clamp(float(cfg_atual.beta_reincidencia), 0.0, 0.5), step=0.01, format="%.2f",
+                key=f"{pref}beta",
                 help="0.15 = +15% por repetição. 4ª nota no mesmo local → ×1.45",
             )
 
@@ -844,7 +889,7 @@ def _render_aba_configuracoes() -> None:
         # -- Família de defeito (selecionável + peso por item) ---------------
         usar_familia = st.checkbox(
             "🔩 Multiplicar por família de defeito", value=cfg_atual.usar_familia,
-            key="cfg_score_usar_familia",
+            key=f"{pref}usar_familia",
         )
         mult_fam_vp = dict(cfg_atual.mult_familia_vp)
         mult_fam_ee = dict(cfg_atual.mult_familia_ee)
@@ -860,28 +905,28 @@ def _render_aba_configuracoes() -> None:
                 fam_vp_sel = st.multiselect(
                     "Famílias VP", options=list(MULT_FAMILIA_VP_PADRAO.keys()),
                     default=[f for f in cfg_atual.mult_familia_vp if f in MULT_FAMILIA_VP_PADRAO],
-                    key="cfg_score_fam_vp_sel", label_visibility="collapsed",
+                    key=f"{pref}fam_vp_sel", label_visibility="collapsed",
                 )
                 mult_fam_vp = {}
                 for fam in fam_vp_sel:
                     mult_fam_vp[fam] = st.number_input(
                         fam, min_value=0.0, max_value=5.0,
-                        value=float(cfg_atual.mult_familia_vp.get(fam, MULT_FAMILIA_VP_PADRAO.get(fam, 1.0))),
-                        step=0.1, key=f"cfg_score_fam_vp_{fam}",
+                        value=_clamp(float(cfg_atual.mult_familia_vp.get(fam, MULT_FAMILIA_VP_PADRAO.get(fam, 1.0))), 0.0, 5.0),
+                        step=0.1, key=f"{pref}fam_vp_{fam}",
                     )
             with fcol2:
                 st.markdown("_Eletroeletrônica (EE)_")
                 fam_ee_sel = st.multiselect(
                     "Famílias EE", options=list(MULT_FAMILIA_EE_PADRAO.keys()),
                     default=[f for f in cfg_atual.mult_familia_ee if f in MULT_FAMILIA_EE_PADRAO],
-                    key="cfg_score_fam_ee_sel", label_visibility="collapsed",
+                    key=f"{pref}fam_ee_sel", label_visibility="collapsed",
                 )
                 mult_fam_ee = {}
                 for fam in fam_ee_sel:
                     mult_fam_ee[fam] = st.number_input(
                         fam, min_value=0.0, max_value=5.0,
-                        value=float(cfg_atual.mult_familia_ee.get(fam, MULT_FAMILIA_EE_PADRAO.get(fam, 1.0))),
-                        step=0.1, key=f"cfg_score_fam_ee_{fam}",
+                        value=_clamp(float(cfg_atual.mult_familia_ee.get(fam, MULT_FAMILIA_EE_PADRAO.get(fam, 1.0))), 0.0, 5.0),
+                        step=0.1, key=f"{pref}fam_ee_{fam}",
                     )
 
         st.markdown("---")
@@ -889,7 +934,7 @@ def _render_aba_configuracoes() -> None:
         # -- Tipo de nota (CT/PV) ---------------------------------------------
         usar_tipo = st.checkbox(
             "📋 Multiplicar por tipo (CT/PV)", value=cfg_atual.usar_tipo,
-            key="cfg_score_usar_tipo",
+            key=f"{pref}usar_tipo",
             help="CT = Corretiva · PV = Preventiva",
         )
         mult_tipo = dict(cfg_atual.mult_tipo)
@@ -898,13 +943,13 @@ def _render_aba_configuracoes() -> None:
             mult_tipo = {
                 "CT": tcol1.number_input(
                     "CT — Corretiva", min_value=0.0, max_value=5.0,
-                    value=float(cfg_atual.mult_tipo.get("CT", 1.5)),
-                    step=0.1, key="cfg_score_tipo_ct",
+                    value=_clamp(float(cfg_atual.mult_tipo.get("CT", 1.5)), 0.0, 5.0),
+                    step=0.1, key=f"{pref}tipo_ct",
                 ),
                 "PV": tcol2.number_input(
                     "PV — Preventiva", min_value=0.0, max_value=5.0,
-                    value=float(cfg_atual.mult_tipo.get("PV", 1.0)),
-                    step=0.1, key="cfg_score_tipo_pv",
+                    value=_clamp(float(cfg_atual.mult_tipo.get("PV", 1.0)), 0.0, 5.0),
+                    step=0.1, key=f"{pref}tipo_pv",
                 ),
             }
 
@@ -913,7 +958,7 @@ def _render_aba_configuracoes() -> None:
         # -- Tipo de Inspeção (dimensão nova, selecionável + peso) ------------
         usar_tipo_insp = st.checkbox(
             "🔍 Multiplicar por tipo de inspeção", value=cfg_atual.usar_tipo_inspecao,
-            key="cfg_score_usar_tipo_insp",
+            key=f"{pref}usar_tipo_insp",
             help="Origem da nota: Ronda, Drone, Trackstar, Inspeção técnica "
                  "de AMV, etc. — dimensão nova, desligada até você escolher pesos.",
         )
@@ -932,35 +977,62 @@ def _render_aba_configuracoes() -> None:
                 tipo_insp_sel = st.multiselect(
                     "Tipos de inspeção a ponderar", options=universo_insp,
                     default=list(cfg_atual.mult_tipo_inspecao.keys()),
-                    key="cfg_score_tipo_insp_sel",
+                    key=f"{pref}tipo_insp_sel",
                 )
                 mult_tipo_insp = {}
                 for t in tipo_insp_sel:
                     mult_tipo_insp[t] = st.number_input(
                         t, min_value=0.0, max_value=5.0,
-                        value=float(cfg_atual.mult_tipo_inspecao.get(t, 1.0)),
-                        step=0.1, key=f"cfg_score_tipo_insp_{t}",
+                        value=_clamp(float(cfg_atual.mult_tipo_inspecao.get(t, 1.0)), 0.0, 5.0),
+                        step=0.1, key=f"{pref}tipo_insp_{t}",
                     )
 
         st.markdown("---")
 
-        if st.button("💾 Salvar Configuração de Score", key="btn_score_cfg", type="primary"):
-            _salvar_config(None, CHAVE_PESO_PRIORIDADE, {
-                "1-Muito alta": p1, "2-Alta": p2, "3-Média": p3, "4-Baixa": p4,
-            })
-            _salvar_config(None, CHAVE_USAR_IDADE, usar_idade)
-            _salvar_config(None, CHAVE_ALPHA, alpha)
-            _salvar_config(None, CHAVE_USAR_REINCIDENCIA, usar_reinc)
-            _salvar_config(None, CHAVE_BETA_REINCIDENCIA, beta)
-            _salvar_config(None, CHAVE_USAR_FAMILIA, usar_familia)
-            _salvar_config(None, CHAVE_MULT_FAMILIA_VP, mult_fam_vp)
-            _salvar_config(None, CHAVE_MULT_FAMILIA_EE, mult_fam_ee)
-            _salvar_config(None, CHAVE_USAR_TIPO, usar_tipo)
-            _salvar_config(None, CHAVE_MULT_TIPO, mult_tipo)
-            _salvar_config(None, CHAVE_USAR_TIPO_INSPECAO, usar_tipo_insp)
-            _salvar_config(None, CHAVE_MULT_TIPO_INSPECAO, mult_tipo_insp)
-            carregar_score_config.clear()  # efeito imediato pra quem salvou, sem esperar o TTL de 5min
-            st.success("✅ Configuração de Score salva! Já vale pra SP, VP, Geral e Modo TV.")
+        colsalvar, colresetar = st.columns(2)
+        with colsalvar:
+            if st.button("💾 Salvar", key=f"{pref}btn_salvar", type="primary", use_container_width=True):
+                _salvar_config(ger_sel, CHAVE_PESO_PRIORIDADE, {
+                    "1-Muito alta": p1, "2-Alta": p2, "3-Média": p3, "4-Baixa": p4,
+                })
+                _salvar_config(ger_sel, CHAVE_USAR_IDADE, usar_idade)
+                _salvar_config(ger_sel, CHAVE_ALPHA, alpha)
+                _salvar_config(ger_sel, CHAVE_USAR_REINCIDENCIA, usar_reinc)
+                _salvar_config(ger_sel, CHAVE_BETA_REINCIDENCIA, beta)
+                _salvar_config(ger_sel, CHAVE_USAR_FAMILIA, usar_familia)
+                _salvar_config(ger_sel, CHAVE_MULT_FAMILIA_VP, mult_fam_vp)
+                _salvar_config(ger_sel, CHAVE_MULT_FAMILIA_EE, mult_fam_ee)
+                _salvar_config(ger_sel, CHAVE_USAR_TIPO, usar_tipo)
+                _salvar_config(ger_sel, CHAVE_MULT_TIPO, mult_tipo)
+                _salvar_config(ger_sel, CHAVE_USAR_TIPO_INSPECAO, usar_tipo_insp)
+                _salvar_config(ger_sel, CHAVE_MULT_TIPO_INSPECAO, mult_tipo_insp)
+                carregar_score_config.clear()  # efeito imediato pra quem salvou, sem esperar o TTL de 5min
+                st.success(f"✅ Configuração de Score de {ger_sel} salva!")
+                st.rerun()  # widgets já nascem com os valores recém-salvos, sem clique extra
+
+        with colresetar:
+            if st.button("♻️ Resetar para o padrão", key=f"{pref}btn_resetar", use_container_width=True):
+                _salvar_config(ger_sel, CHAVE_PESO_PRIORIDADE, dict(PESO_PRIORIDADE_PADRAO))
+                _salvar_config(ger_sel, CHAVE_USAR_IDADE, True)
+                _salvar_config(ger_sel, CHAVE_ALPHA, ALPHA_PADRAO)
+                _salvar_config(ger_sel, CHAVE_USAR_REINCIDENCIA, True)
+                _salvar_config(ger_sel, CHAVE_BETA_REINCIDENCIA, BETA_REINCIDENCIA_PADRAO)
+                _salvar_config(ger_sel, CHAVE_USAR_FAMILIA, True)
+                _salvar_config(ger_sel, CHAVE_MULT_FAMILIA_VP, dict(MULT_FAMILIA_VP_PADRAO))
+                _salvar_config(ger_sel, CHAVE_MULT_FAMILIA_EE, dict(MULT_FAMILIA_EE_PADRAO))
+                _salvar_config(ger_sel, CHAVE_USAR_TIPO, True)
+                _salvar_config(ger_sel, CHAVE_MULT_TIPO, dict(MULT_TIPO_PADRAO))
+                _salvar_config(ger_sel, CHAVE_USAR_TIPO_INSPECAO, False)
+                _salvar_config(ger_sel, CHAVE_MULT_TIPO_INSPECAO, {})
+                carregar_score_config.clear()
+                # Limpa os widgets desta Gerência (senão continuam mostrando o
+                # valor antigo em session_state, ignorando o value= recém-lido
+                # do banco — key fixa "vence" o value= depois da 1ª renderização).
+                for k in list(st.session_state.keys()):
+                    if k.startswith(pref):
+                        del st.session_state[k]
+                st.success(f"✅ Score de {ger_sel} resetado para o padrão de fábrica!")
+                st.rerun()
 
     # ── 4.4: Alertas Automáticos (Sprint 5) ──────────────────────────────────
     with st.expander("🚨 Alertas Automáticos", expanded=False):

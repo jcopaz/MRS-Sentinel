@@ -379,10 +379,11 @@ def render_modo_tv(_loop: bool = True):
             )
         return
 
-    # Mesma config única de Administração → Configurações → 🎯 Score (não
+    # Config de Administração → Configurações → 🎯 Score DESSA Gerência (não
     # mais o ScoreConfig() padrão fixo) — o Modo TV passa a refletir os
-    # mesmos pesos que as telas de Gerência usam (core/score_engine.py).
-    df = calcular_score_dataframe(df_raw, carregar_score_config())
+    # mesmos pesos que a tela de Gerência correspondente usa (config é por
+    # Gerência, ver core/score_engine.py).
+    df = calcular_score_dataframe(df_raw, carregar_score_config(gerencia))
 
     idx = st.session_state.get("tv_slide_idx", 0) % len(_SLIDES)
 

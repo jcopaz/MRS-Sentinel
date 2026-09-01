@@ -251,7 +251,7 @@ def render_gerencia_geral():
 
     # Score: mesma config única de Administração → Configurações → 🎯 Score
     # (ver core/score_engine.py) — não é mais reconfigurada por sidebar.
-    score_cfg = carregar_score_config()
+    score_cfg = carregar_score_config("GERAL")
 
     # ── Carrega dados (cached) ────────────────────────────────────────────────
     with st.spinner("⏳ Carregando dados consolidados..."):
