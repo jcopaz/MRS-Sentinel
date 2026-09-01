@@ -131,9 +131,38 @@ def _carregar_dados_tv() -> pd.DataFrame:
         df["lead_time_dias"] = pd.to_numeric(df["lead_time_dias"], errors="coerce")
 
     if "centro_trab" in df.columns:
-        df = df[df["centro_trab"] == CENTRO_TRAB_TV].copy()
+        # centro_trab chega bruto do parser, no formato hierárquico
+        # completo (ex.: "V.SP.CIJN"), não a sigla pura — mesma lógica
+        # defensiva de core/parser.py::detectar_gerencia_nota (pega o
+        # ÚLTIMO segmento separado por "."), que também cobre o caso de
+        # já vir só a sigla sem prefixo (split de string sem "." devolve
+        # a própria string). Bug real corrigido 2026-08-31: o filtro
+        # antigo comparava direto com "CIJN" e nunca batia.
+        sigla = (
+            df["centro_trab"].astype(str).str.strip().str.upper()
+            .str.split(".").str[-1]
+        )
+        df = df[sigla == CENTRO_TRAB_TV].copy()
 
     return df
+
+
+def _valores_centro_trab_disponiveis() -> list[str]:
+    """
+    Diagnóstico pro aviso de "sem dado" — lista os centro_trab realmente
+    presentes nos dados de GERENCIA_TV, pra identificar rápido se o
+    código fixo (CENTRO_TRAB_TV) mudou ou está errado, sem precisar
+    investigar direto no banco.
+    """
+    frames = []
+    for disc in ("VP", "EE"):
+        df_d = get_notas_cached(GERENCIA_TV, disc)
+        if not df_d.empty and "centro_trab" in df_d.columns:
+            frames.append(df_d[["centro_trab"]])
+    if not frames:
+        return []
+    todos = pd.concat(frames, ignore_index=True)
+    return sorted(todos["centro_trab"].dropna().astype(str).str.strip().unique().tolist())
 
 # endregion
 
@@ -183,8 +212,23 @@ def render_modo_tv(_loop: bool = True):
     if df_raw.empty:
         st.warning(
             f"⚠️ Nenhum dado encontrado para {NOME_LOCAL_TV} "
-            f"(Centro de Trabalho {CENTRO_TRAB_TV}, Gerência {GERENCIA_TV})."
+            f"(Centro de Trabalho '{CENTRO_TRAB_TV}', Gerência {GERENCIA_TV})."
         )
+        # Diagnóstico: mostra os centro_trab que REALMENTE existem nos
+        # dados de SP — se '{CENTRO_TRAB_TV}' não estiver nessa lista, é
+        # sinal de que o código fixo no topo deste arquivo está errado
+        # (ver CENTRO_TRAB_TV) e precisa ser ajustado pro valor real.
+        disponiveis = _valores_centro_trab_disponiveis()
+        if disponiveis:
+            st.caption(
+                "Centro de Trabalho disponíveis nos dados de "
+                f"{GERENCIA_TV}: " + ", ".join(f"`{c}`" for c in disponiveis)
+            )
+        else:
+            st.caption(
+                f"Nenhum dado carregado pra Gerência {GERENCIA_TV} ainda "
+                "(nem de outros pátios) — pode ser upload pendente."
+            )
         return
 
     df = calcular_score_dataframe(df_raw, ScoreConfig())

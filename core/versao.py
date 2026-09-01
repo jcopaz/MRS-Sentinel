@@ -324,4 +324,31 @@
 # precisar de texto digitado). MINOR -- simplifica um fluxo existente,
 # não quebra nada, nenhuma tela nova nem mudança de schema.
 
-APP_VERSION = "4.1.0"
+# 4.1.1 (2026-08-31): corrige o Modo TV dando "nenhum dado encontrado
+# para Jundiaí" mesmo com dado real na base. Causa raiz real: centro_trab
+# chega do parser no formato hierárquico completo (ex.: "V.SP.CIJN" —
+# core/parser.py::detectar_gerencia_nota já extrai a sigla via
+# centro.split(".")[-1]), não a sigla pura "CIJN" — o filtro do Modo TV
+# comparava direto com "CIJN" e nunca batia. Corrigido extraindo o último
+# segmento (mesma lógica defensiva do parser, cobre tanto formato com
+# prefixo quanto sem, e ignora maiúsc./minúsc.). Bônus: quando o filtro
+# ainda assim não encontra nada, a tela agora lista os centro_trab reais
+# presentes nos dados de SP — identifica na hora se o código fixo mudou,
+# sem precisar investigar direto no banco de novo.
+#   Achado relacionado, NÃO corrigido aqui (fora do pedido, escopo maior
+# — afeta a tela principal, não só o Modo TV): components/filtros.py::
+# _opcoes_centros() tem o MESMO problema de fundo — compara as siglas
+# puras de CENTROS_POR_GERENCIA (ex. "CIJN") contra os valores brutos
+# reais de centro_trab (ex. "V.SP.CIJN"), então a lista "conhecidos"
+# nunca bate e todo centro cai como "extra", aparecendo no multiselect
+# com o código bruto em vez do nome organizado — sem quebrar o filtro em
+# si (a seleção/comparação funciona, só a apresentação fica feia/sem
+# priorização). Registrado pra decisão do Julio antes de mexer.
+# Testado em runtime: dataset com centro_trab "V.SP.CIJN" e variante
+# minúscula "v.sp.cijn" agora é encontrado corretamente (2 notas, exclui
+# a de outro centro); cenário sem nenhuma nota de Jundiaí mostra o aviso
+# E a lista de centro_trab realmente disponíveis; guard de permissão e
+# giro de slides re-confirmados intactos. PATCH -- bugfix, mesmo
+# comportamento esperado.
+
+APP_VERSION = "4.1.1"
