@@ -351,4 +351,29 @@
 # giro de slides re-confirmados intactos. PATCH -- bugfix, mesmo
 # comportamento esperado.
 
-APP_VERSION = "4.1.1"
+# 4.2.0 (2026-08-31): Modo TV ganha tela de seleção de Gerência +
+# Coordenação (pedido do Julio) em vez de Jundiaí fixo no código. Só
+# aparece na primeira vez (sidebar normal, widgets visíveis); depois de
+# "▶️ Iniciar" fica salva em session_state pro resto da sessão e entra no
+# loop de sempre. Gerências disponíveis: só SP e VP — são as únicas com
+# CENTROS_POR_GERENCIA (sigla de centro_trab) preenchido em
+# core/glossarios.py; as 4 gerências novas (FN/FS/RJ/LC) têm nome de
+# coordenação cadastrado mas ainda sem a sigla correspondente (mesma
+# limitação de dado já registrada no projeto) — generalizar é só
+# preencher esse mapeamento quando o dado existir.
+#   Resposta à pergunta do Julio sobre a sessão cair pra tela de login
+# sozinha: confirmado em auth/login.py que NÃO existe token/JWT
+# persistido nem timeout por tempo — a sessão só cai se o processo do
+# Streamlit reiniciar (novo deploy/push, restart do servidor, crash), já
+# que o login vive só em st.session_state sem cookie. Documentado
+# explicitamente no topo do módulo.
+# Testado em runtime: tela de seleção mostra Gerências=[SP,VP] e
+# Coordenações reais de SP=[Jundiaí,Paranapiacaba,Piaçaguera]; fluxo
+# real de clique (selecionar "Jundiaí" no dropdown + clicar "Iniciar")
+# salva tv_gerencia=SP/tv_centro_trab=CIJN/tv_nome_local=Jundiaí
+# corretamente em session_state; guard de permissão, filtro de
+# centro_trab, giro de slides e diagnóstico de "sem dado" re-confirmados
+# intactos depois da escolha. MINOR -- funcionalidade nova compatível,
+# rota/permissão/comportamento do loop em si não mudam.
+
+APP_VERSION = "4.2.0"
