@@ -376,4 +376,38 @@
 # intactos depois da escolha. MINOR -- funcionalidade nova compatível,
 # rota/permissão/comportamento do loop em si não mudam.
 
-APP_VERSION = "4.2.0"
+# 4.2.1 (2026-08-31): corrige de vez o "sem dado" do Modo TV (a correção
+# do 4.1.1 tinha ficado incompleta) + botão de sair. Diagnóstico real
+# trazido pelo Julio: os centro_trab realmente presentes em SP são
+# "E.SP.IPA, E.SP.IPG, V.SP.IPA, V.SP.IPG, V.SP.PJU" — nenhum contém
+# "CIJN". Causa raiz de verdade: centro_trab NÃO termina na sigla da
+# coordenação — termina no PÁTIO (core/glossarios.py::PATIOS_POR_CENTRO:
+# CIJN → [IJN, ILA, IAB]). "V.SP.IPA" é o pátio IPA, que pertence à
+# coordenação CIPA (Piaçaguera), não a CIJN. O filtro do 4.1.1 comparava
+# o último segmento contra a sigla da coordenação inteira — nunca ia
+# bater, porque essa sigla nunca aparece sozinha no dado.
+#   Corrigido comparando contra a LISTA de pátios da coordenação
+# (PATIOS_POR_CENTRO[sigla]), não mais uma sigla única — COORDENACOES_TV
+# agora é {gerência: {nome: [pátios]}}, encadeando
+# COORDENACOES_POR_GERENCIA → CENTROS_POR_GERENCIA → PATIOS_POR_CENTRO.
+# tv_centro_trab virou tv_patios (lista) em session_state.
+#   Achado dos dados reais nesse mesmo diagnóstico (não é mais bug de
+# código): os dados de SP carregados até agora só têm pátios de
+# Piaçaguera (IPA) e Paranapiacaba (IPG) + um "PJU" não catalogado em
+# PATIOS_POR_CENTRO — nenhum pátio de Jundiaí (IJN/ILA/IAB) ainda. É
+# upload pendente pra essa coordenação, não um bug de filtro.
+#   Botão "🚪 Sair do Modo TV" (pedido do Julio): fica visível o tempo
+# todo durante o loop (removido stButton da lista de seletores CSS
+# escondidos — nenhum st.button "solto" aparecia nos slides mesmo, só
+# st.download_button, que continua escondido por seu próprio testid).
+# Limpa as chaves de sessão do Modo TV e navega de volta pra
+# gerencia_<sigla> — sai de vez, não só reseta a escolha.
+# Testado em runtime: filtro com pátios reais (V.SP.IJN maiúsculo +
+# v.sp.ila minúsculo) encontra as 2 notas de Jundiaí, exclui a de IPA;
+# cenário sem nenhum pátio de Jundiaí mostra o aviso com a lista de
+# pátios esperados + diagnóstico dos centro_trab reais; clique no botão
+# de sair confirmado limpando tv_gerencia e navegando pra 'gerencia_sp';
+# guard de permissão, seleção e giro de slides re-confirmados intactos.
+# PATCH -- bugfix + ajuste de fluxo, mesma API/rota.
+
+APP_VERSION = "4.2.1"
