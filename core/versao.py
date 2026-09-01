@@ -410,4 +410,58 @@
 # guard de permissão, seleção e giro de slides re-confirmados intactos.
 # PATCH -- bugfix + ajuste de fluxo, mesma API/rota.
 
-APP_VERSION = "4.2.1"
+# 5.0.0 (2026-09-01): três pedidos do Julio no mesmo lote.
+#   (1) "Alertas Automáticos" e "Visão de Campo" (modules/alertas.py,
+# modules/visao_campo.py) viram admin-only — "não faz sentido da maneira
+# que está" pros outros perfis. Bloqueio real via require_admin() (novo
+# guard usado, já existia em auth/permissions.py sem nenhum caller até
+# agora) no topo das duas telas, não só o botão sumindo da sidebar
+# (modules/home.py::_render_nav_buttons) — acesso direto por
+# session_state["pagina"] antigo também cai no guard.
+#   (2) Score sai do sidebar de cada Gerência (SP/VP/Geral tinham cada
+# uma o SEU expander "⚙️ Score", nenhum deles salvava nada — resetava pro
+# padrão a cada F5/sessão) e vira UM painel só em Administração →
+# Configurações → "🎯 Score — Pesos e Multiplicadores", persistido de
+# verdade (tabela configuracoes, gerencia=NULL — config global pra SP, VP,
+# Geral e Modo TV; decisão registrada no cabeçalho de core/score_engine.py
+# por não ter sido confirmada explicitamente antes de codar: os 3
+# expanders antigos já usavam os mesmos valores padrão, então não perde
+# nada de fato hoje). Peso de Prioridade migrou junto, como pedido. Toda
+# dimensão multiplicadora passa a seguir o mesmo padrão "selecionável +
+# peso por item" (pedido explícito): Família de defeito (VP e EE
+# continuam com listas separadas — vocabulário diferente, não é
+# por-Gerência) e Tipo (CT/PV) ganharam esse tratamento; Tipo de Inspeção
+# é DIMENSÃO NOVA no score (Ronda/Drone/Trackstar/etc., mesmo catálogo
+# dinâmico do filtro homônimo) — nasce OFF e sem peso salvo, então ninguém
+# tem o próprio score recalculado sozinho no dia do deploy. render_score_
+# sidebar() foi removido de vez (core/score_engine.py); carregar_score_
+# config() (cacheada, ttl=300, invalidada na hora do save) é a nova fonte
+# única, chamada por gerencia_dashboard.py, gerencia_geral.py e também
+# modo_tv.py (Modo TV usava ScoreConfig() puro/hardcoded antes — passa a
+# refletir os mesmos pesos configurados). _get_config/_salvar_config
+# também saíram de dentro de modules/admin_panel.py e viraram fonte única
+# em database/queries.py (get_config/salvar_config), pra score_engine.py
+# poder ler sem import circular. Upload/parser (core/parser.py) e
+# snapshots (core/snapshots.py) NÃO foram alterados de propósito — o
+# score ali continua com pesos de fábrica fixos (congelado, pra manter
+# histórico comparável mesmo se o admin mudar pesos depois).
+#   (3) Bugfix: st.date_input de "Abertura da Nota"/"Encerramento da
+# Nota" (components/filtros.py, na sidebar) parecia sempre vazio ao
+# clicar — não estava vazio, a REGRA CSS genérica que pinta todo texto da
+# sidebar de branco (pensada pros textos sobre o fundo escuro da sidebar,
+# modules/home.py) também pintava de branco o valor dentro do campo de
+# data, que o BaseWeb renderiza sobre fundo claro — texto branco em caixa
+# branca, invisível. Corrigido com uma regra mais específica (cor preta,
+# sem mexer no fundo, que já era o padrão claro do próprio BaseWeb) que
+# vence a genérica na cascata.
+# Testado em runtime (AppTest): guard bloqueia usuario/assistente nas 2
+# telas sem exceção e com mensagem clara, admin continua vendo os 2
+# botões na sidebar e usuário comum não vê nenhum dos dois; carregar_
+# score_config() cai nos padrões de código quando não há nada salvo ainda
+# (idênticos aos que os 3 expanders antigos usavam); aba Configurações
+# renderiza o novo painel sem exceção; clique em "Salvar Configuração de
+# Score" grava as 12 chaves esperadas em configuracoes.
+# MAJOR -- reorganização de fluxo (Score sai do sidebar, vira config
+# persistida) + restrição de acesso a 2 telas inteiras.
+
+APP_VERSION = "5.0.0"

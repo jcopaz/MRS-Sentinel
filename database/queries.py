@@ -553,6 +553,49 @@ def contar_alertas_novos(gerencia: str | None = None) -> int:
         return 0
 
 
+def get_config(gerencia: str | None, chave: str, default):
+    """
+    Lê um valor da tabela `configuracoes` (chave única por gerência —
+    gerência=None é a config global). Fonte única: extraída de
+    modules/admin_panel.py (era `_get_config`, privada de lá) pra que
+    core/score_engine.py também possa ler config persistida sem import
+    circular (score_engine é importado POR admin_panel, não o contrário).
+    Retorna `default` se não encontrado ou em caso de erro — nunca quebra
+    a tela por falta de config.
+    """
+    try:
+        supabase = get_supabase()
+        q = supabase.table("configuracoes").select("valor").eq("chave", chave)
+        if gerencia:
+            q = q.eq("gerencia", gerencia)
+        else:
+            q = q.is_("gerencia", "null")
+        resp = q.limit(1).execute()
+        if resp.data:
+            return resp.data[0]["valor"]
+        return default
+    except Exception:
+        return default
+
+
+def salvar_config(gerencia: str | None, chave: str, valor, admin_id: str | None = None) -> None:
+    """Persiste (upsert) um valor na tabela `configuracoes`. Ver get_config()."""
+    try:
+        supabase = get_supabase()
+        dados = {
+            "gerencia":        gerencia,
+            "chave":           chave,
+            "valor":           valor,
+            "atualizado_por":  admin_id,
+            "atualizado_em":   datetime.utcnow().isoformat(),
+        }
+        supabase.table("configuracoes").upsert(
+            dados, on_conflict="gerencia,chave"
+        ).execute()
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar configuração '{chave}': {e}")
+
+
 def marcar_alerta_status(alerta_id, status: str, usuario_id: str | None = None) -> bool:
     """
     Atualiza o status de um alerta ('novo' | 'visto' | 'resolvido').

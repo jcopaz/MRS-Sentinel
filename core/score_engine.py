@@ -1,9 +1,10 @@
 # =============================================================================
 # core/score_engine.py — Motor de Score Composto
-# Sprint 3 — MRS Sentinel (fórmula estendida na Sprint 4.5)
+# Sprint 3 — MRS Sentinel (fórmula estendida na Sprint 4.5; config migrada
+# do sidebar de cada Gerência pra Administração > Configurações em 2026-09-01)
 #
 # Fórmula:
-#   Score = peso_prio × mult_status × mult_familia × mult_tipo
+#   Score = peso_prio × mult_status × mult_familia × mult_tipo × mult_tipo_insp
 #         × (1 + α × anos_aberta)
 #         × (1 + β × (n_ocorrencias_local - 1))
 #
@@ -14,18 +15,33 @@
 #   quantas notas do DataFrame atual compartilham ramal+origem+familia_defeito
 #   (mesma granularidade do motor de alertas, core/alertas.py).
 #
+# CONFIG GLOBAL (2026-09-01): até aqui, cada tela de Gerência (SP/VP/Geral)
+# tinha seu PRÓPRIO expander de Score na sidebar (render_score_sidebar,
+# removido) — nada disso era salvo, resetava pros valores padrão a cada
+# acesso/F5, e as 3 telas já usavam os mesmos valores padrão mesmo assim.
+# Pedido do Julio: um único painel de configuração dentro de Administração,
+# que VALE PRA TUDO (SP + VP + Geral) e agora fica salvo de verdade em
+# `configuracoes` (gerencia=NULL, chave prefixada 'score_'). Escolha de
+# manter uma config só (não 3) — decisão registrada aqui porque não foi
+# confirmada explicitamente com o Julio antes de codar: os valores padrão
+# das 3 telas já eram idênticos, então na prática ninguém perde nada, e
+# elimina divergência sem motivo de negócio real. Família de defeito
+# continua com DUAS listas de pesos (VP e EE) — isso não é por Gerência,
+# é porque VP e EE têm vocabulário de família diferente (Trilho/AMV/... x
+# Wayside/Sinalização/...), distinção real de dado, mantida como estava.
+#
 # Exporta:
-#   ScoreConfig              — dataclass com pesos configuráveis
-#   render_score_sidebar()   — painel sidebar com sliders
-#   calcular_score_dataframe() — aplica score a todo o DataFrame
-#   render_painel_transparencia() — exibe pesos ativos ao usuário
+#   ScoreConfig                 — dataclass com pesos configuráveis
+#   carregar_score_config()     — lê a config persistida (Administração)
+#   calcular_score_dataframe()  — aplica score a todo o DataFrame
+#   render_painel_transparencia() — exibe pesos ativos ao usuário (somente leitura)
 #
 # Sessão 1: Imports & constantes de peso
 # Sessão 2: ScoreConfig (dataclass)
 # Sessão 3: calcular_score_linha() — cálculo por linha
 # Sessão 4: calcular_score_dataframe() — vetorizado
-# Sessão 5: render_score_sidebar() — controles na sidebar
-# Sessão 6: render_painel_transparencia() — explicação dos pesos
+# Sessão 5: carregar_score_config() — lê config persistida (Administração)
+# Sessão 6: render_painel_transparencia() — explicação dos pesos (leitura)
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
@@ -76,6 +92,16 @@ MULT_TIPO_PADRAO = {
     "PV": 1.0,   # preventiva
 }
 
+# Tipo de inspeção (coluna tipo_atividade: Ronda, Drone, Trackstar,
+# Inspeção técnica de AMV, etc.) — dimensão NOVA (2026-09-01, pedido do
+# Julio), sem peso padrão histórico: os valores são 100% definidos pelos
+# dados carregados (mesmo catálogo dinâmico do filtro "Tipo de inspeção"
+# em components/filtros.py::_opcoes_tipos_inspecao), não um glossário
+# fixo. Começa OFF e vazio — ninguém tem um score recalculado sozinho no
+# dia em que este recurso for ao ar; só passa a valer quando o admin
+# marcar "usar" e escolher pesos em Administração > Configurações.
+MULT_TIPO_INSPECAO_PADRAO: dict = {}
+
 ALPHA_PADRAO = 0.10  # 10% de acréscimo por ano aberto
 
 # Reincidência: mesmo ramal+origem+familia_defeito repetido no DataFrame atual.
@@ -104,16 +130,22 @@ class ScoreConfig:
     mult_familia_vp: dict = field(default_factory=lambda: dict(MULT_FAMILIA_VP_PADRAO))
     mult_familia_ee: dict = field(default_factory=lambda: dict(MULT_FAMILIA_EE_PADRAO))
     mult_tipo:       dict = field(default_factory=lambda: dict(MULT_TIPO_PADRAO))
+    # Tipo de inspeção (tipo_atividade) — ver MULT_TIPO_INSPECAO_PADRAO acima.
+    # Só as chaves aqui presentes ganham peso ≠ 1.0 — mesmo mecanismo de
+    # "selecionar quais entram" que família/tipo já usam: o dict inteiro
+    # É a seleção, o que não está aqui fica neutro (.get(x, 1.0)).
+    mult_tipo_inspecao: dict = field(default_factory=lambda: dict(MULT_TIPO_INSPECAO_PADRAO))
 
     # Reincidência: peso extra por nota repetida no mesmo ramal+origem+família
     beta_reincidencia:      float = BETA_REINCIDENCIA_PADRAO
     reincidencia_mult_max:  float = REINCIDENCIA_MULT_MAX_PADRAO
 
     # Flags de ativação (permite desligar componentes do score)
-    usar_familia:      bool = True
-    usar_tipo:         bool = True
-    usar_idade:        bool = True
-    usar_reincidencia: bool = True
+    usar_familia:       bool = True
+    usar_tipo:          bool = True
+    usar_tipo_inspecao: bool = False  # nova dimensão nasce desligada — ver comentário acima
+    usar_idade:         bool = True
+    usar_reincidencia:  bool = True
 
 # endregion
 
@@ -185,6 +217,12 @@ def calcular_score_linha(row: pd.Series, cfg: ScoreConfig) -> float:
         tipo = str(row.get("tipo_nota", "PV")).strip().upper()[:2]
         score *= cfg.mult_tipo.get(tipo, 1.0)
 
+    # Multiplicador de tipo de inspeção (tipo_atividade: Ronda, Drone,
+    # Trackstar, Inspeção técnica de AMV, etc. — ver MULT_TIPO_INSPECAO_PADRAO)
+    if cfg.usar_tipo_inspecao:
+        tipo_insp = str(row.get("tipo_atividade", "")).strip()
+        score *= cfg.mult_tipo_inspecao.get(tipo_insp, 1.0)
+
     # Fator de envelhecimento
     if cfg.usar_idade:
         anos = _anos_abertos(row.get("data_nota"))
@@ -254,102 +292,71 @@ def calcular_score_dataframe(df: pd.DataFrame, cfg: Optional[ScoreConfig] = None
 # endregion
 
 
-# region ====================== SESSÃO 5: Sidebar de configuração ==============
+# region ====================== SESSÃO 5: Config persistida (Administração) ====
 
-def render_score_sidebar(gerencia: str = "SP") -> ScoreConfig:
+# Chaves em `configuracoes` (gerencia=NULL — config GLOBAL, ver decisão no
+# cabeçalho do módulo). Fonte única dos nomes: lidas aqui, escritas pelo
+# painel "🎯 Score — Pesos e Multiplicadores" em modules/admin_panel.py.
+CHAVE_PESO_PRIORIDADE    = "score_peso_prioridade"
+CHAVE_USAR_IDADE         = "score_usar_idade"
+CHAVE_ALPHA              = "score_alpha"
+CHAVE_USAR_REINCIDENCIA  = "score_usar_reincidencia"
+CHAVE_BETA_REINCIDENCIA  = "score_beta_reincidencia"
+CHAVE_USAR_FAMILIA       = "score_usar_familia"
+CHAVE_MULT_FAMILIA_VP    = "score_mult_familia_vp"
+CHAVE_MULT_FAMILIA_EE    = "score_mult_familia_ee"
+CHAVE_USAR_TIPO          = "score_usar_tipo"
+CHAVE_MULT_TIPO          = "score_mult_tipo"
+CHAVE_USAR_TIPO_INSPECAO = "score_usar_tipo_inspecao"
+CHAVE_MULT_TIPO_INSPECAO = "score_mult_tipo_inspecao"
+
+
+def _bool_config(valor, default: bool) -> bool:
+    """Normaliza valor vindo do banco (bool nativo, ou 'true'/'false'/1/0 se
+    alguém editar a linha manualmente no Supabase) pra bool."""
+    if valor is None:
+        return default
+    if isinstance(valor, bool):
+        return valor
+    return str(valor).strip().lower() in ("true", "1", "sim")
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_score_config() -> ScoreConfig:
     """
-    Renderiza o painel de configuração de score na sidebar.
-    Usa st.expander para não poluir a sidebar com muitos controles.
+    Monta o ScoreConfig ativo a partir da config persistida em Administração
+    > Configurações (tabela `configuracoes`, gerencia=NULL — mesma config
+    pra SP, VP e Geral, ver decisão no cabeçalho do módulo). Substitui o
+    antigo render_score_sidebar(): a config deixou de ser refeita do zero em
+    cada tela/sessão e passou a ser definida uma vez pelo admin.
 
-    Args:
-        gerencia: 'SP', 'VP' ou 'GERAL' — usado no título do expander
+    Cacheado (ttl=300s, mesmo padrão de database/queries_rasf.py) — evita
+    round-trip ao banco a cada rerun de cada aba de cada Gerência. O painel
+    de admin chama carregar_score_config.clear() logo após salvar, então a
+    própria pessoa que editou já vê o efeito na hora; outras sessões pegam
+    em até 5 min.
 
-    Returns:
-        ScoreConfig com os pesos escolhidos pelo usuário
+    Defensivo: qualquer chave ausente (nunca salva) ou corrompida cai no
+    padrão de código — nunca quebra a tela por falta de linha no banco.
     """
+    from database.queries import get_config
+
     cfg = ScoreConfig()
-
-    with st.expander(f"⚙️ Score — {gerencia}", expanded=False):
-
-        # ── Alpha (envelhecimento) ────────────────────────────────────────────
-        cfg.usar_idade = st.checkbox(
-            "📅 Penalizar notas antigas",
-            value=True,
-            key=f"sc_usar_idade_{gerencia}",
-            help="Acrescenta peso para notas abertas há mais tempo",
-        )
-        if cfg.usar_idade:
-            cfg.alpha = st.slider(
-                "α — Acréscimo por ano em aberto",
-                min_value=0.0, max_value=0.5,
-                value=ALPHA_PADRAO, step=0.01,
-                format="%.2f",
-                key=f"sc_alpha_{gerencia}",
-                help="0.10 = +10% por ano. Nota com 2 anos → ×1.20",
-            )
-
-        st.markdown("---")
-
-        # ── Família de defeito ────────────────────────────────────────────────
-        cfg.usar_familia = st.checkbox(
-            "🔩 Multiplicar por família de defeito",
-            value=True,
-            key=f"sc_usar_familia_{gerencia}",
-        )
-
-        st.markdown("---")
-
-        # ── Tipo de nota ──────────────────────────────────────────────────────
-        cfg.usar_tipo = st.checkbox(
-            "📋 Multiplicar por tipo (CT/PV)",
-            value=True,
-            key=f"sc_usar_tipo_{gerencia}",
-            help="CT (Corretiva) = ×1.5 · PV (Preventiva) = ×1.0",
-        )
-
-        st.markdown("---")
-
-        # ── Reincidência no local ────────────────────────────────────────────
-        cfg.usar_reincidencia = st.checkbox(
-            "🔁 Penalizar reincidência no mesmo local",
-            value=True,
-            key=f"sc_usar_reincidencia_{gerencia}",
-            help="Mesmo ramal+pátio+família com múltiplas notas pesa mais — "
-                 "mesma lógica dos hot-spots crônicos (aba Alertas).",
-        )
-        if cfg.usar_reincidencia:
-            cfg.beta_reincidencia = st.slider(
-                "β — Acréscimo por ocorrência repetida",
-                min_value=0.0, max_value=0.5,
-                value=BETA_REINCIDENCIA_PADRAO, step=0.01,
-                format="%.2f",
-                key=f"sc_beta_reinc_{gerencia}",
-                help="0.15 = +15% por repetição. 4ª nota no mesmo local → ×1.45",
-            )
-
-        st.markdown("---")
-
-        # ── Pesos de prioridade ───────────────────────────────────────────────
-        st.markdown("**🎯 Pesos de prioridade**")
-        col1, col2 = st.columns(2)
-        with col1:
-            cfg.peso_prioridade["1-Muito alta"] = st.number_input(
-                "Muito Alta", min_value=1, max_value=10,
-                value=4, step=1, key=f"sc_p1_{gerencia}",
-            )
-            cfg.peso_prioridade["3-Média"] = st.number_input(
-                "Média", min_value=1, max_value=10,
-                value=2, step=1, key=f"sc_p3_{gerencia}",
-            )
-        with col2:
-            cfg.peso_prioridade["2-Alta"] = st.number_input(
-                "Alta", min_value=1, max_value=10,
-                value=3, step=1, key=f"sc_p2_{gerencia}",
-            )
-            cfg.peso_prioridade["4-Baixa"] = st.number_input(
-                "Baixa", min_value=1, max_value=10,
-                value=1, step=1, key=f"sc_p4_{gerencia}",
-            )
+    try:
+        cfg.peso_prioridade = dict(get_config(None, CHAVE_PESO_PRIORIDADE, PESO_PRIORIDADE_PADRAO))
+        cfg.usar_idade = _bool_config(get_config(None, CHAVE_USAR_IDADE, True), True)
+        cfg.alpha = float(get_config(None, CHAVE_ALPHA, ALPHA_PADRAO))
+        cfg.usar_reincidencia = _bool_config(get_config(None, CHAVE_USAR_REINCIDENCIA, True), True)
+        cfg.beta_reincidencia = float(get_config(None, CHAVE_BETA_REINCIDENCIA, BETA_REINCIDENCIA_PADRAO))
+        cfg.usar_familia = _bool_config(get_config(None, CHAVE_USAR_FAMILIA, True), True)
+        cfg.mult_familia_vp = dict(get_config(None, CHAVE_MULT_FAMILIA_VP, MULT_FAMILIA_VP_PADRAO))
+        cfg.mult_familia_ee = dict(get_config(None, CHAVE_MULT_FAMILIA_EE, MULT_FAMILIA_EE_PADRAO))
+        cfg.usar_tipo = _bool_config(get_config(None, CHAVE_USAR_TIPO, True), True)
+        cfg.mult_tipo = dict(get_config(None, CHAVE_MULT_TIPO, MULT_TIPO_PADRAO))
+        cfg.usar_tipo_inspecao = _bool_config(get_config(None, CHAVE_USAR_TIPO_INSPECAO, False), False)
+        cfg.mult_tipo_inspecao = dict(get_config(None, CHAVE_MULT_TIPO_INSPECAO, MULT_TIPO_INSPECAO_PADRAO))
+    except Exception:
+        return ScoreConfig()  # qualquer erro de leitura/formato -> padrão de código, nunca quebra a tela
 
     return cfg
 
@@ -375,6 +382,7 @@ def render_painel_transparencia(cfg: ScoreConfig):
                   × Multiplicador Status (neutro — ver nota abaixo)
                   × Multiplicador Família
                   × Multiplicador Tipo
+                  × Multiplicador Tipo de Inspeção
                   × (1 + α × Anos em aberto)
                   × (1 + β × Ocorrências repetidas no mesmo local - 1)
             ```
@@ -417,6 +425,9 @@ def render_painel_transparencia(cfg: ScoreConfig):
             st.markdown("**📋 Tipo CT/PV**")
             st.success("✅ Ativo") if cfg.usar_tipo else st.info("⏸️ Desativado")
 
+            st.markdown("**🔍 Tipo de Inspeção**")
+            st.success("✅ Ativo") if cfg.usar_tipo_inspecao else st.info("⏸️ Desativado")
+
             st.markdown("**🔁 Reincidência no local**")
             if cfg.usar_reincidencia:
                 st.success(f"✅ Ativa — β = {cfg.beta_reincidencia:.2f} (+{cfg.beta_reincidencia*100:.0f}% por repetição, teto ×{cfg.reincidencia_mult_max:.1f})")
@@ -427,8 +438,8 @@ def render_painel_transparencia(cfg: ScoreConfig):
                 st.info("⏸️ Desativada")
 
         st.caption(
-            "ℹ️ Scores altos = maior criticidade. Use os controles em "
-            "⚙️ Score na sidebar para ajustar os pesos."
+            "ℹ️ Scores altos = maior criticidade. Pesos ajustáveis em "
+            "Administração → Configurações → 🎯 Score."
         )
 
 # endregion

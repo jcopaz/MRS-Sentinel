@@ -44,7 +44,7 @@ from core.indicadores import (
 )
 
 # Motor de score
-from core.score_engine import calcular_score_dataframe, render_score_sidebar
+from core.score_engine import calcular_score_dataframe, carregar_score_config
 
 # Normalização de ramais
 from core.glossarios import normalizar_coluna_ramal, nome_ramal, RAMAIS_MRS
@@ -249,10 +249,9 @@ def render_gerencia_geral():
 
         st.markdown("---")
 
-        # Score unificado (mesmos pesos para as duas gerências na visão geral)
-        score_cfg = render_score_sidebar(gerencia="GERAL")
-
-        st.markdown("---")
+    # Score: mesma config única de Administração → Configurações → 🎯 Score
+    # (ver core/score_engine.py) — não é mais reconfigurada por sidebar.
+    score_cfg = carregar_score_config()
 
     # ── Carrega dados (cached) ────────────────────────────────────────────────
     with st.spinner("⏳ Carregando dados consolidados..."):

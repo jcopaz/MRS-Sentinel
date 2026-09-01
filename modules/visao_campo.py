@@ -19,7 +19,7 @@
 import streamlit as st
 import pandas as pd
 
-from auth.permissions import gerencias_visiveis
+from auth.permissions import gerencias_visiveis, require_admin
 
 # region ====================== SESSÃO 1: CSS + helpers ========================
 
@@ -236,6 +236,9 @@ def _carregar_notas(gerencia: str) -> pd.DataFrame:
 
 
 def render_visao_campo():
+    # Restrita a admin (pedido do Julio, 2026-09-01) — mesma lógica de
+    # modules/alertas.py: bloqueio real, não só o link sumindo do menu.
+    require_admin()
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown("### 📱 Visão de Campo")
 

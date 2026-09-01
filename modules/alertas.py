@@ -27,7 +27,7 @@ import streamlit as st
 import pandas as pd
 
 from auth.session import get_gerencia, get_perfil, get_id
-from auth.permissions import can_see_gerencia, can_manage_alertas, require_login, gerencias_visiveis
+from auth.permissions import can_see_gerencia, can_manage_alertas, require_admin, gerencias_visiveis
 from database.queries import (
     get_alertas, marcar_alerta_status, contar_alertas_novos, log_acesso,
 )
@@ -329,7 +329,11 @@ def _botoes_export(df: pd.DataFrame, gerencia: str = ""):
 
 def render_alertas():
     """Ponto de entrada da tela de Alertas (rota 'alertas')."""
-    require_login()  # RBAC: tela protegida — sem sessão, não renderiza
+    # Restrita a admin (pedido do Julio, 2026-09-01) — require_admin() já
+    # cobre require_login() internamente. Bloqueio de verdade (não só o
+    # link sumir do menu em modules/home.py), pra acesso direto via
+    # pagina_atual velho em session_state também cair aqui.
+    require_admin()
     _inject_css()
     st.markdown("## 🚨 Alertas Automáticos")
     st.caption(

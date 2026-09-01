@@ -22,7 +22,7 @@ from components.heatmap import render_heatmap, render_ranking, render_serie_temp
 from components.filtros import render_filtros_cascata, aplicar_filtros_atributos
 from components.visao_gerencial import render_visao_gerencial
 
-from core.score_engine import render_score_sidebar, calcular_score_dataframe, render_painel_transparencia
+from core.score_engine import carregar_score_config, calcular_score_dataframe, render_painel_transparencia
 from core.glossarios import (
     normalizar_coluna_ramal, NOME_CURTO_GERENCIA, COR_GERENCIA, COORDENACOES_POR_GERENCIA,
 )
@@ -175,8 +175,11 @@ def render_gerencia(sigla: str) -> None:
         )
 
         st.markdown("---")
-        score_cfg = render_score_sidebar(gerencia=sigla)
-        st.markdown("---")
+
+    # Score: config única definida em Administração → Configurações → 🎯
+    # Score (não é mais reconfigurada por sidebar/por tela — ver cabeçalho
+    # de core/score_engine.py, decisão de 2026-09-01).
+    score_cfg = carregar_score_config()
 
     # ── Carrega dados ─────────────────────────────────────────────────────────
     with st.spinner(f"⏳ Carregando dados da Gerência {sigla}..."):

@@ -79,7 +79,7 @@ from auth.session import set_pagina
 from components.kpi_card import render_kpi_cards
 from components.unifilar import render_unifilar_dual
 from components.heatmap import render_ranking
-from core.score_engine import calcular_score_dataframe, ScoreConfig
+from core.score_engine import calcular_score_dataframe, carregar_score_config
 from core.glossarios import (
     normalizar_coluna_ramal, CENTROS_POR_GERENCIA, COORDENACOES_POR_GERENCIA,
     PATIOS_POR_CENTRO,
@@ -379,7 +379,10 @@ def render_modo_tv(_loop: bool = True):
             )
         return
 
-    df = calcular_score_dataframe(df_raw, ScoreConfig())
+    # Mesma config única de Administração → Configurações → 🎯 Score (não
+    # mais o ScoreConfig() padrão fixo) — o Modo TV passa a refletir os
+    # mesmos pesos que as telas de Gerência usam (core/score_engine.py).
+    df = calcular_score_dataframe(df_raw, carregar_score_config())
 
     idx = st.session_state.get("tv_slide_idx", 0) % len(_SLIDES)
 

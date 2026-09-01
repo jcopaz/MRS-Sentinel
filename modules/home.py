@@ -6,7 +6,7 @@ from pathlib import Path
 
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
-from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis, can_access_modo_tv
+from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis, can_access_modo_tv, is_admin
 from database.queries import log_acesso, contar_alertas_novos
 from core.glossarios import GERENCIAS_COM_DASHBOARD, GERENCIA_GERAL_DE
 from core.versao import APP_VERSION
@@ -48,6 +48,20 @@ def _inject_sidebar_css():
     [data-testid="stSidebar"] span,
     [data-testid="stSidebar"] div {
         color: #ffffff !important;
+    }
+
+    /* st.date_input (Abertura/Encerramento da Nota) herdava o branco da
+       regra genérica acima e ficava com texto branco sobre o fundo claro
+       que o BaseWeb usa nesse componente — a data estava lá (o widget
+       sempre recebe um value), só invisível: texto branco em cima de caixa
+       branca (reportado pelo Julio, 2026-09-01, como "campo não aparece
+       preenchido clicando"). Mais específico que a regra genérica -> vence
+       na cascata mesmo com !important dos dois lados. Não mexe no fundo:
+       o branco da caixa é o padrão do próprio BaseWeb, não algo que a gente
+       force — só a cor do texto estava errada. */
+    [data-testid="stSidebar"] [data-testid="stDateInput"] input {
+        color: #000000 !important;
+        background: transparent !important;
     }
 
     /* Botões da sidebar — estilo ghost */
@@ -236,18 +250,22 @@ def _render_nav_buttons():
     ativo_evo = "🔵 " if pagina_atual == "evolucao" else ""
     nav_items.append(("EVOLUCAO", f"{ativo_evo}📈  Evolução da Malha", "evolucao"))
 
-    # Visão de Campo: tela enxuta mobile-first (prioridades + alertas)
-    ativo_campo = "🔵 " if pagina_atual == "campo" else ""
-    nav_items.append(("CAMPO", f"{ativo_campo}📱  Visão de Campo", "campo"))
+    # Visão de Campo e Alertas: restritos a admin (pedido do Julio,
+    # 2026-09-01) — "não faz sentido da maneira que está" pros demais
+    # perfis. Botão some do menu E a tela em si é bloqueada em
+    # modules/visao_campo.py / modules/alertas.py (require_admin()) —
+    # não só o link some, o acesso direto por pagina_atual também.
+    if is_admin():
+        ativo_campo = "🔵 " if pagina_atual == "campo" else ""
+        nav_items.append(("CAMPO", f"{ativo_campo}📱  Visão de Campo", "campo"))
 
-    # Alertas: todos podem ver — badge com contagem de novos
-    ativo_alertas = "🔵 " if pagina_atual == "alertas" else ""
-    try:
-        n_novos = contar_alertas_novos(get_gerencia())
-    except Exception:
-        n_novos = 0
-    badge = f"  ({n_novos})" if n_novos else ""
-    nav_items.append(("ALERTAS", f"{ativo_alertas}🚨  Alertas{badge}", "alertas"))
+        ativo_alertas = "🔵 " if pagina_atual == "alertas" else ""
+        try:
+            n_novos = contar_alertas_novos(get_gerencia())
+        except Exception:
+            n_novos = 0
+        badge = f"  ({n_novos})" if n_novos else ""
+        nav_items.append(("ALERTAS", f"{ativo_alertas}🚨  Alertas{badge}", "alertas"))
 
     # Upload: admin e assistente
     gerencia_usr = get_gerencia()

@@ -7,7 +7,8 @@
 # Abas:
 #   1. 👥 Usuários    — CRUD completo (criar, editar, ativar/desativar)
 #   2. 📋 Logs        — Histórico de acessos e uploads
-#   3. ⚙️ Configurações — Pesos padrão de score por gerência, km de malha
+#   3. ⚙️ Configurações — Score (pesos e multiplicadores, config única —
+#      migrou do sidebar de cada Gerência em 2026-09-01), km de malha
 
 from datetime import datetime
 
@@ -15,9 +16,21 @@ import streamlit as st
 import pandas as pd
 
 from database.client  import get_supabase, get_supabase_admin
-from database.queries import get_uploads_historico, gerar_email_sintetico
+from database.queries import (
+    get_uploads_historico, gerar_email_sintetico, get_notas_cached,
+    get_config as _get_config, salvar_config as _salvar_config_shared,
+)
 from core.glossarios   import LISTA_GERENCIAS
 from core.versao       import APP_VERSION
+from core.score_engine import (
+    carregar_score_config, MULT_FAMILIA_VP_PADRAO, MULT_FAMILIA_EE_PADRAO,
+    ALPHA_PADRAO, BETA_REINCIDENCIA_PADRAO,
+    CHAVE_PESO_PRIORIDADE, CHAVE_USAR_IDADE, CHAVE_ALPHA,
+    CHAVE_USAR_REINCIDENCIA, CHAVE_BETA_REINCIDENCIA,
+    CHAVE_USAR_FAMILIA, CHAVE_MULT_FAMILIA_VP, CHAVE_MULT_FAMILIA_EE,
+    CHAVE_USAR_TIPO, CHAVE_MULT_TIPO,
+    CHAVE_USAR_TIPO_INSPECAO, CHAVE_MULT_TIPO_INSPECAO,
+)
 
 # Senha provisória padrão — mesma pra toda conta nova E pra todo reset
 # (pedido do Julio, 2026-08-31). Fonte única: usada tanto no formulário de
@@ -637,6 +650,28 @@ def _buscar_uploads() -> pd.DataFrame:
 
 # region ====================== SESSÃO 4: Aba Configurações ===================
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _catalogo_tipos_inspecao() -> list[str]:
+    """
+    Valores reais de 'Tipo de inspeção' (coluna tipo_atividade) já
+    carregados no banco — mesmo catálogo dinâmico do filtro homônimo em
+    components/filtros.py::_opcoes_tipos_inspecao, só que combinando SP+VP
+    de uma vez (o filtro olha só a gerência da tela atual; aqui é pro
+    admin ponderar globalmente). Reaproveita get_notas_cached (mesmo TTL
+    de 5min já usado nas telas de Gerência) — não abre uma query nova.
+    Defensivo: erro ou base vazia -> lista vazia, nunca quebra a aba.
+    """
+    valores: set[str] = set()
+    for ger in ("SP", "VP"):
+        try:
+            df = get_notas_cached(ger, None)
+            if not df.empty and "tipo_atividade" in df.columns:
+                valores |= set(df["tipo_atividade"].dropna().unique().tolist())
+        except Exception:
+            continue
+    return sorted(v for v in valores if v)
+
+
 def _render_aba_configuracoes() -> None:
     """
     Configurações da plataforma por gerência.
@@ -723,21 +758,209 @@ def _render_aba_configuracoes() -> None:
             _salvar_config(None, "meta_adh_critico", adh_cr)
             st.success("✅ Metas dos indicadores atualizadas! Aplicadas na próxima renderização.")
 
-    # ── 4.3: Score padrão por gerência ───────────────────────────────────────
-    with st.expander("⚖️ Score Padrão — Fator Idade (α)", expanded=False):
-        alpha_por_gerencia = {}
-        cols_alpha = st.columns(len(LISTA_GERENCIAS))
-        for col, ger in zip(cols_alpha, LISTA_GERENCIAS):
-            alpha_por_gerencia[ger] = col.slider(
-                f"α — Gerência {ger}", 0.0, 0.5,
-                value=float(_get_config(ger, "alpha_idade", 0.10)),
-                step=0.01, format="%.2f", key=f"cfg_alpha_{ger.lower()}",
+    # ── 4.3: Score — Pesos e Multiplicadores ─────────────────────────────────
+    # Migrou do expander "⚙️ Score" que existia na sidebar de cada tela de
+    # Gerência (SP/VP/Geral) — pedido do Julio, 2026-09-01: "o item Score -
+    # Geral deverá entrar na aba administração e sair do sidebar". Config
+    # ÚNICA agora (não mais 3 versões independentes que nem eram salvas —
+    # ver decisão registrada no cabeçalho de core/score_engine.py). Toda
+    # dimensão que multiplica o score (família, tipo, tipo de inspeção) usa
+    # o mesmo padrão: multiselect pra ESCOLHER quais itens entram + peso
+    # numérico por item escolhido — pedido explícito do Julio ("todas as
+    # opções que forem multiplicadores do score... deverá ser possível
+    # selecionar e ponderar o peso por item selecionado").
+    with st.expander("🎯 Score — Pesos e Multiplicadores", expanded=False):
+        st.caption(
+            "Config única, vale para SP + VP + Geral (inclusive Modo TV). "
+            "Fórmula: Peso Prioridade × Família × Tipo × Tipo de Inspeção × "
+            "(1 + α · anos em aberto) × (1 + β · reincidências no local)."
+        )
+
+        cfg_atual = carregar_score_config()
+
+        # -- Peso de Prioridade (pedido do Julio: junto do score aqui) ------
+        st.markdown("**🎯 Peso de Prioridade**")
+        pcol1, pcol2 = st.columns(2)
+        with pcol1:
+            p1 = st.number_input(
+                "Muito Alta", min_value=1, max_value=10,
+                value=int(cfg_atual.peso_prioridade.get("1-Muito alta", 4)),
+                step=1, key="cfg_score_p1",
+            )
+            p3 = st.number_input(
+                "Média", min_value=1, max_value=10,
+                value=int(cfg_atual.peso_prioridade.get("3-Média", 2)),
+                step=1, key="cfg_score_p3",
+            )
+        with pcol2:
+            p2 = st.number_input(
+                "Alta", min_value=1, max_value=10,
+                value=int(cfg_atual.peso_prioridade.get("2-Alta", 3)),
+                step=1, key="cfg_score_p2",
+            )
+            p4 = st.number_input(
+                "Baixa", min_value=1, max_value=10,
+                value=int(cfg_atual.peso_prioridade.get("4-Baixa", 1)),
+                step=1, key="cfg_score_p4",
             )
 
-        if st.button("💾 Salvar α Padrão", key="btn_alpha"):
-            for ger, valor in alpha_por_gerencia.items():
-                _salvar_config(ger, "alpha_idade", valor)
-            st.success("✅ Fator α atualizado!")
+        st.markdown("---")
+
+        # -- Envelhecimento (idade) ------------------------------------------
+        usar_idade = st.checkbox(
+            "📅 Penalizar notas antigas", value=cfg_atual.usar_idade,
+            key="cfg_score_usar_idade",
+            help="Acrescenta peso para notas abertas há mais tempo.",
+        )
+        alpha = ALPHA_PADRAO
+        if usar_idade:
+            alpha = st.slider(
+                "α — Acréscimo por ano em aberto", 0.0, 0.5,
+                value=float(cfg_atual.alpha), step=0.01, format="%.2f",
+                key="cfg_score_alpha",
+                help="0.10 = +10% por ano. Nota com 2 anos → ×1.20",
+            )
+
+        st.markdown("---")
+
+        # -- Reincidência no local --------------------------------------------
+        usar_reinc = st.checkbox(
+            "🔁 Penalizar reincidência no mesmo local", value=cfg_atual.usar_reincidencia,
+            key="cfg_score_usar_reinc",
+            help="Mesmo ramal+pátio+família com múltiplas notas pesa mais — "
+                 "mesma lógica dos hot-spots crônicos (aba Alertas).",
+        )
+        beta = BETA_REINCIDENCIA_PADRAO
+        if usar_reinc:
+            beta = st.slider(
+                "β — Acréscimo por ocorrência repetida", 0.0, 0.5,
+                value=float(cfg_atual.beta_reincidencia), step=0.01, format="%.2f",
+                key="cfg_score_beta",
+                help="0.15 = +15% por repetição. 4ª nota no mesmo local → ×1.45",
+            )
+
+        st.markdown("---")
+
+        # -- Família de defeito (selecionável + peso por item) ---------------
+        usar_familia = st.checkbox(
+            "🔩 Multiplicar por família de defeito", value=cfg_atual.usar_familia,
+            key="cfg_score_usar_familia",
+        )
+        mult_fam_vp = dict(cfg_atual.mult_familia_vp)
+        mult_fam_ee = dict(cfg_atual.mult_familia_ee)
+        if usar_familia:
+            st.caption(
+                "Escolha quais famílias entram no score e o peso de cada uma "
+                "(ex.: AMV, Dormente, Geometria...). As não escolhidas ficam "
+                "neutras (×1.0) — não somem do app, só não pesam no score."
+            )
+            fcol1, fcol2 = st.columns(2)
+            with fcol1:
+                st.markdown("_Via Permanente (VP)_")
+                fam_vp_sel = st.multiselect(
+                    "Famílias VP", options=list(MULT_FAMILIA_VP_PADRAO.keys()),
+                    default=[f for f in cfg_atual.mult_familia_vp if f in MULT_FAMILIA_VP_PADRAO],
+                    key="cfg_score_fam_vp_sel", label_visibility="collapsed",
+                )
+                mult_fam_vp = {}
+                for fam in fam_vp_sel:
+                    mult_fam_vp[fam] = st.number_input(
+                        fam, min_value=0.0, max_value=5.0,
+                        value=float(cfg_atual.mult_familia_vp.get(fam, MULT_FAMILIA_VP_PADRAO.get(fam, 1.0))),
+                        step=0.1, key=f"cfg_score_fam_vp_{fam}",
+                    )
+            with fcol2:
+                st.markdown("_Eletroeletrônica (EE)_")
+                fam_ee_sel = st.multiselect(
+                    "Famílias EE", options=list(MULT_FAMILIA_EE_PADRAO.keys()),
+                    default=[f for f in cfg_atual.mult_familia_ee if f in MULT_FAMILIA_EE_PADRAO],
+                    key="cfg_score_fam_ee_sel", label_visibility="collapsed",
+                )
+                mult_fam_ee = {}
+                for fam in fam_ee_sel:
+                    mult_fam_ee[fam] = st.number_input(
+                        fam, min_value=0.0, max_value=5.0,
+                        value=float(cfg_atual.mult_familia_ee.get(fam, MULT_FAMILIA_EE_PADRAO.get(fam, 1.0))),
+                        step=0.1, key=f"cfg_score_fam_ee_{fam}",
+                    )
+
+        st.markdown("---")
+
+        # -- Tipo de nota (CT/PV) ---------------------------------------------
+        usar_tipo = st.checkbox(
+            "📋 Multiplicar por tipo (CT/PV)", value=cfg_atual.usar_tipo,
+            key="cfg_score_usar_tipo",
+            help="CT = Corretiva · PV = Preventiva",
+        )
+        mult_tipo = dict(cfg_atual.mult_tipo)
+        if usar_tipo:
+            tcol1, tcol2 = st.columns(2)
+            mult_tipo = {
+                "CT": tcol1.number_input(
+                    "CT — Corretiva", min_value=0.0, max_value=5.0,
+                    value=float(cfg_atual.mult_tipo.get("CT", 1.5)),
+                    step=0.1, key="cfg_score_tipo_ct",
+                ),
+                "PV": tcol2.number_input(
+                    "PV — Preventiva", min_value=0.0, max_value=5.0,
+                    value=float(cfg_atual.mult_tipo.get("PV", 1.0)),
+                    step=0.1, key="cfg_score_tipo_pv",
+                ),
+            }
+
+        st.markdown("---")
+
+        # -- Tipo de Inspeção (dimensão nova, selecionável + peso) ------------
+        usar_tipo_insp = st.checkbox(
+            "🔍 Multiplicar por tipo de inspeção", value=cfg_atual.usar_tipo_inspecao,
+            key="cfg_score_usar_tipo_insp",
+            help="Origem da nota: Ronda, Drone, Trackstar, Inspeção técnica "
+                 "de AMV, etc. — dimensão nova, desligada até você escolher pesos.",
+        )
+        mult_tipo_insp = dict(cfg_atual.mult_tipo_inspecao)
+        if usar_tipo_insp:
+            opcoes_insp = _catalogo_tipos_inspecao()
+            # Une com o que já está salvo — um peso configurado antes continua
+            # selecionável mesmo se a amostra atual de dados não tiver esse valor.
+            universo_insp = sorted(set(opcoes_insp) | set(cfg_atual.mult_tipo_inspecao.keys()))
+            if not universo_insp:
+                st.caption(
+                    "_(Nenhum dado carregado ainda pra listar tipos de inspeção "
+                    "reais — faça upload em alguma Gerência primeiro.)_"
+                )
+            else:
+                tipo_insp_sel = st.multiselect(
+                    "Tipos de inspeção a ponderar", options=universo_insp,
+                    default=list(cfg_atual.mult_tipo_inspecao.keys()),
+                    key="cfg_score_tipo_insp_sel",
+                )
+                mult_tipo_insp = {}
+                for t in tipo_insp_sel:
+                    mult_tipo_insp[t] = st.number_input(
+                        t, min_value=0.0, max_value=5.0,
+                        value=float(cfg_atual.mult_tipo_inspecao.get(t, 1.0)),
+                        step=0.1, key=f"cfg_score_tipo_insp_{t}",
+                    )
+
+        st.markdown("---")
+
+        if st.button("💾 Salvar Configuração de Score", key="btn_score_cfg", type="primary"):
+            _salvar_config(None, CHAVE_PESO_PRIORIDADE, {
+                "1-Muito alta": p1, "2-Alta": p2, "3-Média": p3, "4-Baixa": p4,
+            })
+            _salvar_config(None, CHAVE_USAR_IDADE, usar_idade)
+            _salvar_config(None, CHAVE_ALPHA, alpha)
+            _salvar_config(None, CHAVE_USAR_REINCIDENCIA, usar_reinc)
+            _salvar_config(None, CHAVE_BETA_REINCIDENCIA, beta)
+            _salvar_config(None, CHAVE_USAR_FAMILIA, usar_familia)
+            _salvar_config(None, CHAVE_MULT_FAMILIA_VP, mult_fam_vp)
+            _salvar_config(None, CHAVE_MULT_FAMILIA_EE, mult_fam_ee)
+            _salvar_config(None, CHAVE_USAR_TIPO, usar_tipo)
+            _salvar_config(None, CHAVE_MULT_TIPO, mult_tipo)
+            _salvar_config(None, CHAVE_USAR_TIPO_INSPECAO, usar_tipo_insp)
+            _salvar_config(None, CHAVE_MULT_TIPO_INSPECAO, mult_tipo_insp)
+            carregar_score_config.clear()  # efeito imediato pra quem salvou, sem esperar o TTL de 5min
+            st.success("✅ Configuração de Score salva! Já vale pra SP, VP, Geral e Modo TV.")
 
     # ── 4.4: Alertas Automáticos (Sprint 5) ──────────────────────────────────
     with st.expander("🚨 Alertas Automáticos", expanded=False):
@@ -806,43 +1029,18 @@ def _render_aba_configuracoes() -> None:
             st.success("✅ Cache limpo! Próxima navegação buscará dados frescos do banco.")
 
 
-def _get_config(gerencia: str | None, chave: str, default):
-    """
-    Busca valor de configuração no banco.
-    Retorna default se não encontrado ou em caso de erro.
-    """
-    try:
-        supabase = get_supabase()
-        q = supabase.table("configuracoes").select("valor").eq("chave", chave)
-        if gerencia:
-            q = q.eq("gerencia", gerencia)
-        else:
-            q = q.is_("gerencia", "null")
-        resp = q.limit(1).execute()
-        if resp.data:
-            return resp.data[0]["valor"]
-        return default
-    except Exception:
-        return default
-
-
+# _get_config/_salvar_config viraram fonte única em database/queries.py
+# (get_config/salvar_config), reaproveitada também por core/score_engine.py
+# (score_engine é importado POR admin_panel — import circular se fosse o
+# contrário). _get_config é usado direto via alias no import acima; só
+# _salvar_config precisa deste wrapper fino aqui pra continuar injetando o
+# admin_id automaticamente (a versão compartilhada recebe por parâmetro,
+# a antiga pegava sozinha de st.session_state — sem este wrapper, as
+# dezenas de chamadas já existentes que não passam admin_id perderiam o
+# registro de "quem alterou" em atualizado_por).
 def _salvar_config(gerencia: str | None, chave: str, valor) -> None:
-    """Persiste configuração no banco via upsert."""
-    try:
-        supabase = get_supabase()
-        admin = st.session_state.get("usuario", {})
-        dados = {
-            "gerencia":        gerencia,
-            "chave":           chave,
-            "valor":           valor,
-            "atualizado_por":  admin.get("id"),
-            "atualizado_em":   datetime.utcnow().isoformat(),
-        }
-        supabase.table("configuracoes").upsert(
-            dados, on_conflict="gerencia,chave"
-        ).execute()
-    except Exception as e:
-        st.error(f"❌ Erro ao salvar configuração '{chave}': {e}")
+    admin_id = st.session_state.get("usuario", {}).get("id")
+    _salvar_config_shared(gerencia, chave, valor, admin_id)
 
 # endregion
 
