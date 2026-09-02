@@ -73,17 +73,23 @@ def _inject_sidebar_css():
         caret-color: #000000 !important;
         background: #ffffff !important;
     }
-    /* "Início"/"Fim" (Abertura/Encerramento da Nota) ficavam com aparência
-       acinzentada mesmo com color:#fff — o rótulo do widget do Streamlit
-       carrega um `opacity` próprio (texto secundário, pensado pra tema
-       claro) que deixa QUALQUER cor esmaecida contra o fundo escuro da
-       sidebar; `color` sozinho não resolve isso, precisa também zerar o
-       opacity (pedido do Julio, 2026-09-02: mesmo branco "cheio" dos
-       demais títulos da sidebar, tipo "📅 Abertura da Nota"). Pega tanto
-       o <label> quanto o wrapper stWidgetLabel, que é onde o Streamlit
-       aplica esse opacity de verdade. */
+    /* "Início"/"Fim" (Abertura/Encerramento da Nota): a tentativa anterior
+       (só no <label> e no wrapper stWidgetLabel) não pegou — o texto
+       "Início"/"Fim" de verdade fica num <p> AINDA MAIS interno (dentro de
+       stMarkdownContainer), que é exatamente um dos "TODOS os
+       descendentes" pintados de preto pela regra `* {color:preto}" acima
+       (pensada pro valor da data, não pro rótulo). Pintar só o <label>/
+       stWidgetLabel de branco não adianta: esse <p> tem uma regra própria
+       (via a wildcard) que bate DIRETO nele, e "regra direta no elemento"
+       sempre vence "cor herdada do pai", não importa a especificidade do
+       pai. Corrigido pegando TAMBÉM os descendentes do label (`label *`),
+       com especificidade maior que a wildcard genérica -> essa parte
+       específica vence, o resto do stDateInput (o valor da data) continua
+       preto como deve ser. */
     [data-testid="stSidebar"] [data-testid="stDateInput"] label,
-    [data-testid="stSidebar"] [data-testid="stDateInput"] [data-testid="stWidgetLabel"] {
+    [data-testid="stSidebar"] [data-testid="stDateInput"] label *,
+    [data-testid="stSidebar"] [data-testid="stDateInput"] [data-testid="stWidgetLabel"],
+    [data-testid="stSidebar"] [data-testid="stDateInput"] [data-testid="stWidgetLabel"] * {
         color: #ffffff !important;
         opacity: 1 !important;
     }

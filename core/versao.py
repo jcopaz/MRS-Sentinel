@@ -583,4 +583,20 @@
 # 5.1.1) não foram tocados, como pedido.
 # PATCH -- ajuste de estilo, sem mudar comportamento.
 
-APP_VERSION = "6.0.1"
+# 6.0.2 (2026-09-02): o fix do 6.0.1 piorou em vez de resolver — Julio
+# reportou "Início"/"Fim" agora em PRETO (antes era cinza esmaecido). Causa
+# raiz de verdade: o texto "Início"/"Fim" fica num <p> AINDA MAIS interno
+# (dentro de stMarkdownContainer), não direto no <label>/stWidgetLabel que
+# o 6.0.1 pintou de branco. Esse <p> é um dos "TODOS os descendentes" que
+# a regra `* {color:preto}` do 5.1.1 (pensada pro VALOR da data) também
+# pinta — e uma regra que bate DIRETO num elemento sempre vence a cor
+# herdada do pai, não importa a especificidade do pai (por isso pintar só
+# o <label> de branco não tinha efeito nenhum no <p> de dentro). Corrigido
+# em modules/home.py::_inject_sidebar_css() acrescentando `label *` e
+# `[stWidgetLabel] *` às regras brancas — cobre TODOS os descendentes do
+# rótulo, com especificidade maior que a wildcard genérica, então essa
+# parte específica vence e o resto do campo (o valor da data) continua
+# preto normalmente.
+# PATCH -- ajuste de estilo, sem mudar comportamento (correção do 6.0.1).
+
+APP_VERSION = "6.0.2"
