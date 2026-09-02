@@ -73,8 +73,19 @@ def _inject_sidebar_css():
         caret-color: #000000 !important;
         background: #ffffff !important;
     }
-    [data-testid="stSidebar"] [data-testid="stDateInput"] label {
-        color: #ffffff !important;  /* "Início"/"Fim" continuam brancos (fica sobre o fundo escuro da sidebar) */
+    /* "Início"/"Fim" (Abertura/Encerramento da Nota) ficavam com aparência
+       acinzentada mesmo com color:#fff — o rótulo do widget do Streamlit
+       carrega um `opacity` próprio (texto secundário, pensado pra tema
+       claro) que deixa QUALQUER cor esmaecida contra o fundo escuro da
+       sidebar; `color` sozinho não resolve isso, precisa também zerar o
+       opacity (pedido do Julio, 2026-09-02: mesmo branco "cheio" dos
+       demais títulos da sidebar, tipo "📅 Abertura da Nota"). Pega tanto
+       o <label> quanto o wrapper stWidgetLabel, que é onde o Streamlit
+       aplica esse opacity de verdade. */
+    [data-testid="stSidebar"] [data-testid="stDateInput"] label,
+    [data-testid="stSidebar"] [data-testid="stDateInput"] [data-testid="stWidgetLabel"] {
+        color: #ffffff !important;
+        opacity: 1 !important;
     }
 
     /* Botões da sidebar — estilo ghost */

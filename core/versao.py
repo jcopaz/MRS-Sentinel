@@ -571,4 +571,16 @@
 # logout.
 # MAJOR -- duas correções de segurança/escopo de dado no mesmo lote.
 
-APP_VERSION = "6.0.0"
+# 6.0.1 (2026-09-02): confirmado pelo Julio que o fix de CSS do 5.1.1
+# funcionou (data aparece preenchida) — mas os rótulos "Início"/"Fim" de
+# Abertura/Encerramento da Nota ficavam acinzentados, não no branco
+# "cheio" dos demais títulos da sidebar. Causa: o wrapper de rótulo do
+# Streamlit (stWidgetLabel) carrega um `opacity` próprio (texto secundário,
+# pensado pra tema claro) — `color:#fff` sozinho não resolve opacity.
+# modules/home.py::_inject_sidebar_css() ganha `opacity:1 !important`
+# junto do color, no <label> e no wrapper stWidgetLabel dentro de
+# stDateInput. Só os rótulos — os campos de data em si (já corrigidos no
+# 5.1.1) não foram tocados, como pedido.
+# PATCH -- ajuste de estilo, sem mudar comportamento.
+
+APP_VERSION = "6.0.1"
