@@ -518,4 +518,57 @@
 # só sintaxe/CSS revisados; aguardando confirmação do Julio em produção.
 # PATCH -- bugfix (correção de um fix que não pegou).
 
-APP_VERSION = "5.1.1"
+# 6.0.0 (2026-09-02): dois achados reais do Julio testando com um usuário
+# de teste, ambos de segurança/escopo de dado.
+#
+#   (1) RBAC de Gerência estava furado pro perfil "usuario": criou uma
+# conta usuário com Gerência SP delegada e ela enxergava TODAS as outras
+# Gerências (botão habilitado na sidebar pra cada uma) e também a Visão
+# Geral (SP+VP combinadas) — mais que o escopo dela. Causa raiz:
+# auth/permissions.py::can_see_gerencia() tinha uma regra explícita
+# "Usuário: pode ver tudo (somente leitura)", só "Assistente" era restrito
+# à própria Gerência. Corrigido: a regra agora é sobre TER ou NÃO uma
+# Gerência delegada (campo `gerencia` do cadastro), não sobre o nome do
+# perfil — com Gerência delegada (usuario OU assistente), só ela, nem
+# Visão Geral; sem Gerência delegada (gerencia=NULL, hoje só acontece com
+# Admin/contas globais), vê tudo. Nova can_ver_visao_geral() com a mesma
+# regra. E — mais importante — o bloqueio deixou de ser só o botão sumir
+# da sidebar: require_gerencia(sigla)/require_visao_geral() (novos guards
+# em auth/permissions.py) entram no TOPO de render_gerencia() (dashboard
+# genérico), render_gerencia_placeholder() (Gerências ainda sem dashboard)
+# e render_gerencia_geral() — um session_state velho/manipulado não
+# contorna mais o bloqueio, mesmo padrão de defesa já usado pra
+# Alertas/Visão de Campo (require_admin, 2026-09-01).
+#
+#   (2) Criou um usuário de teste e não foi pedido pra trocar a senha
+# provisória — toda conta nova (e todo reset de senha) nasce/volta pra
+# SENHA_PADRAO ("Sentinel@123", igual pra todo mundo) e não havia
+# NENHUMA obrigatoriedade de troca (limitação já documentada antes — sem
+# SMTP confiável pra reset autoatendido, a rede corporativa bloqueia porta
+# de saída SMTP). Novo campo usuarios.deve_trocar_senha (ver
+# database/schema_deve_trocar_senha.sql — rodar no Supabase) setado TRUE
+# em toda criação (_criar_usuario) e todo reset (_resetar_senha) de
+# usuário em modules/admin_panel.py. Nova tela
+# auth/trocar_senha_obrigatoria.py intercepta o app INTEIRO em
+# app.py::main() (antes de sidebar/rotas) enquanto esse campo for TRUE —
+# só sai trocando a senha (API admin do Supabase, mesmo mecanismo sem
+# SMTP já usado em auth/recuperar_senha.py e no reset do admin) ou fazendo
+# logout. Aba Usuários do Painel Admin ganhou coluna "Senha Provisória"
+# (🔑 Pendente / ✅ Trocada) pro admin ver quem ainda não trocou.
+#
+# Testado em runtime (AppTest): usuário com Gerência SP delegada bloqueado
+# ao tentar ver VP e a Visão Geral (mensagem clara, sem exceção), mas
+# acessa a própria SP normalmente; assistente com Gerência VP continua
+# bloqueado tentando ver SP (regra que já existia, confirmado que não
+# regrediu); admin acessa qualquer Gerência sem bloqueio; um perfil
+# usuario SEM Gerência delegada (gerencia=NULL) continua vendo tudo
+# (fallback intencional); sidebar do usuário SP só mostra o botão da
+# própria SP (sem as outras 5 Gerências nem Visão Geral). Troca de senha:
+# rejeita senha <8 caracteres e senhas que não conferem sem chamar a API;
+# troca bem-sucedida chama update_user_by_id com o auth_user_id certo e
+# desmarca deve_trocar_senha; conta sem auth_user_id salvo usa o fallback
+# por e-mail (mesmo mecanismo do reset de senha); botão cancelar faz
+# logout.
+# MAJOR -- duas correções de segurança/escopo de dado no mesmo lote.
+
+APP_VERSION = "6.0.0"

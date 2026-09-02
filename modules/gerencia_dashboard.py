@@ -22,6 +22,7 @@ from components.heatmap import render_heatmap, render_ranking, render_serie_temp
 from components.filtros import render_filtros_cascata, aplicar_filtros_atributos
 from components.visao_gerencial import render_visao_gerencial
 
+from auth.permissions import require_gerencia
 from core.score_engine import carregar_score_config, calcular_score_dataframe, render_painel_transparencia
 from core.glossarios import (
     normalizar_coluna_ramal, NOME_CURTO_GERENCIA, COR_GERENCIA, COORDENACOES_POR_GERENCIA,
@@ -156,6 +157,12 @@ def render_gerencia(sigla: str) -> None:
     Ponto de entrada da tela de uma Gerência. Chamado por app.py com a
     sigla certa (ex.: render_gerencia("SP"), render_gerencia("FN")).
     """
+    # Bloqueio real (2026-09-02) — antes só o botão sumia da sidebar pra
+    # quem não devia ver esta Gerência; um session_state antigo/manipulado
+    # ainda chegava aqui e via o dado de fora do escopo delegado (achado
+    # real do Julio testando com usuário de teste). Ver auth/permissions.py.
+    require_gerencia(sigla)
+
     nome_curto = NOME_CURTO_GERENCIA.get(sigla, sigla)
     cor_ini, cor_fim = COR_GERENCIA.get(sigla, ("#1e3a5f", "#2d5a8e"))
     coordenacoes = " · ".join(COORDENACOES_POR_GERENCIA.get(sigla, []))

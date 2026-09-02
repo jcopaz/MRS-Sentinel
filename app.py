@@ -40,8 +40,9 @@ injetar_css_global()
 
 
 # region ====================== SESSÃO 2: Imports (após set_page_config) ======================
-from auth.session    import is_logged_in, init_session
+from auth.session    import is_logged_in, init_session, get_usuario
 from auth.login      import render_login
+from auth.trocar_senha_obrigatoria import render_trocar_senha_obrigatoria
 from modules.home    import render_sidebar
 from modules.gerencia_dashboard import render_gerencia
 from modules.gerencia_geral import render_gerencia_geral
@@ -219,13 +220,20 @@ def _rotear():
 def main():
     """
     Ponto de entrada principal.
-    Ordem: CSS → init estado → auth check → sidebar (se logado) → roteamento
+    Ordem: CSS → init estado → auth check → troca de senha obrigatória
+    (se pendente) → sidebar (se logado) → roteamento
     """
     _inject_global_css()
     init_session()
 
     if not is_logged_in():
         render_login()
+    elif get_usuario().get("deve_trocar_senha"):
+        # Intercepta ANTES de sidebar/rotas — toda conta nova ou recém-
+        # resetada nasce com deve_trocar_senha=True (ver modules/admin_panel.py
+        # e database/schema_deve_trocar_senha.sql). Sem sidebar aqui de
+        # propósito: não dá pra "escapar" navegando pra outra tela.
+        render_trocar_senha_obrigatoria()
     else:
         render_sidebar()
         _rotear()

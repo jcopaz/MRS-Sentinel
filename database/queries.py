@@ -457,6 +457,23 @@ def atualizar_ultimo_login(user_id: str) -> None:
         pass
 
 
+def atualizar_deve_trocar_senha(user_id: str, valor: bool) -> None:
+    """
+    Marca (ou desmarca) que o usuário precisa trocar a senha no próximo
+    login — ver database/schema_deve_trocar_senha.sql e
+    auth/trocar_senha_obrigatoria.py. Falha silenciosa (mesmo padrão de
+    atualizar_ultimo_login) — nunca deve quebrar o fluxo de criação/reset
+    de senha por causa disso.
+    """
+    try:
+        supabase = get_supabase()
+        supabase.table("usuarios").update({
+            "deve_trocar_senha": valor
+        }).eq("id", user_id).execute()
+    except Exception:
+        pass
+
+
 def log_acesso(
     usuario_id: str | None,
     acao: str,

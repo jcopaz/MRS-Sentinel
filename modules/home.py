@@ -6,7 +6,7 @@ from pathlib import Path
 
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
-from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis, can_access_modo_tv, is_admin
+from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis, can_access_modo_tv, can_ver_visao_geral, is_admin
 from database.queries import log_acesso, contar_alertas_novos
 from core.glossarios import GERENCIAS_COM_DASHBOARD, GERENCIA_GERAL_DE
 from core.versao import APP_VERSION
@@ -255,9 +255,12 @@ def _render_nav_buttons():
         icone = "🏭" if sigla in GERENCIAS_COM_DASHBOARD else "🚧"
         nav_items.append((sigla, f"{ativo_ger}{icone}  Gerência {sigla}", pagina_ger))
 
-    # Visão Geral: todos podem ver
-    ativo_geral = "🔵 " if pagina_atual == "gerencia_geral" else ""
-    nav_items.append(("GERAL", f"{ativo_geral}🌐  Visão Geral", "gerencia_geral"))
+    # Visão Geral: combina SP+VP — só quem NÃO tem uma Gerência específica
+    # delegada (2026-09-02, corrige achado do Julio: usuário com Gerência
+    # SP via a Visão Geral, que mostra mais que o escopo dele).
+    if can_ver_visao_geral():
+        ativo_geral = "🔵 " if pagina_atual == "gerencia_geral" else ""
+        nav_items.append(("GERAL", f"{ativo_geral}🌐  Visão Geral", "gerencia_geral"))
 
     # Evolução da Malha: comparativo período a período (base viva de notas)
     ativo_evo = "🔵 " if pagina_atual == "evolucao" else ""

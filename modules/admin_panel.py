@@ -121,8 +121,8 @@ def _render_aba_usuarios(admin_logado: dict) -> None:
     else:
         # Formata para exibição
         df_display = df_users[[c for c in [
-            "nome", "matricula", "email", "email_gerado", "perfil", "gerencia", "ativo",
-            "ultimo_login", "criado_em",
+            "nome", "matricula", "email", "email_gerado", "perfil", "gerencia",
+            "deve_trocar_senha", "ativo", "ultimo_login", "criado_em",
         ] if c in df_users.columns]].copy()
 
         # E-mail sintético (login por matrícula) não é um e-mail real — não exibir
@@ -130,15 +130,23 @@ def _render_aba_usuarios(admin_logado: dict) -> None:
             df_display.loc[df_display["email_gerado"].fillna(False), "email"] = "— (login por matrícula)"
             df_display.drop(columns=["email_gerado"], inplace=True)
 
+        # Ainda na senha provisória: sinal claro pro admin de quem falta
+        # trocar (pedido implícito do Julio, 2026-09-02 — achado testando).
+        if "deve_trocar_senha" in df_display.columns:
+            df_display["deve_trocar_senha"] = df_display["deve_trocar_senha"].fillna(False).map(
+                {True: "🔑 Pendente", False: "✅ Trocada"}
+            )
+
         df_display.rename(columns={
-            "nome":         "Nome",
-            "matricula":    "Matrícula",
-            "email":        "E-mail",
-            "perfil":       "Perfil",
-            "gerencia":     "Gerência",
-            "ativo":        "Ativo",
-            "ultimo_login": "Último Login",
-            "criado_em":    "Criado em",
+            "nome":              "Nome",
+            "matricula":         "Matrícula",
+            "email":             "E-mail",
+            "perfil":            "Perfil",
+            "gerencia":          "Gerência",
+            "deve_trocar_senha": "Senha Provisória",
+            "ativo":             "Ativo",
+            "ultimo_login":      "Último Login",
+            "criado_em":         "Criado em",
         }, inplace=True)
 
         # Formata datas
@@ -335,7 +343,7 @@ def _buscar_usuarios() -> pd.DataFrame:
         supabase = get_supabase()
         resp = (
             supabase.table("usuarios")
-            .select("id, nome, matricula, email, email_gerado, auth_user_id, perfil, gerencia, acesso_tv, ativo, ultimo_login, criado_em")
+            .select("id, nome, matricula, email, email_gerado, auth_user_id, perfil, gerencia, acesso_tv, deve_trocar_senha, ativo, ultimo_login, criado_em")
             .order("criado_em", desc=True)
             .execute()
         )
@@ -392,6 +400,10 @@ def _criar_usuario(
             "acesso_tv":    acesso_tv,
             "ativo":        True,
             "criado_por":   criado_por,
+            # Toda conta nova nasce com a senha provisória (SENHA_PADRAO)
+            # -- força troca no primeiro login (achado real do Julio,
+            # 2026-09-02: criava usuário e não era pedido pra trocar).
+            "deve_trocar_senha": True,
         }
         supabase.table("usuarios").insert(dados).execute()
 
@@ -448,13 +460,18 @@ def _resetar_senha(
 
         admin.auth.admin.update_user_by_id(auth_user_id, {"password": nova_senha})
 
+        # Reset também deixa a conta na senha provisória -- força troca no
+        # próximo login, mesma regra da criação (ver _criar_usuario acima).
+        from database.queries import atualizar_deve_trocar_senha
+        atualizar_deve_trocar_senha(user_id, True)
+
         _registrar_log(
             acao="RESETAR_SENHA",
             detalhes={"user_id": user_id, "email": email},
             admin_id=admin_id,
         )
 
-        st.success(f"✅ Senha de **{email}** redefinida com sucesso!")
+        st.success(f"✅ Senha de **{email}** redefinida com sucesso! Vai ser pedido pra trocar no próximo login.")
 
     except Exception as e:
         st.error(f"❌ Erro ao resetar senha: {e}")

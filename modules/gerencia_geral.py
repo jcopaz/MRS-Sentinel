@@ -43,6 +43,8 @@ from core.indicadores import (
     render_semaforo,
 )
 
+from auth.permissions import require_visao_geral
+
 # Motor de score
 from core.score_engine import calcular_score_dataframe, carregar_score_config
 
@@ -203,6 +205,10 @@ def render_gerencia_geral():
     Ponto de entrada da Visão Geral multi-gerencial.
     Chamado pelo app.py quando o usuário navega para 'Geral'.
     """
+    # Bloqueio real (2026-09-02) — combina SP+VP, então quem tem uma
+    # Gerência específica delegada não pode ver (mesmo achado do Julio
+    # que motivou require_gerencia em gerencia_dashboard.py).
+    require_visao_geral()
 
     # ── Cabeçalho ──────────────────────────────────────────────────────────────
     st.markdown(

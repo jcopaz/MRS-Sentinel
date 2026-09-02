@@ -9,10 +9,16 @@
 
 import streamlit as st
 
+from auth.permissions import require_gerencia
 from core.glossarios import NOME_GERENCIA
 
 
 def render_gerencia_placeholder(sigla: str) -> None:
+    # Bloqueio real (2026-09-02) — mesma regra das telas com dashboard de
+    # verdade (ver modules/gerencia_dashboard.py). Esta tela não expõe dado
+    # nenhum, mas mantém o padrão: acesso é sempre pela Gerência delegada.
+    require_gerencia(sigla)
+
     nome = NOME_GERENCIA.get(sigla, f"Gerência {sigla}")
     st.markdown(f"### 🏭 {nome}")
     st.info(
