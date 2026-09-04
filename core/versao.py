@@ -599,4 +599,37 @@
 # preto normalmente.
 # PATCH -- ajuste de estilo, sem mudar comportamento (correção do 6.0.1).
 
-APP_VERSION = "6.0.2"
+# 6.1.0 (2026-09-02): Modo TV — 3ª e última correção do filtro (pendência
+# registrada desde 2026-09-01: "ainda não apareceu nada... Voce deverá
+# filtrar o centro de Trabalho apenas. Deixar a Opção para filtrar os
+# Trechos"). Histórico completo no cabeçalho de modules/modo_tv.py: 1ª
+# tentativa comparava contra a sigla da coordenação (nunca batia), 2ª
+# contra a lista de pátios da coordenação (corrigia a comparação, mas
+# ainda dependia de COORDENACOES_POR_GERENCIA/CENTROS_POR_GERENCIA
+# estarem preenchidos e alinhados — só SP/VP tinham, e mesmo assim o
+# Julio reportou "ainda não apareceu nada"). Abandona "Coordenação"
+# inteiramente: a tela de seleção agora pergunta Gerência + Centro de
+# Trabalho (multiselect com os valores REAIS já presentes nos dados,
+# mesma fonte de components/filtros.py) + Trecho opcional, e o filtro em
+# si é uma comparação DIRETA (.isin()) contra o valor bruto de
+# centro_trab — sem nenhum split/parsing de hierarquia, exatamente o
+# mesmo mecanismo já usado e comprovado no filtro "🏢 Centro de Trabalho"
+# de toda tela de Gerência. Funciona pra QUALQUER gerência com dado
+# carregado (LISTA_GERENCIAS inteira), não só SP/VP — não depende mais
+# de nenhum glossário de coordenação/pátio estar preenchido.
+# session_state: tv_patios/tv_centro_sigla saem, entram tv_centros
+# (lista de Centro de Trabalho) e tv_trechos (lista opcional de Trecho).
+# Testado em runtime (AppTest): tela de seleção lista os Centros de
+# Trabalho REAIS presentes nos dados (não mais nomes de coordenação);
+# fluxo real (selectbox de Gerência + multiselect de Centro + clique em
+# Iniciar, sem atalho por session_state) grava a escolha certa;
+# comparação direta contra centro_trab bruto (formato "V.SP.IJN") acha as
+# notas certas e exclui as de outro centro; Trecho filtra em cima do
+# Centro já escolhido; aviso de "sem dado" continua listando os Centros
+# reais disponíveis pra diagnóstico; botão sair continua limpando a
+# sessão do Modo TV.
+# MINOR -- corrige o fluxo de filtro que estava impedindo o recurso de
+# funcionar de fato; não muda schema/tela nova, é o mesmo recurso do
+# 4.2.0/4.2.1/5.0.0 finalmente funcionando como pedido.
+
+APP_VERSION = "6.1.0"

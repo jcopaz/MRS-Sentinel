@@ -10,8 +10,9 @@
 #   1. Logar normalmente no navegador (perfil admin, ou um usuário com
 #      "Acesso ao Modo TV" marcado no Painel Admin).
 #   2. Clicar em "📺 Modo TV" na barra lateral.
-#   3. Escolher a Gerência e a Coordenação (tela única, só na primeira
-#      vez — fica salva pro resto da sessão) e clicar em "▶️ Iniciar".
+#   3. Escolher a Gerência e o(s) Centro(s) de Trabalho — e, se quiser,
+#      um Trecho específico (tela única, só na primeira vez — fica salva
+#      pro resto da sessão) — e clicar em "▶️ Iniciar".
 #   4. Deixar o navegador em tela cheia (F11) e a sessão aberta —
 #      a partir daí a tela gira sozinha, sem precisar recarregar a página.
 #   5. "🚪 Sair do Modo TV" (canto superior) volta pro painel normal a
@@ -40,28 +41,31 @@
 # escondidos via CSS — a lógica deles continua rodando por baixo com os
 # valores padrão, só não aparece na tela.
 #
-# Coordenação selecionável só em SP e VP: são as únicas gerências com o
-# mapeamento sigla-de-centro completo em core/glossarios.py
-# (CENTROS_POR_GERENCIA) — as 4 gerências novas (FN/FS/RJ/LC) têm nome de
-# coordenação cadastrado mas ainda não têm a sigla de centro_trab
-# correspondente (mesma limitação já registrada no projeto). Generalizar
-# pras outras 4 é só preencher CENTROS_POR_GERENCIA quando o dado
-# existir.
-#
-# ⚠️ centro_trab NÃO é a sigla da coordenação (CIJN) — o formato real é
-# "V.SP.<PÁTIO>" (ex.: "V.SP.IPA"), onde o ÚLTIMO segmento é o PÁTIO, não
-# a coordenação. Bug real 2026-08-31: comparar contra "CIJN" nunca batia
-# porque "CIJN" nunca aparece sozinho no dado — o filtro certo é contra a
-# LISTA de pátios da coordenação (core/glossarios.py::PATIOS_POR_CENTRO,
-# ex. CIJN → [IJN, ILA, IAB]). Achado nesse mesmo diagnóstico: os dados
-# de SP carregados até agora só têm pátios de Piaçaguera (IPA) e
-# Paranapiacaba (IPG) + um "PJU" não catalogado — nenhum pátio de
-# Jundiaí (IJN/ILA/IAB) ainda. Não é mais bug de código: é upload
-# pendente pra essa coordenação especificamente.
+# ⚠️ HISTÓRICO DO FILTRO (pra não repetir os mesmos erros): a v1 filtrava
+# por "Coordenação" (ex. Jundiaí), tentando derivar isso de centro_trab.
+# Duas tentativas erradas antes desta versão:
+#   1ª) comparar o último segmento de centro_trab contra a SIGLA da
+#       coordenação (ex. "CIJN") — nunca batia, "CIJN" nunca aparece
+#       sozinho no dado (formato real é "V.SP.<algo>").
+#   2ª) trocar por comparar contra a LISTA DE PÁTIOS da coordenação
+#       (core/glossarios.py::PATIOS_POR_CENTRO) — corrigia a comparação,
+#       mas ainda dependia de COORDENACOES_POR_GERENCIA/CENTROS_POR_GERENCIA
+#       estarem 100% preenchidos e alinhados (só SP/VP tinham), e mesmo
+#       corrigido o Julio reportou "ainda não apareceu nada" numa
+#       coordenação com dado real.
+# SOLUÇÃO 2026-09-02 (pedido explícito do Julio: "Voce deverá filtrar o
+# centro de Trabalho apenas. Deixar a Opção para filtrar os Trechos"):
+# abandona a ideia de "Coordenação" inteiramente. Filtra DIRETO pelo valor
+# bruto de centro_trab (comparação simples .isin(), sem split/parsing de
+# hierarquia nenhum) — exatamente o mesmo mecanismo já usado e comprovado
+# em components/filtros.py (filtro "🏢 Centro de Trabalho" de toda tela de
+# Gerência). Trecho entra como filtro OPCIONAL adicional, mesma lógica.
+# Funciona pra QUALQUER gerência com dado carregado, sem depender de
+# nenhum glossário de coordenação/pátio estar preenchido.
 #
 # Sessão 1: Imports & configuração
 # Sessão 2: CSS do Modo TV (esconde sidebar + controles interativos)
-# Sessão 3: Tela de seleção (Gerência + Coordenação) + botão de sair
+# Sessão 3: Tela de seleção (Gerência + Centro de Trabalho + Trecho) + botão de sair
 # Sessão 4: Carregamento de dados
 # Sessão 5: Slides
 # Sessão 6: render_modo_tv() — orquestração + loop
@@ -80,10 +84,7 @@ from components.kpi_card import render_kpi_cards
 from components.unifilar import render_unifilar_dual
 from components.heatmap import render_ranking
 from core.score_engine import calcular_score_dataframe, carregar_score_config
-from core.glossarios import (
-    normalizar_coluna_ramal, CENTROS_POR_GERENCIA, COORDENACOES_POR_GERENCIA,
-    PATIOS_POR_CENTRO,
-)
+from core.glossarios import normalizar_coluna_ramal, LISTA_GERENCIAS
 from database.queries import get_notas_cached
 
 INTERVALO_SLIDE_SEGUNDOS = 25
@@ -91,22 +92,9 @@ INTERVALO_SLIDE_SEGUNDOS = 25
 # Chaves de session_state usadas por este módulo — centralizado aqui pra
 # _sair_do_modo_tv() saber exatamente o que limpar.
 _CHAVES_SESSAO_TV = [
-    "tv_gerencia", "tv_patios", "tv_centro_sigla", "tv_nome_local",
+    "tv_gerencia", "tv_centros", "tv_trechos", "tv_nome_local",
     "tv_slide_idx", "_css_modo_tv_injetado",
 ]
-
-# {gerencia: {"Nome bonito da coordenação": [lista de pátios, ex. "IPA"]}}
-# — encadeia COORDENACOES_POR_GERENCIA (nome) → CENTROS_POR_GERENCIA
-# (sigla, ex. "CIJN") → PATIOS_POR_CENTRO (pátios reais que aparecem no
-# último segmento de centro_trab). Só pras gerências com as 3 listas
-# preenchidas em glossarios.py.
-COORDENACOES_TV: dict[str, dict[str, list[str]]] = {
-    g: {
-        nome: PATIOS_POR_CENTRO.get(sigla, [])
-        for nome, sigla in zip(COORDENACOES_POR_GERENCIA.get(g, []), CENTROS_POR_GERENCIA[g])
-    }
-    for g in CENTROS_POR_GERENCIA
-}
 
 # endregion
 
@@ -185,54 +173,70 @@ def _botao_sair():
 
 def _tela_selecao(_loop: bool = True) -> bool:
     """
-    Tela de escolha de Gerência + Coordenação — aparece só na primeira
-    vez (sidebar normal, sem CSS de esconder). Depois de "▶️ Iniciar",
-    a escolha fica em st.session_state pro resto da sessão (não pergunta
-    de novo a cada rerun do loop).
+    Tela de escolha de Gerência + Centro de Trabalho (+ Trecho opcional) —
+    aparece só na primeira vez (sidebar normal, sem CSS de esconder).
+    Depois de "▶️ Iniciar", a escolha fica em st.session_state pro resto
+    da sessão (não pergunta de novo a cada rerun do loop). Ver histórico
+    do filtro no cabeçalho do módulo — Centro de Trabalho é comparação
+    DIRETA contra o dado bruto, sem depender de nenhum glossário de
+    coordenação/pátio.
 
     Retorna True se a escolha já está pronta (pode seguir pro loop),
     False se ainda está mostrando a tela de seleção (o caller deve parar
     por aqui nesse rerun).
     """
-    if st.session_state.get("tv_gerencia") and st.session_state.get("tv_patios"):
+    if st.session_state.get("tv_gerencia") and st.session_state.get("tv_centros"):
         return True
 
     st.markdown("## 📺 Modo TV — Configuração")
     st.caption(
-        "Escolha a Gerência e a Coordenação que vão ficar em loop na TV. "
-        "Só precisa fazer isso uma vez — fica salvo pro resto da sessão."
+        "Escolha o(s) Centro(s) de Trabalho que vão ficar em loop na TV — "
+        "e, se quiser, restrinja também por Trecho. Só precisa fazer isso "
+        "uma vez — fica salvo pro resto da sessão."
     )
 
-    gerencias_disp = sorted(COORDENACOES_TV.keys())
-    if not gerencias_disp:
-        st.error("🚫 Nenhuma Gerência com Coordenação cadastrada pro Modo TV ainda.")
-        return False
+    gerencia_sel = st.selectbox("Gerência", LISTA_GERENCIAS, key="tv_sel_gerencia")
 
-    gerencia_sel = st.selectbox("Gerência", gerencias_disp, key="tv_sel_gerencia")
-    coords = COORDENACOES_TV.get(gerencia_sel, {})
-    if not coords:
-        st.warning(f"⚠️ Gerência {gerencia_sel} ainda não tem Coordenação cadastrada.")
-        return False
+    with st.spinner("Carregando Centros de Trabalho disponíveis..."):
+        centros_disp = _valores_centro_trab_disponiveis(gerencia_sel)
 
-    coord_nome_sel = st.selectbox("Coordenação", sorted(coords.keys()), key="tv_sel_coord")
-
-    if st.button("▶️ Iniciar Modo TV", type="primary"):
-        # Sigla da coordenação (ex. "CIJN") -- só pra formar keys únicas
-        # dos gráficos (gerencia=f"TV_{chave_local}"), não usada no
-        # filtro (que compara contra tv_patios, a lista de pátios reais).
-        sigla_coord = next(
-            sigla for nome, sigla in zip(
-                COORDENACOES_POR_GERENCIA.get(gerencia_sel, []),
-                CENTROS_POR_GERENCIA[gerencia_sel],
-            ) if nome == coord_nome_sel
+    if not centros_disp:
+        st.warning(
+            f"⚠️ Nenhum dado carregado ainda pra Gerência {gerencia_sel} — "
+            "faça upload em Upload de Dados primeiro."
         )
+        return False
+
+    centros_sel = st.multiselect(
+        "🏢 Centro de Trabalho", options=centros_disp, key="tv_sel_centros",
+        help="Selecione um ou mais — o Modo TV mostra só as notas desses "
+             "Centros de Trabalho (mesma lista usada no filtro das telas de Gerência).",
+    )
+
+    trechos_sel: list[str] = []
+    if centros_sel:
+        trechos_disp = _opcoes_trecho_tv(gerencia_sel, centros_sel)
+        if trechos_disp:
+            trechos_sel = st.multiselect(
+                "🛤️ Trecho (opcional)", options=trechos_disp, key="tv_sel_trechos",
+                help="Deixe vazio pra mostrar todos os trechos dos Centros escolhidos.",
+            )
+
+    if st.button("▶️ Iniciar Modo TV", type="primary", disabled=not centros_sel, key="tv_btn_iniciar"):
+        nome_local = centros_sel[0] if len(centros_sel) == 1 else f"{len(centros_sel)} Centros de Trabalho"
+        if trechos_sel:
+            nome_local += f" · {len(trechos_sel)} trecho(s)"
+
         st.session_state["tv_gerencia"] = gerencia_sel
-        st.session_state["tv_patios"] = coords[coord_nome_sel]
-        st.session_state["tv_centro_sigla"] = sigla_coord
-        st.session_state["tv_nome_local"] = coord_nome_sel
+        st.session_state["tv_centros"] = centros_sel
+        st.session_state["tv_trechos"] = trechos_sel
+        st.session_state["tv_nome_local"] = nome_local
         if not _loop:
             return True
         st.rerun()
+
+    if not centros_sel:
+        st.caption("Selecione ao menos um Centro de Trabalho pra habilitar o botão.")
 
     return False
 
@@ -242,13 +246,16 @@ def _tela_selecao(_loop: bool = True) -> bool:
 # region ====================== SESSÃO 4: Carregamento de dados =================
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _carregar_dados_tv(gerencia: str, patios: tuple[str, ...]) -> pd.DataFrame:
-    """VP+EE da Gerência escolhida, filtrado nos pátios da Coordenação
-    escolhida. Mesma lógica de
-    modules/gerencia_dashboard.py::_carregar_dados, sem os widgets.
+def _carregar_dados_tv(
+    gerencia: str, centros: tuple[str, ...], trechos: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """VP+EE da Gerência escolhida, filtrado nos Centros de Trabalho (e,
+    opcionalmente, Trechos) escolhidos. Mesma lógica de
+    modules/gerencia_dashboard.py::_carregar_dados/_aplicar_filtros — mas
+    aqui os valores já são raiz, direto, sem widget.
 
-    `patios` é tuple (não list) porque st.cache_data precisa de argumentos
-    hasheáveis pra formar a chave do cache.
+    `centros`/`trechos` são tuple (não list) porque st.cache_data precisa
+    de argumentos hasheáveis pra formar a chave do cache.
     """
     frames = []
     for disc in ("VP", "EE"):
@@ -266,29 +273,29 @@ def _carregar_dados_tv(gerencia: str, patios: tuple[str, ...]) -> pd.DataFrame:
     if "lead_time_dias" in df.columns:
         df["lead_time_dias"] = pd.to_numeric(df["lead_time_dias"], errors="coerce")
 
-    if "centro_trab" in df.columns and patios:
-        # centro_trab chega bruto do parser, no formato hierárquico
-        # completo "V.SP.<PÁTIO>" (ex.: "V.SP.IPA") — o ÚLTIMO segmento é
-        # o PÁTIO, NÃO a sigla da coordenação (bug real 2026-08-31: uma
-        # coordenação como "CIJN" nunca aparece sozinha no dado — precisa
-        # comparar contra a LISTA de pátios dela, PATIOS_POR_CENTRO).
-        # .split(".") num valor já sem prefixo devolve o próprio valor,
-        # então cobre os dois formatos.
-        sigla = (
-            df["centro_trab"].astype(str).str.strip().str.upper()
-            .str.split(".").str[-1]
-        )
-        patios_upper = {p.upper() for p in patios}
-        df = df[sigla.isin(patios_upper)].copy()
+    # Filtro por Centro de Trabalho — comparação DIRETA contra o valor
+    # bruto de centro_trab (.isin(), sem split/parsing de hierarquia
+    # nenhum). Mesmo mecanismo já usado e comprovado em
+    # components/filtros.py/modules/gerencia_dashboard.py — ver histórico
+    # de tentativas erradas no cabeçalho do módulo.
+    if "centro_trab" in df.columns and centros:
+        df = df[df["centro_trab"].isin(centros)].copy()
+
+    # Trecho é filtro OPCIONAL adicional (pedido do Julio: "Deixar a
+    # Opção para filtrar os Trechos") — tupla vazia = sem filtro, mostra
+    # todos os trechos dos Centros escolhidos.
+    if "trecho" in df.columns and trechos:
+        df = df[df["trecho"].isin(trechos)].copy()
 
     return df
 
 
 def _valores_centro_trab_disponiveis(gerencia: str) -> list[str]:
     """
-    Diagnóstico pro aviso de "sem dado" — lista os centro_trab realmente
-    presentes nos dados da gerência escolhida, pra identificar rápido se
-    a coordenação escolhida simplesmente não tem upload ainda.
+    Centro de Trabalho (valor bruto) realmente presentes nos dados da
+    Gerência — usada tanto pra popular o multiselect da tela de seleção
+    quanto pro diagnóstico do aviso de "sem dado" (mesma fonte, sem
+    duplicar lógica).
     """
     frames = []
     for disc in ("VP", "EE"):
@@ -299,6 +306,25 @@ def _valores_centro_trab_disponiveis(gerencia: str) -> list[str]:
         return []
     todos = pd.concat(frames, ignore_index=True)
     return sorted(todos["centro_trab"].dropna().astype(str).str.strip().unique().tolist())
+
+
+def _opcoes_trecho_tv(gerencia: str, centros_sel: list[str]) -> list[str]:
+    """
+    Trechos reais disponíveis nos Centros de Trabalho já escolhidos —
+    mesma lógica de components/filtros.py::_opcoes_trechos, sem os
+    widgets/cascata completa (aqui só depende de Centro, não de Ramal).
+    """
+    frames = []
+    for disc in ("VP", "EE"):
+        df_d = get_notas_cached(gerencia, disc)
+        if not df_d.empty and "trecho" in df_d.columns and "centro_trab" in df_d.columns:
+            frames.append(df_d[["centro_trab", "trecho"]])
+    if not frames:
+        return []
+    todos = pd.concat(frames, ignore_index=True)
+    if centros_sel:
+        todos = todos[todos["centro_trab"].isin(centros_sel)]
+    return sorted(todos["trecho"].dropna().astype(str).str.strip().unique().tolist())
 
 # endregion
 
@@ -330,10 +356,10 @@ _SLIDES = [_slide_kpis, _slide_unifilar, _slide_ranking]
 def render_modo_tv(_loop: bool = True):
     """
     Ponto de entrada do Modo TV (rota 'modo_tv'). Primeiro rerun (ou
-    quando ainda não escolheu Gerência/Coordenação nesta sessão): tela de
-    seleção (Sessão 3). Depois disso, gira sozinho entre os slides
-    definidos em _SLIDES, sem recarregar a página (ver docstring do
-    módulo — preserva o login). Admin sempre acessa; outros perfis só
+    quando ainda não escolheu Gerência/Centro de Trabalho nesta sessão):
+    tela de seleção (Sessão 3). Depois disso, gira sozinho entre os
+    slides definidos em _SLIDES, sem recarregar a página (ver docstring
+    do módulo — preserva o login). Admin sempre acessa; outros perfis só
     com 'acesso_tv' marcado (ver auth/permissions.py::can_access_modo_tv).
 
     _loop=False (só pra teste automatizado): pula o time.sleep()+st.rerun()
@@ -349,23 +375,23 @@ def render_modo_tv(_loop: bool = True):
         return
 
     gerencia = st.session_state["tv_gerencia"]
-    patios = tuple(st.session_state["tv_patios"])
+    centros = tuple(st.session_state["tv_centros"])
+    trechos = tuple(st.session_state.get("tv_trechos") or [])
     nome_local = st.session_state["tv_nome_local"]
-    chave_local = st.session_state.get("tv_centro_sigla", nome_local)
+    # Chave só pra dar keys únicas aos gráficos (gerencia=f"TV_{chave_local}")
+    # — sanitizada porque vira parte de key= de widget (sem espaço/pontuação).
+    chave_local = "_".join(c.strip().replace(" ", "").replace(".", "") for c in centros)[:60] or "TV"
 
     _injetar_css_tv()
     _botao_sair()
 
-    df_raw = _carregar_dados_tv(gerencia, patios)
+    df_raw = _carregar_dados_tv(gerencia, centros, trechos)
     if df_raw.empty:
-        st.warning(
-            f"⚠️ Nenhum dado encontrado para {nome_local} "
-            f"(pátios {', '.join(patios) or '—'}, Gerência {gerencia})."
-        )
+        st.warning(f"⚠️ Nenhum dado encontrado para {nome_local} (Gerência {gerencia}).")
         # Diagnóstico: mostra os centro_trab que REALMENTE existem nos
-        # dados da gerência — se nenhum terminar em algum dos pátios
-        # esperados, é sinal de que essa coordenação ainda não tem
-        # upload (não é bug de código).
+        # dados da gerência — se o(s) Centro(s) escolhido(s) não estiver
+        # na lista, é sinal de que ainda não tem upload pra esse Centro
+        # (não é bug de código).
         disponiveis = _valores_centro_trab_disponiveis(gerencia)
         if disponiveis:
             st.caption(
@@ -374,8 +400,8 @@ def render_modo_tv(_loop: bool = True):
             )
         else:
             st.caption(
-                f"Nenhum dado carregado pra Gerência {gerencia} ainda "
-                "(nem de outros pátios) — pode ser upload pendente."
+                f"Nenhum dado carregado pra Gerência {gerencia} ainda — "
+                "pode ser upload pendente."
             )
         return
 
