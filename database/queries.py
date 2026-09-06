@@ -652,6 +652,39 @@ def get_config(gerencia: str | None, chave: str, default):
         return default
 
 
+def get_configs_gerencia(gerencia: str | None, chaves: list[str]) -> dict:
+    """
+    Busca VÁRIAS chaves de `configuracoes` de uma vez só — 1 round-trip ao
+    banco, em vez de 1 chamada por chave via get_config(). Achado real
+    (2026-09-06, Julio reportou o app "pesado"/"não fluida"): carregar_score_
+    config() fazia 12 chamadas SEQUENCIAIS de get_config(), uma por peso do
+    Score — em rede corporativa com proxy (latência por requisição já
+    documentada neste projeto), isso sozinho podia custar segundos a cada
+    Gerência aberta (multiplicado por SP/VP/GERAL/Modo TV, cada um com seu
+    próprio cache de 5min). Esta função resolve isso pra qualquer chamador
+    que precise de várias chaves da MESMA gerência de uma vez.
+
+    Args:
+        gerencia: sigla da Gerência, ou None pra config global
+        chaves:   lista de chaves a buscar
+
+    Returns:
+        dict {chave: valor} só com as que existirem no banco — quem chama
+        aplica o próprio default pra cada chave ausente (mesmo padrão de
+        get_config, só que em lote). Nunca lança exceção — {} em erro.
+    """
+    if not chaves:
+        return {}
+    try:
+        supabase = get_supabase()
+        q = supabase.table("configuracoes").select("chave, valor").in_("chave", chaves)
+        q = q.eq("gerencia", gerencia) if gerencia else q.is_("gerencia", "null")
+        resp = q.execute()
+        return {r["chave"]: r["valor"] for r in (resp.data or [])}
+    except Exception:
+        return {}
+
+
 def salvar_config(gerencia: str | None, chave: str, valor, admin_id: str | None = None) -> None:
     """Persiste (upsert) um valor na tabela `configuracoes`. Ver get_config()."""
     try:

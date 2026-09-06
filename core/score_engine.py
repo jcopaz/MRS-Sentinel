@@ -316,6 +316,14 @@ CHAVE_MULT_TIPO          = "score_mult_tipo"
 CHAVE_USAR_TIPO_INSPECAO = "score_usar_tipo_inspecao"
 CHAVE_MULT_TIPO_INSPECAO = "score_mult_tipo_inspecao"
 
+_CHAVES_SCORE = [
+    CHAVE_PESO_PRIORIDADE, CHAVE_USAR_IDADE, CHAVE_ALPHA,
+    CHAVE_USAR_REINCIDENCIA, CHAVE_BETA_REINCIDENCIA,
+    CHAVE_USAR_FAMILIA, CHAVE_MULT_FAMILIA_VP, CHAVE_MULT_FAMILIA_EE,
+    CHAVE_USAR_TIPO, CHAVE_MULT_TIPO,
+    CHAVE_USAR_TIPO_INSPECAO, CHAVE_MULT_TIPO_INSPECAO,
+]
+
 
 def _bool_config(valor, default: bool) -> bool:
     """Normaliza valor vindo do banco (bool nativo, ou 'true'/'false'/1/0 se
@@ -355,23 +363,32 @@ def carregar_score_config(gerencia: str) -> ScoreConfig:
 
     Defensivo: qualquer chave ausente (nunca salva) ou corrompida cai no
     padrão de código — nunca quebra a tela por falta de linha no banco.
+
+    PERFORMANCE (achado real, 2026-09-06 — Julio reportou o app "pesado"):
+    até aqui eram 12 chamadas SEQUENCIAIS de get_config() (uma por peso) —
+    12 round-trips ao banco toda vez que o cache expirava, e a rede
+    corporativa da MRS tem proxy no meio (latência por requisição já
+    documentada neste projeto). Trocado por UMA chamada em lote
+    (get_configs_gerencia), que busca as 12 chaves de uma vez só.
     """
-    from database.queries import get_config
+    from database.queries import get_configs_gerencia
+
+    valores = get_configs_gerencia(gerencia, _CHAVES_SCORE)  # 1 round-trip, não 12
 
     cfg = ScoreConfig()
     try:
-        cfg.peso_prioridade = dict(get_config(gerencia, CHAVE_PESO_PRIORIDADE, PESO_PRIORIDADE_PADRAO))
-        cfg.usar_idade = _bool_config(get_config(gerencia, CHAVE_USAR_IDADE, True), True)
-        cfg.alpha = float(get_config(gerencia, CHAVE_ALPHA, ALPHA_PADRAO))
-        cfg.usar_reincidencia = _bool_config(get_config(gerencia, CHAVE_USAR_REINCIDENCIA, True), True)
-        cfg.beta_reincidencia = float(get_config(gerencia, CHAVE_BETA_REINCIDENCIA, BETA_REINCIDENCIA_PADRAO))
-        cfg.usar_familia = _bool_config(get_config(gerencia, CHAVE_USAR_FAMILIA, True), True)
-        cfg.mult_familia_vp = dict(get_config(gerencia, CHAVE_MULT_FAMILIA_VP, MULT_FAMILIA_VP_PADRAO))
-        cfg.mult_familia_ee = dict(get_config(gerencia, CHAVE_MULT_FAMILIA_EE, MULT_FAMILIA_EE_PADRAO))
-        cfg.usar_tipo = _bool_config(get_config(gerencia, CHAVE_USAR_TIPO, True), True)
-        cfg.mult_tipo = dict(get_config(gerencia, CHAVE_MULT_TIPO, MULT_TIPO_PADRAO))
-        cfg.usar_tipo_inspecao = _bool_config(get_config(gerencia, CHAVE_USAR_TIPO_INSPECAO, False), False)
-        cfg.mult_tipo_inspecao = dict(get_config(gerencia, CHAVE_MULT_TIPO_INSPECAO, MULT_TIPO_INSPECAO_PADRAO))
+        cfg.peso_prioridade = dict(valores.get(CHAVE_PESO_PRIORIDADE, PESO_PRIORIDADE_PADRAO))
+        cfg.usar_idade = _bool_config(valores.get(CHAVE_USAR_IDADE, True), True)
+        cfg.alpha = float(valores.get(CHAVE_ALPHA, ALPHA_PADRAO))
+        cfg.usar_reincidencia = _bool_config(valores.get(CHAVE_USAR_REINCIDENCIA, True), True)
+        cfg.beta_reincidencia = float(valores.get(CHAVE_BETA_REINCIDENCIA, BETA_REINCIDENCIA_PADRAO))
+        cfg.usar_familia = _bool_config(valores.get(CHAVE_USAR_FAMILIA, True), True)
+        cfg.mult_familia_vp = dict(valores.get(CHAVE_MULT_FAMILIA_VP, MULT_FAMILIA_VP_PADRAO))
+        cfg.mult_familia_ee = dict(valores.get(CHAVE_MULT_FAMILIA_EE, MULT_FAMILIA_EE_PADRAO))
+        cfg.usar_tipo = _bool_config(valores.get(CHAVE_USAR_TIPO, True), True)
+        cfg.mult_tipo = dict(valores.get(CHAVE_MULT_TIPO, MULT_TIPO_PADRAO))
+        cfg.usar_tipo_inspecao = _bool_config(valores.get(CHAVE_USAR_TIPO_INSPECAO, False), False)
+        cfg.mult_tipo_inspecao = dict(valores.get(CHAVE_MULT_TIPO_INSPECAO, MULT_TIPO_INSPECAO_PADRAO))
     except Exception:
         return ScoreConfig()  # qualquer erro de leitura/formato -> padrão de código, nunca quebra a tela
 

@@ -692,4 +692,35 @@
 # (fast-follow, se o Julio confirmar que quer lá também).
 # MAJOR -- tela/fluxo novo (upload de Tratamento) + tabela nova no schema.
 
-APP_VERSION = "7.0.0"
+# 7.0.1 (2026-09-06): performance — Julio reportou o app "pesado"/"não
+# fluida", lento desde a tela de login. Achado real:
+# core/score_engine.py::carregar_score_config() fazia **12 chamadas
+# SEQUENCIAIS** de get_config() (uma por peso do Score) toda vez que o
+# cache de 5min expirava — em cada Gerência aberta (SP/VP/GERAL/Modo TV,
+# cada um com seu próprio cache). Na rede corporativa da MRS, que tem
+# proxy no meio (latência por requisição já documentada neste projeto),
+# 12 round-trips sequenciais por Gerência é um custo real, não teórico —
+# some ao tempo de _carregar_dados() (2 chamadas) + get_tratamento_cached
+# (1, novo no 7.0.0) + sidebar (2), então "entrar e ver a primeira
+# Gerência" chegava a ~17 round-trips ao banco antes de renderizar algo.
+#
+# Corrigido: nova database/queries.py::get_configs_gerencia(gerencia,
+# chaves) busca VÁRIAS chaves de `configuracoes` numa ÚNICA query
+# (`.in_("chave", [...])`), em vez de uma por chave. carregar_score_
+# config() passa a fazer 1 round-trip em vez de 12 — reduz o total de
+# ~17 pra ~6 round-trips numa primeira abertura de Gerência com cache
+# frio. Comportamento e valores idênticos (mesmo fallback por chave
+# ausente, mesmo cache de 5min) — só menos chamadas de rede.
+#
+# Testado: contagem de chamadas confirmada via fake (0 chamadas a
+# get_config, exatamente 1 a get_configs_gerencia, onde antes eram 12);
+# suíte de testes do painel de Score (isolamento por Gerência, seletor,
+# Salvar, Resetar) revalidada sem regressão.
+#
+# Não descarta outras causas fora do meu alcance de visão (cold-start do
+# Streamlit Community Cloud após inatividade, tier de recursos do
+# container) — se continuar lento após o deploy desta versão, vale
+# checar o painel "Manage app" do Streamlit Cloud.
+# PATCH -- otimização, sem mudar comportamento/valores.
+
+APP_VERSION = "7.0.1"
