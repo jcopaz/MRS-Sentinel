@@ -723,4 +723,16 @@
 # checar o painel "Manage app" do Streamlit Cloud.
 # PATCH -- otimização, sem mudar comportamento/valores.
 
-APP_VERSION = "7.0.1"
+# 8.0.0 (2026-09-06): segurança — achado de revisão automática em
+# auth/recuperar_senha.py::solicitar_reset_senha(): a senha temporária
+# gerada e enviada por e-mail em texto puro não forçava troca no próximo
+# login (diferente do reset manual do admin e da criação de usuário, que
+# já forçavam via `deve_trocar_senha` desde o 6.0.0). Corrigido: chama
+# atualizar_deve_trocar_senha(usuario['id'], True) logo após trocar a
+# senha no Supabase Auth — reduz a janela de exposição da senha que
+# acabou de circular por e-mail. Mesmo padrão já usado em
+# modules/admin_panel.py::_resetar_senha() e _criar_usuario().
+# MAJOR -- correção de segurança (regra do próprio changelog: correção
+# de segurança conta como MAJOR mesmo sem tela nova/mudar fluxo visível).
+
+APP_VERSION = "8.0.0"

@@ -30,6 +30,7 @@ from database.queries import (
     get_usuario_by_email,
     get_usuario_by_matricula,
     buscar_auth_user_id_por_email,
+    atualizar_deve_trocar_senha,
     log_acesso,
 )
 
@@ -117,6 +118,13 @@ def solicitar_reset_senha(identificador: str) -> str:
         admin.auth.admin.update_user_by_id(auth_user_id, {"password": senha_temp})
     except Exception:
         return _MSG_GENERICA
+
+    # Mesma regra do reset manual do admin (modules/admin_panel.py) e da
+    # criação de usuário: conta que fica com senha provisória/temporária
+    # tem que trocar no próximo login — reduz a janela de exposição da
+    # senha que acabou de ser mandada por e-mail em texto puro (achado de
+    # revisão de segurança, 2026-09-06).
+    atualizar_deve_trocar_senha(usuario["id"], True)
 
     if not _enviar_email_senha(usuario["email"], usuario.get("nome", ""), senha_temp):
         return _MSG_FALHA_ENVIO
