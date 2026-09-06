@@ -119,6 +119,23 @@ COLUNAS_FORMATO_D: dict[str, str] = {
     # "Km Fim"    + "Maker_Dist_End_1"    → km_fim
 }
 
+# Tratamento de Notas — planilha "Tratamento de Notas GG" (2026-09-05)
+# Mesmo export do Formato D, só que com a coluna nova "Status diag ok"
+# (Diagnosticada/Diagnosticar) e sem data de encerramento (só lista notas
+# ainda em aberto sendo trabalhadas pelo Técnico Fiscal). Não precisa de
+# score/família/lead_time — é só uma fonte de status, cruzada com `notas`
+# por numero_nota (ver processar_planilha_tratamento() e
+# database/queries.py::calcular_diagnosticada).
+COLUNAS_TRATAMENTO: dict[str, str] = {
+    "Número_da_nota":                "numero_nota",
+    "Nº_ordem":                      "ordem",
+    "Gerencia":                      "gerencia_origem",
+    "Data_da_nota":                  "data_nota",
+    "Centro_de_trabalho_responsável": "centro_trab",
+    "Local_de_instalação_TPLNR":     "local_instalacao",
+    "Status diag ok":                "status_diag",
+}
+
 # endregion
 
 
@@ -604,6 +621,92 @@ def processar_planilha(
         df = df[df["numero_nota"].notna()].reset_index(drop=True)
 
     return df, formato, disciplina
+
+
+def processar_planilha_tratamento(
+    arquivo_bytes, nome_arquivo: str, gerencia: str,
+) -> pd.DataFrame:
+    """
+    Pipeline enxuto pra planilha "Tratamento de Notas GG" — mesmo export do
+    Formato D, mas é só uma fonte de STATUS (Diagnosticada/Diagnosticar),
+    não notas operacionais: sem score, família, lead_time, etc. (ver
+    COLUNAS_TRATAMENTO). Gerência detectada linha a linha, mesmo mecanismo
+    de processar_planilha() (permite arquivo GG com todas as gerências
+    juntas — confirmado com a planilha real, 100% de detecção automática).
+
+    Args:
+        arquivo_bytes: BytesIO do arquivo enviado
+        nome_arquivo:  nome original
+        gerencia:      fallback manual, só usado se a detecção por linha falhar
+
+    Returns:
+        DataFrame com numero_nota, status_diag, gerencia, ordem, data_nota,
+        centro_trab, ramal, trecho, origem, gerencia_auto
+    """
+    df_raw = carregar_planilha(arquivo_bytes, nome_arquivo)
+
+    colunas_rename = {k: v for k, v in COLUNAS_TRATAMENTO.items() if k in df_raw.columns}
+    df = df_raw.rename(columns=colunas_rename).copy()
+    df = df.dropna(how="all")
+
+    df = _converter_colunas_data(df, ["data_nota"])
+    df = _aplicar_tplnr_dataframe(df)
+    df = df.reset_index(drop=True)
+    df = normalizar_coluna_ramal(df, "ramal")
+
+    # Gerência por linha — mesmo mecanismo de processar_planilha() (Passo 14)
+    centro_col = df["centro_trab"] if "centro_trab" in df.columns else pd.Series([None] * len(df), index=df.index)
+    origem_col = df["gerencia_origem"] if "gerencia_origem" in df.columns else pd.Series([None] * len(df), index=df.index)
+    detectadas = [detectar_gerencia_nota(c, g) for c, g in zip(centro_col, origem_col)]
+    df["gerencia_auto"] = [d is not None for d in detectadas]
+    df["gerencia"]      = [d if d else gerencia for d in detectadas]
+
+    # numero_nota numérico + filtro linhas inválidas (mesmo padrão do Passo 15)
+    if "numero_nota" in df.columns:
+        df["numero_nota"] = pd.to_numeric(df["numero_nota"], errors="coerce")
+        df = df[df["numero_nota"].notna()].reset_index(drop=True)
+
+    # status_diag: mantém o valor bruto da planilha ("Diagnosticada"/
+    # "Diagnosticar") — a interpretação (Sim/Não) fica na hora de cruzar
+    # com `notas`, não aqui (ver database/queries.py::calcular_diagnosticada).
+    if "status_diag" not in df.columns:
+        df["status_diag"] = None
+
+    return df
+
+
+def df_para_registros_tratamento_supabase(df: pd.DataFrame, upload_id: str) -> list[dict]:
+    """Converte o DataFrame de Tratamento pra lista de dicts do Supabase."""
+    colunas = [
+        "numero_nota", "ordem", "status_diag", "data_nota",
+        "centro_trab", "ramal", "trecho", "origem", "gerencia",
+    ]
+    registros = []
+    for _, row in df.iterrows():
+        rec = {"upload_id": upload_id}
+        for col in colunas:
+            val = row.get(col)
+            try:
+                if val is None or pd.isnull(val):
+                    rec[col] = None
+                    continue
+            except (TypeError, ValueError):
+                pass
+            if isinstance(val, float):
+                if np.isnan(val) or np.isinf(val):
+                    rec[col] = None
+                elif val == int(val):
+                    rec[col] = int(val)
+                else:
+                    rec[col] = val
+            elif isinstance(val, (pd.Timestamp, datetime)):
+                rec[col] = val.date().isoformat()
+            elif hasattr(val, "item"):
+                rec[col] = val.item()
+            else:
+                rec[col] = val
+        registros.append(rec)
+    return registros
 
 
 def df_para_registros_supabase(df: pd.DataFrame, upload_id: str) -> list[dict]:

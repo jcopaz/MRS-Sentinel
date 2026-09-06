@@ -231,6 +231,63 @@ def get_notas_cached(gerencia: str, disciplina: str | None = None) -> pd.DataFra
     return get_notas_gerencia(gerencia, disciplina)
 
 
+def get_tratamento_gerencia(gerencia: str) -> pd.DataFrame:
+    """
+    Busca a base de Tratamento de Notas ativa de uma Gerência (tabela
+    notas_tratamento — ver database/schema_notas_tratamento.sql). Mesma
+    lógica anti-duplicação de get_notas_gerencia: só lê o(s) upload(s)
+    'ativo' (disciplina='TRATAMENTO' em uploads_historico), com paginação.
+
+    Args:
+        gerencia: 'SP', 'VP', 'FN', 'FS', 'RJ' ou 'LC'
+
+    Returns:
+        pd.DataFrame com numero_nota, status_diag, ordem, data_nota,
+        centro_trab, ramal, trecho, origem — ou vazio se não houver
+        upload de Tratamento pra essa Gerência ainda.
+    """
+    try:
+        supabase = get_supabase()
+        upload_ids = _upload_ids_ativos(gerencia, "TRATAMENTO")
+        if not upload_ids:
+            return pd.DataFrame()
+
+        PAGE_SIZE = 1000
+        registros: list[dict] = []
+        offset = 0
+        while True:
+            resp = (
+                supabase.table("notas_tratamento")
+                .select("*")
+                .in_("upload_id", upload_ids)
+                .range(offset, offset + PAGE_SIZE - 1)
+                .execute()
+            )
+            pagina = resp.data or []
+            registros.extend(pagina)
+            if len(pagina) < PAGE_SIZE:
+                break
+            offset += PAGE_SIZE
+
+        if not registros:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(registros)
+        if "data_nota" in df.columns:
+            df["data_nota"] = pd.to_datetime(df["data_nota"], errors="coerce")
+        return df
+
+    except Exception as e:
+        st.error(f"❌ Erro ao buscar Tratamento de Notas ({gerencia}): {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)  # Cache de 5 minutos — mesmo padrão de get_notas_cached
+def get_tratamento_cached(gerencia: str) -> pd.DataFrame:
+    """Versão cacheada de get_tratamento_gerencia para uso nas telas de visualização."""
+    return get_tratamento_gerencia(gerencia)
+
+
 def get_kpis_gerencia(gerencia: str, disciplina: str | None = None) -> dict:
     """
     Retorna KPIs aggregados diretamente do banco (query leve).

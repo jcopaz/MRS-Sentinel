@@ -100,16 +100,20 @@ def _render_selecao() -> tuple[str, str]:
     with col2:
         disciplina = st.selectbox(
             "📋 Disciplina",
-                ["VP", "EE", "RASF", "RASF_BASE"],
+                ["VP", "EE", "RASF", "RASF_BASE", "TRATAMENTO"],
                 format_func=lambda x: {
-                    "VP":        "🛤️ Via Permanente (VP)",
-                    "EE":        "⚡ Eletroeletrônica (EE)",
-                    "RASF":      "🔌 RASF — Análise de Falha EE",
-                    "RASF_BASE": "🗓️ RASF — Base Congelada 2025 (YoY)",
+                    "VP":          "🛤️ Via Permanente (VP)",
+                    "EE":          "⚡ Eletroeletrônica (EE)",
+                    "RASF":        "🔌 RASF — Análise de Falha EE",
+                    "RASF_BASE":   "🗓️ RASF — Base Congelada 2025 (YoY)",
+                    "TRATAMENTO":  "🔍 Tratamento de Notas (Diagnóstico VP)",
                 }.get(x, x),
                 help="VP/EE = planilha SAP de notas. RASF = export da Reunião de "
                      "Análise Sistêmica de Falha (base viva). RASF — Base 2025 = "
-                     "congelado do ano anterior (habilita o comparativo YoY na aba EE)."
+                     "congelado do ano anterior (habilita o comparativo YoY na aba EE). "
+                     "Tratamento de Notas = planilha do Técnico Fiscal com o status de "
+                     "diagnóstico (Diagnosticada/Diagnosticar) das notas VP em aberto — "
+                     "alimenta o filtro 'Diagnosticada' nas telas de Gerência."
             )
 
     return gerencia, disciplina
@@ -130,6 +134,11 @@ def _render_upload_area(gerencia: str, disciplina: str):
     # Base congelada 2025 tem pipeline próprio (tabela rasf_baseline).
     if disciplina == "RASF_BASE":
         _render_upload_baseline(gerencia)
+        return
+
+    # Tratamento de Notas tem pipeline próprio (tabela notas_tratamento).
+    if disciplina == "TRATAMENTO":
+        _render_upload_tratamento(gerencia)
         return
 
     st.markdown("---")
@@ -940,6 +949,235 @@ def _gravar_baseline_gerencia(df, nome_arquivo: str, gerencia: str, tamanho_mb: 
     except Exception as e:
         barra.empty()
         st.error(f"❌ Falha ao gravar base congelada da Gerência {gerencia}: {e}")
+        return False
+
+# endregion
+
+
+# region ====================== SESSÃO 4.5: Upload de Tratamento de Notas =======
+# (2026-09-05 — planilha do Técnico Fiscal com status Diagnosticada/
+# Diagnosticar, cruzada com `notas` por numero_nota — ver core/diagnostico.py)
+
+def _render_upload_tratamento(gerencia: str):
+    """
+    Upload da planilha "Tratamento de Notas GG". Mesmo Formato D das notas
+    VP, só que com a coluna extra "Status diag ok" — parser dedicado
+    (core.parser.processar_planilha_tratamento) → tabela notas_tratamento.
+    Mesmo padrão anti-duplicação dos demais uploads (uploads_historico,
+    disciplina='TRATAMENTO'), e mesmo suporte a arquivo com várias
+    Gerências de uma vez (detecção por linha, já confirmado funcionando
+    100% na planilha real).
+    """
+    from core.parser import processar_planilha_tratamento
+
+    st.markdown("---")
+    st.markdown("### 📁 Selecione a planilha de Tratamento de Notas")
+    st.markdown("""
+    <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px;
+        padding:12px 16px; margin-bottom:1rem; font-size:0.85rem; color:#374151;">
+        <strong>Arquivo esperado:</strong> export do Técnico Fiscal (aba
+        <code>Export</code>) com a coluna <strong>"Status diag ok"</strong>
+        (Diagnosticada/Diagnosticar).<br>
+        <strong>Alimenta:</strong> o filtro <strong>Diagnosticada</strong>
+        (Sim/Não/Pendente Saneamento/Encerrada — Aguarda Baixa no SAP) nas
+        telas de Gerência (VP).<br>
+        <strong>Tamanho máximo:</strong> 50 MB
+    </div>
+    """, unsafe_allow_html=True)
+
+    arquivo = st.file_uploader(
+        "Planilha de Tratamento de Notas",
+        type=["xlsx", "xls"],
+        key="upload_tratamento",
+        label_visibility="collapsed",
+    )
+    if not arquivo:
+        return
+
+    tamanho_mb = arquivo.size / (1024 * 1024)
+    if tamanho_mb > 50:
+        st.error(f"❌ Arquivo muito grande ({tamanho_mb:.1f} MB). Máximo: 50 MB.")
+        return
+
+    st.markdown("---")
+    st.markdown("### 🔄 Processando...")
+    with st.spinner(f"Analisando **{arquivo.name}**..."):
+        try:
+            df = processar_planilha_tratamento(
+                arquivo_bytes=io.BytesIO(arquivo.read()),
+                nome_arquivo=arquivo.name,
+                gerencia=gerencia,
+            )
+        except Exception as e:
+            st.error(f"❌ Erro ao processar a planilha: {e}")
+            return
+
+    if df.empty:
+        st.warning("⚠️ Nenhuma linha válida encontrada na planilha.")
+        return
+
+    if "status_diag" not in df.columns or df["status_diag"].isna().all():
+        st.error(
+            "❌ Não encontrei a coluna **\"Status diag ok\"** nesta planilha — "
+            "confira se é o arquivo certo (Tratamento de Notas), não a base "
+            "de Notas em Aberto."
+        )
+        return
+
+    # Mesma regra de permissão por gerência dos demais uploads (evita subir,
+    # sem querer, Tratamento de uma Gerência que o Assistente não gerencia).
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+    nao_permitidas = [g for g in gerencias_presentes if not can_upload(g)]
+    if nao_permitidas:
+        qtd = int(df["gerencia"].isin(nao_permitidas).sum())
+        st.warning(
+            f"⚠️ {qtd} nota(s) da(s) Gerência(s) **{', '.join(nao_permitidas)}** "
+            f"foram descartadas — você só tem permissão de upload para a "
+            f"Gerência **{gerencia}**."
+        )
+        df = df[~df["gerencia"].isin(nao_permitidas)].reset_index(drop=True)
+        if df.empty:
+            st.error("❌ Nenhuma linha restante após aplicar as permissões de upload.")
+            return
+        gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+
+    mista = len(gerencias_presentes) > 1
+
+    # Preview
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📋 Total de Notas", f"{len(df):,}".replace(",", "."))
+    c2.metric("🏭 Gerência", " + ".join(gerencias_presentes) if mista else gerencia)
+    contagem_status = df["status_diag"].value_counts()
+    c3.metric("✅ Diagnosticada", f"{int(contagem_status.get('Diagnosticada', 0)):,}".replace(",", "."))
+    c4.metric("⏳ Diagnosticar", f"{int(contagem_status.get('Diagnosticar', 0)):,}".replace(",", "."))
+
+    if mista:
+        contagem_ger = df["gerencia"].value_counts()
+        st.info(
+            "📦 **Arquivo com notas de mais de uma gerência** — cada uma será "
+            "gravada separadamente:\n\n" +
+            "\n".join(f"- **{g}**: {int(contagem_ger[g]):,} nota(s)".replace(",", ".") for g in gerencias_presentes)
+        )
+
+    with st.expander("🔍 Preview dos dados (primeiras 20 linhas)", expanded=False):
+        cols_show = [c for c in [
+            "numero_nota", "gerencia", "status_diag", "ramal", "trecho",
+            "origem", "data_nota",
+        ] if c in df.columns]
+        st.dataframe(df[cols_show].head(20), use_container_width=True, hide_index=True)
+
+    gerencias_txt = " e ".join(gerencias_presentes) if mista else gerencia
+    st.warning(
+        f"⚠️ **Atenção:** esta ação irá **substituir** a base de Tratamento de "
+        f"Notas ativa da Gerência **{gerencias_txt}**. A base de Notas em "
+        f"Aberto/Concluídas NÃO é afetada — só o status de diagnóstico.",
+        icon="⚠️",
+    )
+
+    if st.button(f"✅ Confirmar Upload — {len(df)} notas", type="primary",
+                 use_container_width=True, key="btn_confirmar_upload_tratamento"):
+        _executar_upload_tratamento(df, arquivo.name, tamanho_mb)
+
+
+def _executar_upload_tratamento(df: pd.DataFrame, nome_arquivo: str, tamanho_mb: float):
+    """Grava o Tratamento de Notas em notas_tratamento, uma gerência por vez."""
+    gerencias_presentes = sorted(df["gerencia"].dropna().unique().tolist())
+    total = len(df)
+    sucesso_algum = False
+
+    for ger in gerencias_presentes:
+        sub_df = df[df["gerencia"] == ger].reset_index(drop=True)
+        tamanho_proporcional = tamanho_mb * (len(sub_df) / total) if total else tamanho_mb
+        if len(gerencias_presentes) > 1:
+            st.markdown(f"#### 🏭 Gerência {ger} — {len(sub_df):,} nota(s)".replace(",", "."))
+        if _gravar_tratamento_gerencia(sub_df, nome_arquivo, ger, tamanho_proporcional):
+            sucesso_algum = True
+
+    if sucesso_algum:
+        try:
+            from database.queries import get_tratamento_cached
+            get_tratamento_cached.clear()
+        except Exception:
+            pass
+        st.balloons()
+        st.session_state.pop("upload_tratamento", None)
+
+
+def _gravar_tratamento_gerencia(df: pd.DataFrame, nome_arquivo: str, gerencia: str, tamanho_mb: float) -> bool:
+    """
+    Persiste o Tratamento de Notas de UMA gerência: arquiva o upload
+    'ativo' anterior (disciplina='TRATAMENTO'), registra o novo upload e
+    insere as linhas em notas_tratamento. Mesma sequência de
+    _executar_upload_gerencia(), pra tabela diferente.
+    """
+    from core.parser import df_para_registros_tratamento_supabase
+
+    supabase    = get_supabase()
+    usuario_id  = get_id()
+    total_notas = len(df)
+    DISCIPLINA_TRATAMENTO = "TRATAMENTO"
+
+    barra = st.progress(0, text="Iniciando upload...")
+
+    try:
+        barra.progress(10, text="Arquivando Tratamento anterior...")
+        supabase.table("uploads_historico").update({"status": "substituido"}).match({
+            "gerencia":   gerencia,
+            "disciplina": DISCIPLINA_TRATAMENTO,
+            "status":     "ativo",
+        }).execute()
+
+        if not _verificar_arquivamento(supabase, gerencia, DISCIPLINA_TRATAMENTO):
+            barra.empty()
+            st.error(
+                f"❌ Falha ao arquivar o Tratamento anterior da Gerência "
+                f"**{gerencia}**. Upload cancelado para evitar duplicar "
+                "registros. Tente novamente — se persistir, pode ser "
+                "instabilidade da rede corporativa."
+            )
+            return False
+
+        barra.progress(25, text="Registrando upload...")
+        resp_upload = supabase.table("uploads_historico").insert({
+            "usuario_id":    usuario_id,
+            "gerencia":      gerencia,
+            "disciplina":    DISCIPLINA_TRATAMENTO,
+            "nome_arquivo":  nome_arquivo,
+            "total_notas":   total_notas,
+            "tamanho_bytes": int(tamanho_mb * 1024 * 1024),
+            "status":        "ativo",
+            "metadados":     {"colunas": list(df.columns)},
+        }).execute()
+        upload_id = resp_upload.data[0]["id"]
+
+        barra.progress(40, text="Convertendo dados...")
+        registros = df_para_registros_tratamento_supabase(df, upload_id)
+
+        tamanho_lote = 500
+        total_lotes  = (len(registros) + tamanho_lote - 1) // tamanho_lote
+        for i in range(0, len(registros), tamanho_lote):
+            lote = registros[i:i + tamanho_lote]
+            supabase.table("notas_tratamento").insert(lote).execute()
+            progresso = 40 + int(55 * (i + tamanho_lote) / len(registros))
+            barra.progress(min(progresso, 95),
+                           text=f"Inserindo... lote {i // tamanho_lote + 1}/{total_lotes}")
+
+        barra.progress(100, text="Concluído!")
+
+        log_acesso(usuario_id, "upload_tratamento", {
+            "gerencia": gerencia, "arquivo": nome_arquivo,
+            "total_notas": total_notas, "upload_id": upload_id,
+        })
+
+        st.success(
+            f"✅ **Upload concluído!** {total_notas:,} nota(s) de Tratamento da "
+            f"Gerência **{gerencia}** carregadas.".replace(",", ".")
+        )
+        return True
+
+    except Exception as e:
+        barra.empty()
+        st.error(f"❌ Falha ao gravar Tratamento de Notas da Gerência {gerencia}: {e}")
         return False
 
 # endregion

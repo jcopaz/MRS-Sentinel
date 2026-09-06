@@ -24,11 +24,12 @@ from components.visao_gerencial import render_visao_gerencial
 
 from auth.permissions import require_gerencia
 from core.score_engine import carregar_score_config, calcular_score_dataframe, render_painel_transparencia
+from core.diagnostico import calcular_diagnosticada, render_resumo_diagnosticada, DIAGNOSTICADA_NAO_SE_APLICA
 from core.glossarios import (
     normalizar_coluna_ramal, NOME_CURTO_GERENCIA, COR_GERENCIA, COORDENACOES_POR_GERENCIA,
 )
 
-from database.queries import get_notas_cached
+from database.queries import get_notas_cached, get_tratamento_cached
 
 # endregion
 
@@ -80,6 +81,31 @@ def _carregar_dados(gerencia: str, disciplina_sel: str) -> pd.DataFrame:
         df["data_nota"] = pd.to_datetime(df["data_nota"], errors="coerce")
     if "lead_time_dias" in df.columns:
         df["lead_time_dias"] = pd.to_numeric(df["lead_time_dias"], errors="coerce")
+
+    return df
+
+
+def _com_diagnosticada(df: pd.DataFrame, gerencia: str) -> pd.DataFrame:
+    """
+    Acrescenta a coluna 'diagnosticada' (Sim/Não/Pendente Saneamento/
+    Encerrada — Aguarda Baixa no SAP/Não se Aplica — ver core/diagnostico.py)
+    cruzando com a base de Tratamento de Notas (upload separado, tabela
+    notas_tratamento). Calculado ao vivo a cada carregamento — mesmo
+    padrão do score (core/score_engine.py), nunca fica gravado em `notas`.
+
+    Só se aplica a linhas VP — EE não tem conceito de diagnóstico/
+    Tratamento (fica sempre 'Não se Aplica', mesmo que 'Aberta').
+    """
+    if df.empty or "disciplina_label" not in df.columns:
+        return df
+
+    df = df.copy()
+    df["diagnosticada"] = DIAGNOSTICADA_NAO_SE_APLICA
+
+    mask_vp = df["disciplina_label"] == "VP"
+    if mask_vp.any():
+        df_tratamento = get_tratamento_cached(gerencia)
+        df.loc[mask_vp, "diagnosticada"] = calcular_diagnosticada(df[mask_vp], df_tratamento).values
 
     return df
 
@@ -191,6 +217,7 @@ def render_gerencia(sigla: str) -> None:
     # ── Carrega dados ─────────────────────────────────────────────────────────
     with st.spinner(f"⏳ Carregando dados da Gerência {sigla}..."):
         df_raw = _carregar_dados(sigla, disciplina_sel)
+        df_raw = _com_diagnosticada(df_raw, sigla)
 
     if df_raw.empty:
         st.warning(
@@ -277,6 +304,8 @@ def render_gerencia(sigla: str) -> None:
     def _aba_kpi_frag():
         st.markdown(f"#### 📊 KPIs da Gerência {sigla}")
         render_kpi_cards(df, gerencia=sigla, disciplina=disciplina_sel)
+        st.markdown("---")
+        render_resumo_diagnosticada(df)
         st.markdown("---")
         render_painel_transparencia(score_cfg)
 

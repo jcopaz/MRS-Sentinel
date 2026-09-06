@@ -25,6 +25,7 @@ from core.glossarios import (
     nome_ramal, RAMAIS_MRS, STATUS_BASE, PESO_PRIORIDADE, status_base_efetivo,
     CENTROS_POR_GERENCIA as _CENTROS_POR_GERENCIA_BASE,
 )
+from core.diagnostico import DIAGNOSTICADA_OPCOES, DIAGNOSTICADA_AJUDA
 
 # Centros de trabalho por gerência — fonte única em core/glossarios.py
 # (antes havia uma segunda cópia divergente aqui). "GERAL" é a união de
@@ -142,6 +143,15 @@ def _opcoes_familias(df: pd.DataFrame) -> list[str]:
     return sorted([f for f in df["familia_defeito"].dropna().unique().tolist() if f])
 
 
+def _opcoes_diagnosticada(df: pd.DataFrame) -> list[str]:
+    """Valores de 'diagnosticada' presentes nos dados, na ordem oficial
+    (DIAGNOSTICADA_OPCOES — ver core/diagnostico.py)."""
+    if "diagnosticada" not in df.columns:
+        return []
+    presentes = set(df["diagnosticada"].dropna().unique().tolist())
+    return [v for v in DIAGNOSTICADA_OPCOES if v in presentes]
+
+
 def _opcoes_tipos_anomalia(df: pd.DataFrame) -> dict[str, str]:
     """
     Tipos de anomalia (code_codificacao) presentes nos dados, com rótulo
@@ -230,7 +240,7 @@ def render_filtros_atributos(
     carregada (disciplina_sel = "VP" ou "EE" isolado).
 
     Returns:
-        dict com chaves: prioridades, familias, tipos_anomalia,
+        dict com chaves: prioridades, familias, diagnosticada, tipos_anomalia,
         tipos_inspecao, status_base_vp, status_base_ee (listas — vazio/tudo selecionado =
         sem filtro)
     """
@@ -259,6 +269,19 @@ def render_filtros_atributos(
     )
     if not familias_sel:
         familias_sel = opcoes_fam
+
+    st.markdown("**🔍 Diagnosticada**")
+    opcoes_diag = _opcoes_diagnosticada(df)
+    diagnosticada_sel = st.multiselect(
+        "Diagnosticada",
+        options=opcoes_diag,
+        default=opcoes_diag,
+        key=f"filtro_diagnosticada_{uid}",
+        label_visibility="collapsed",
+        help=DIAGNOSTICADA_AJUDA,
+    )
+    if not diagnosticada_sel:
+        diagnosticada_sel = opcoes_diag
 
     st.markdown("**🔬 Tipo de anomalia**")
     opcoes_anomalia_label = _opcoes_tipos_anomalia(df)
@@ -328,6 +351,7 @@ def render_filtros_atributos(
     return {
         "prioridades":     prioridades_sel,
         "familias":        familias_sel,
+        "diagnosticada":   diagnosticada_sel,
         "tipos_anomalia":  anomalias_sel,
         "tipos_inspecao":  tipos_sel,
         "status_base_vp":  status_vp_sel,
@@ -350,6 +374,10 @@ def aplicar_filtros_atributos(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     familias = filtros.get("familias") or []
     if familias and "familia_defeito" in df.columns:
         df = df[df["familia_defeito"].isin(familias)]
+
+    diagnosticada = filtros.get("diagnosticada") or []
+    if diagnosticada and "diagnosticada" in df.columns:
+        df = df[df["diagnosticada"].isin(diagnosticada)]
 
     tipos_anomalia = filtros.get("tipos_anomalia") or []
     if tipos_anomalia and "code_codificacao" in df.columns:

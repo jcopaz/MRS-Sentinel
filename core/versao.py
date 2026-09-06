@@ -632,4 +632,64 @@
 # funcionar de fato; não muda schema/tela nova, é o mesmo recurso do
 # 4.2.0/4.2.1/5.0.0 finalmente funcionando como pedido.
 
-APP_VERSION = "6.1.0"
+# 7.0.0 (2026-09-05): novo recurso "Diagnosticada" — visão híbrida VP/EE/
+# RASF ganha uma 4ª fonte de upload: "Tratamento de Notas" (planilha do
+# Técnico Fiscal, coluna "Status diag ok": Diagnosticada/Diagnosticar).
+# Pedido do Julio, motivado por achado real dele: reparou que a série
+# histórica do Tratamento é bem mais curta que a de Notas, e que muitas
+# notas "Aberta" não constam no Tratamento.
+#
+# Análise (comparando "Notas em Aberto GG.xlsx" x "Tratamento de Notas
+# GG.xlsx", 146.426 x 11.228 linhas): das 30.067 notas VP com
+# status_amigavel='Aberta', 19.230 (64%) não têm registro no Tratamento.
+# Mas ao cruzar com status_final (Julio: "verifique se em algum outro
+# campo ela está como concluída, NAPL, NRAV etc."), 15.544 dessas (80,8%)
+# JÁ mostram status_final='Encerrado' — não é falta de diagnóstico, é
+# status_usuario que ficou preso em "ABER" sem acompanhar o encerramento
+# real (confirmado por status_sistema='MSEN', código técnico de nota
+# encerrada). Só as 3.686 restantes (concentradas em RJ, 53%) são
+# genuinamente abertas em todo campo.
+#
+# Daí a classificação de 5 categorias (core/diagnostico.py):
+#   Sim / Não (no Tratamento como Diagnosticada/Diagnosticar)
+#   Pendente Saneamento             (Aberta, ausente, status_final Aberto — precisa diagnóstico de verdade)
+#   Encerrada — Aguarda Baixa no SAP (Aberta, ausente, status_final Encerrado — só falta regularizar o status)
+#   Não se Aplica                   (não-Aberta ausente do Tratamento — comportamento normal)
+#
+# O que foi construído:
+#   - database/schema_notas_tratamento.sql — tabela notas_tratamento +
+#     amplia CHECK de uploads_historico.disciplina pra incluir 'TRATAMENTO'.
+#   - core/parser.py::processar_planilha_tratamento() — pipeline enxuto
+#     (reaproveita Formato D + detecção de gerência por linha, já
+#     confirmada 100% na planilha real; sem score/família, não se aplica
+#     a essa fonte).
+#   - core/diagnostico.py (novo) — calcular_diagnosticada() (cruza por
+#     numero_nota) + render_resumo_diagnosticada() (gráfico/KPIs) + texto
+#     de ajuda das 5 categorias.
+#   - modules/data_uploader.py — nova disciplina "TRATAMENTO" no upload,
+#     mesmo padrão anti-duplicação (arquiva base anterior, 1 upload ativo
+#     por gerência) e mesmo suporte a arquivo com várias Gerências juntas.
+#   - database/queries.py — get_tratamento_gerencia/get_tratamento_cached.
+#   - components/filtros.py — filtro "🔍 Diagnosticada" (multiselect) com
+#     help= explicando as 5 categorias (pedido do Julio: "coloque um ? do
+#     lado do filtro explicando o que é cada categoria").
+#   - modules/gerencia_dashboard.py — coluna calculada ao vivo (mesmo
+#     padrão do score, nunca gravada em `notas`), só nas linhas VP (EE
+#     sempre "Não se Aplica" — não tem esse fluxo).
+#
+# Testado em runtime: dry-run do parser real contra as 2 planilhas
+# verdadeiras (sem gravar no Supabase) — Formato D detectado, disciplina
+# VP auto-detectada, 100% de gerência auto-detectada em ambas; a
+# classificação final do pipeline bate CONTRA o cálculo manual, linha por
+# linha, nas 4 categorias (3.686 / 15.544 / 9.721 / 1.116, exatas);
+# AppTest cobre os 5 casos de calcular_diagnosticada isoladamente, o
+# filtro aparecendo com as 5 opções certas, o painel resumo renderizando,
+# e o caso de Gerência ainda sem nenhum upload de Tratamento (defensivo,
+# sem exceção).
+#
+# Pendências: só cobre as telas de Gerência (gerencia_dashboard.py) por
+# ora — Visão Geral e Modo TV ainda não recebem a coluna/filtro
+# (fast-follow, se o Julio confirmar que quer lá também).
+# MAJOR -- tela/fluxo novo (upload de Tratamento) + tabela nova no schema.
+
+APP_VERSION = "7.0.0"
