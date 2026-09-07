@@ -735,4 +735,47 @@
 # MAJOR -- correção de segurança (regra do próprio changelog: correção
 # de segurança conta como MAJOR mesmo sem tela nova/mudar fluxo visível).
 
-APP_VERSION = "8.0.0"
+# 9.0.0 (2026-09-06): duas Gerências novas — "GC" e "AU" — achadas
+# analisando RASF GG.xlsx (base histórica densa, 23.012 linhas) antes do
+# Julio subir de vez. 30,7% das notas de EE vinham com "Gerência" = algo
+# que não batia em nenhuma sigla conhecida; investigando os PÁTIOS reais
+# por trás de cada código (não só a sigla — os pátios se espalham por
+# várias regiões diferentes, inclusive pátios que já são de SP, ex.
+# "IPG"), ficou claro que "GC" (4.102 notas) e "AU" (143 notas) não são
+# coordenações regionais — são equipes CENTRAIS de EE. Confirmado pelo
+# Julio: "AU" = automação (sistemas embarcados autônomos, abrem falha
+# pra registro/análise — comportamento esperado, não erro de dado);
+# "GC" ainda sem nome confirmado (nome_gerencia usa placeholder
+# explícito, ver core/glossarios.py). Julio escolheu tratá-las como
+# Gerências próprias (opção 1, das 3 levantadas: 7ª/8ª Gerência × repartir
+# nota a nota por pátio × deixar de fora) — mais simples, e a estrutura
+# genérica de Gerência (modules/gerencia_dashboard.py) já foi desenhada
+# pra isso: bastou adicionar "GC"/"AU" a core/glossarios.py::
+# LISTA_GERENCIAS (+ NOME_GERENCIA/NOME_CURTO_GERENCIA/COR_GERENCIA;
+# COORDENACOES_POR_GERENCIA fica vazio de propósito pras duas, não são
+# coordenações regionais) — dashboard, filtro de Score, Modo TV, sidebar,
+# tudo herda automaticamente por já usar LISTA_GERENCIAS dinamicamente em
+# vez de listar as 6 siglas na mão (varrido o projeto inteiro pra
+# confirmar: só os snapshots legados de outra versão tinham a lista
+# hardcoded, nenhum arquivo vivo).
+#
+# Pendência registrada, não resolvida ainda: "FA" (Ferrovia do Aço,
+# confirmado pelo Julio = FN+FS juntas) segue sem solução — ao contrário
+# de GC/AU, "FA" tem 4 códigos de Centro de Trabalho com volume real
+# (FJC, FDE, FPT, FOJ — juntos, dezenas de milhares de notas em 3 bases
+# diferentes) que precisam ser repartidos entre FN e FS, e isso exige
+# saber qual código é de qual Gerência — informação que só o Julio tem.
+# Aguardando resposta antes de mexer em core/glossarios.py::
+# COORDENACAO_REALOCADA (mesmo mecanismo já usado pro caso do Barão de
+# Juparanã, só falta a resposta de qual código vai pra qual lado).
+#
+# Testado: dry-run do parser real (core/parser_rasf.py) contra o arquivo
+# verdadeiro confirma "GEE.GC"→"GC" (4.102) e "GEG.AU"→"AU" (143)
+# resolvendo corretamente (antes: None/NaN pros dois); suítes de teste de
+# RBAC (7 casos) e do painel de Score (5 casos, com a lista de Gerências
+# atualizada de 6 pra 8 opções) revalidadas sem regressão.
+# MAJOR -- 2 Gerências novas (tela/fluxo novo, mesmo nascendo da estrutura
+# genérica já existente) + correção de integridade de dado (4.245 notas
+# de EE que estavam sendo descartadas silenciosamente do upload).
+
+APP_VERSION = "9.0.0"

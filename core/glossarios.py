@@ -120,7 +120,21 @@ GERENCIA_POR_CENTRO = {
 # que precisam listar "todas as gerências" sem hardcode local. Ver
 # database/schema_organograma.sql pra estrutura completa (Gerência Geral
 # > Gerência > Coordenação) com nomes e códigos SAP de cada uma.
-LISTA_GERENCIAS = ["SP", "VP", "FN", "FS", "RJ", "LC"]
+#
+# GC/AU (2026-09-06): achado real comparando RASF GG.xlsx contra o app —
+# 4.102 + 143 notas de EE vinham com "Gerência" = "GEE.GC"/"GEG.AU", sem
+# bater em nenhuma sigla regional. Investigando os PÁTIOS reais por trás
+# (coluna "Local Pátio"), nenhuma das duas é uma coordenação/região —
+# os pátios se espalham por várias regiões diferentes (inclusive pátios
+# que já são de SP, ex. "IPG"), confirmando que são equipes
+# centrais/corporativas de EE, não uma coordenação fixa. Confirmado pelo
+# Julio: "AU" = automação (sistemas embarcados autônomos — abrem falha
+# pra registro/análise, não é erro de dado). Tratadas como 2 Gerências
+# próprias (opção escolhida pelo Julio: "vai da opção 1", entre as 3
+# levantadas — 7ª/8ª Gerência × repartir por pátio × deixar de fora).
+# Nome de "GC" ainda é um placeholder (ver NOME_GERENCIA) — Julio não
+# confirmou o que a sigla significa, só que é uma unidade central de EE.
+LISTA_GERENCIAS = ["SP", "VP", "FN", "FS", "RJ", "LC", "GC", "AU"]
 GERENCIAS_CONHECIDAS = set(LISTA_GERENCIAS)
 
 # Códigos de gerência LEGADOS que ainda aparecem em notas antigas do SAP,
@@ -149,6 +163,11 @@ NOME_GERENCIA = {
     "FS": "Gerência Frente Sul",
     "RJ": "Gerência de Malha Rio de Janeiro",
     "LC": "Gerência de Malha Linha do Centro",
+    # ⚠️ Placeholder — Julio ainda não confirmou o nome/escopo exato de
+    # "GC" (só que é uma unidade central de EE, pátios espalhados por
+    # várias regiões). Trocar assim que ele confirmar.
+    "GC": "Gerência GC (nome a confirmar)",
+    "AU": "Gerência de Automação",
 }
 
 # Nome curto/geográfico (sem "Gerência..." na frente) — usado no
@@ -160,6 +179,8 @@ NOME_CURTO_GERENCIA = {
     "FS": "Frente Sul",
     "RJ": "Rio de Janeiro",
     "LC": "Linha do Centro",
+    "GC": "GC",  # ⚠️ mesmo placeholder do NOME_GERENCIA acima
+    "AU": "Automação",
 }
 
 # Gerência Geral de cada Gerência — usado na tela "Escolha a Gerência
@@ -175,7 +196,9 @@ GERENCIA_GERAL_DE = {
 
 # Coordenações de cada gerência (nomes reais — mesma estrutura semeada em
 # database/schema_organograma.sql) — usado no cabeçalho de
-# modules/gerencia_dashboard.py.
+# modules/gerencia_dashboard.py. GC/AU ficam de propósito com lista vazia
+# — não são coordenações regionais, são equipes centrais de EE (pátios
+# espalhados por várias regiões, ver comentário em LISTA_GERENCIAS acima).
 COORDENACOES_POR_GERENCIA = {
     "SP": ["Piaçaguera", "Paranapiacaba", "Jundiaí"],
     "VP": ["Agulhas Negras", "Taubaté", "Pinheirinho"],
@@ -183,10 +206,12 @@ COORDENACOES_POR_GERENCIA = {
     "FS": ["São João del Rey", "Bom Jardim", "Quatis"],
     "RJ": ["Pinheiral", "Brisamar", "Barra do Piraí", "Rocha Sobrinho"],
     "LC": ["Conselheiro Lafaiete", "Barbacena", "Francisco Bernardino", "Barão de Juparanã"],
+    "GC": [],
+    "AU": [],
 }
 
 # Gradiente de cor de destaque (início, fim) de cada gerência no cabeçalho
-# do dashboard — SP/VP são as cores originais (não mudam); as 4 novas são
+# do dashboard — SP/VP são as cores originais (não mudam); as demais são
 # escolha nossa, só pra diferenciar visualmente. Troque à vontade.
 COR_GERENCIA = {
     "SP": ("#1e3a5f", "#2d5a8e"),  # azul-marinho (original)
@@ -195,6 +220,8 @@ COR_GERENCIA = {
     "FS": ("#713f12", "#b45309"),  # âmbar
     "RJ": ("#4c1d95", "#6d28d9"),  # violeta
     "LC": ("#1e293b", "#475569"),  # grafite
+    "GC": ("#134e4a", "#0f766e"),  # verde-petróleo
+    "AU": ("#581c87", "#9333ea"),  # roxo (remete a automação/tech)
 }
 
 # Gerências que já têm tela de dashboard ligada
