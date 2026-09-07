@@ -778,4 +778,30 @@
 # genérica já existente) + correção de integridade de dado (4.245 notas
 # de EE que estavam sendo descartadas silenciosamente do upload).
 
-APP_VERSION = "9.0.0"
+# 10.0.0 (2026-09-06): "FA" (Ferrovia do Aço) resolvido — pendência
+# registrada no 9.0.0. Julio confirmou a Gerência dona de cada um dos 4
+# códigos de Centro de Trabalho que apareciam sob "FA":
+#   FJC = P1-07 / São Brás do Suaçuí   -> FN (Frente Norte)
+#   FDE = São João del Rei / P1-13     -> FS (Frente Sul)
+#   FOJ = Bom Jardim / P2-06           -> FS (Frente Sul)
+#   FPT = Quatis / P2-13               -> FS (Frente Sul)
+# (Julio escreveu "FDS" na resposta — tratado como o mesmo código "FDE"
+# que de fato aparece nos dados reais das 3 planilhas, único dos 4 que
+# não bateu literalmente; registrado no comentário do código pra
+# verificação futura caso não seja o mesmo código.)
+# Adicionado a core/glossarios.py::COORDENACAO_REALOCADA (mesmo mecanismo
+# já usado pro Barão de Juparanã) — vale pros dois parsers (core/parser.py
+# e core/parser_rasf.py) de uma vez, já que os dois leem do mesmo dict.
+# "ZAS" (5º código sob "FA", menor volume) já tinha sido resolvido sozinho
+# no 9.0.0 (já cadastrado como coordenação de FN).
+#
+# Testado: dry-run do parser real (core/parser_rasf.py) contra RASF
+# GG.xlsx confirma FN=982 e FS=1.790 notas antes classificadas como
+# gerência=None — resta só 38 linhas (de 23.012) genuinamente
+# irrecuperáveis (códigos truncados/vazios no export, ex. "GEGMI-"),
+# irrelevante pra qualquer análise; suíte de RBAC (7 casos) revalidada
+# sem regressão.
+# MAJOR -- correção de integridade de dado (mais ~2.772 notas de EE, nas
+# 3 bases, que estavam sem Gerência classificada corretamente).
+
+APP_VERSION = "10.0.0"

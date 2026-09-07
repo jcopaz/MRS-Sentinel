@@ -154,7 +154,30 @@ GERENCIA_CODIGO_LEGADO = {"MG": "LC"}
 # Gerência inteira que mudou de código, é só esta coordenação. Chave =
 # último segmento do código de centro de trabalho (ex.: "FBJ" de
 # "V.RJ.FBJ"), valor = sigla da gerência dona hoje.
-COORDENACAO_REALOCADA = {"FBJ": "LC"}
+#
+# FJC/FDE/FOJ/FPT (2026-09-06): mesmo caso, só que em vez de uma
+# Gerência inteira renomeada de uma vez (caso "MG"→"LC" acima), aqui é a
+# antiga "FA" (Ferrovia do Aço — GG que junta FN+FS, confirmado pelo
+# Julio) que nunca foi dividida entre as 2 Gerências atuais nos dados
+# antigos; "Gerência" continua vindo "GEE.FA"/"V.FA" pras notas dessas 4
+# coordenações, então só dá pra saber qual é FN e qual é FS olhando o
+# centro de trabalho — exatamente o mesmo mecanismo do Barão de
+# Juparanã. Confirmado pelo Julio:
+#   FJC = P1-07 / São Brás do Suaçuí        -> FN (Frente Norte)
+#   FDE = São João del Rei / P1-13          -> FS (Frente Sul)
+#   FOJ = Bom Jardim / P2-06                -> FS (Frente Sul)
+#   FPT = Quatis / P2-13                    -> FS (Frente Sul)
+# (Julio escreveu "FDS" na resposta — tratado aqui como o mesmo código
+# "FDE" que aparece de fato nos dados reais das 3 planilhas, únicos 4
+# códigos com volume relevante sob "FA"; se não for o mesmo código,
+# avisar pra corrigir.)
+COORDENACAO_REALOCADA = {
+    "FBJ": "LC",
+    "FJC": "FN",
+    "FDE": "FS",
+    "FOJ": "FS",
+    "FPT": "FS",
+}
 
 NOME_GERENCIA = {
     "SP": "Gerência de Malha SP",

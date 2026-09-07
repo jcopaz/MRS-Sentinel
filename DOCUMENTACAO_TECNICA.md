@@ -1,4 +1,4 @@
-# MRS Sentinel — Documentação Técnica (estado em 2026-09-06, v9.0.0)
+# MRS Sentinel — Documentação Técnica (estado em 2026-09-06, v10.0.0)
 
 > Este documento registra COMO o app está montado hoje — pra não perder o que foi
 > feito. Não substitui `core/versao.py` (changelog linha a linha, com causa raiz de
@@ -362,16 +362,6 @@ sistema), **Gestão de Dados**.
 
 ## 8. Pendências conhecidas (em 2026-09-06)
 
-- **"FA" (Ferrovia do Aço) ainda sem tradução** — achado analisando RASF GG.xlsx
-  (23.012 linhas) e cruzando com Notas em Aberto/Tratamento antes do Julio subir
-  as bases de vez: notas antigas trazem "Gerência" = "FA" (Ferrovia do Aço,
-  confirmado pelo Julio = FN+FS juntas), mas o dado real se abre em 4 códigos de
-  Centro de Trabalho com volume grande (FJC, FDE, FPT, FOJ — dezenas de milhares
-  de notas nas 3 bases) que precisam ser repartidos entre FN e FS — e isso só o
-  Julio sabe dizer qual é qual. "ZAS" (5º código, menor volume) já resolvido:
-  já cadastrado como coordenação de FN. Assim que a resposta vier, é só
-  preencher `core/glossarios.py::COORDENACAO_REALOCADA` (mesmo mecanismo já
-  usado pro caso do Barão de Juparanã).
 - **"GC" — nome ainda não confirmado**: virou Gerência própria no 9.0.0 (ver
   §3), mas `core/glossarios.py::NOME_GERENCIA["GC"]` está com um placeholder
   explícito ("Gerência GC (nome a confirmar)") até o Julio dizer o que a sigla
