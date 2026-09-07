@@ -100,19 +100,25 @@ def _render_selecao() -> tuple[str, str]:
     with col2:
         disciplina = st.selectbox(
             "📋 Disciplina",
-                ["VP", "EE", "RASF", "RASF_BASE", "TRATAMENTO"],
+                # "RASF_BASE" (Base Congelada 2025) tirado da lista (2026-09-07,
+                # pedido do Julio: "pode tirar... pois não existe" — a planilha
+                # congelada nunca foi uma base histórica de verdade, era só um
+                # acompanhamento de meta; a base histórica real é a mesma do
+                # RASF vivo, só mais densa — RASF GG.xlsx). Função/tabela
+                # (_render_upload_baseline, rasf_baseline) ficam intactas, só
+                # inacessíveis por aqui — nada consome dado que não existe.
+                ["VP", "EE", "RASF", "TRATAMENTO"],
                 format_func=lambda x: {
                     "VP":          "🛤️ Via Permanente (VP)",
                     "EE":          "⚡ Eletroeletrônica (EE)",
                     "RASF":        "🔌 RASF — Análise de Falha EE",
-                    "RASF_BASE":   "🗓️ RASF — Base Congelada 2025 (YoY)",
                     "TRATAMENTO":  "🔍 Tratamento de Notas (Diagnóstico VP)",
                 }.get(x, x),
                 help="VP/EE = planilha SAP de notas. RASF = export da Reunião de "
-                     "Análise Sistêmica de Falha (base viva). RASF — Base 2025 = "
-                     "congelado do ano anterior (habilita o comparativo YoY na aba EE). "
-                     "Tratamento de Notas = planilha do Técnico Fiscal com o status de "
-                     "diagnóstico (Diagnosticada/Diagnosticar) das notas VP em aberto — "
+                     "Análise Sistêmica de Falha (base viva, mesmo arquivo que "
+                     "alimenta o comparativo histórico). Tratamento de Notas = "
+                     "planilha do Técnico Fiscal com o status de diagnóstico "
+                     "(Diagnosticada/Diagnosticar) das notas VP em aberto — "
                      "alimenta o filtro 'Diagnosticada' nas telas de Gerência."
             )
 

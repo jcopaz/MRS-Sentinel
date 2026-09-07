@@ -804,4 +804,19 @@
 # MAJOR -- correção de integridade de dado (mais ~2.772 notas de EE, nas
 # 3 bases, que estavam sem Gerência classificada corretamente).
 
-APP_VERSION = "10.0.0"
+# 10.0.1 (2026-09-07): remove "RASF — Base Congelada 2025 (YoY)" do
+# seletor de Disciplina no Upload (modules/data_uploader.py). Pedido do
+# Julio: "pode tirar... pois não existe" — achado anterior (mesma
+# análise das planilhas) já tinha revelado que aquela "base congelada"
+# nunca foi uma base histórica separada de verdade, era um acompanhamento
+# de meta; a base histórica real é a mesma do RASF vivo, só mais densa
+# (RASF GG.xlsx, já integrado no 9.0.0/10.0.0). Função
+# (_render_upload_baseline), parser (core/parser_rasf_baseline.py) e
+# tabela (rasf_baseline) ficam intactos — só inacessíveis pelo Upload
+# agora; a aba Gestão de Dados do Painel Admin continua listando
+# "RASF_BASE" (é ferramenta de limpeza/gestão, não de criação — mantém
+# caso algo já tenha sido gravado lá antes).
+# PATCH -- remove opção de menu que nunca teve uso real, sem mudar
+# comportamento de nada que já funciona.
+
+APP_VERSION = "10.0.1"
