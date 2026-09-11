@@ -819,4 +819,32 @@
 # PATCH -- remove opção de menu que nunca teve uso real, sem mudar
 # comportamento de nada que já funciona.
 
-APP_VERSION = "10.0.1"
+# 11.0.0 (2026-09-11): telefone de recuperação de senha — pedido do Julio
+# na véspera de liberar o Sentinel pra mais gente (relato de e-mail de reset
+# não chegando; SMS vira canal prioritário, ainda a implementar — esta versão
+# só CAPTURA e guarda o número).
+#   - database/schema_telefone.sql (novo) — usuarios.telefone TEXT, E.164.
+#   - auth/telefone.py (novo) — validar_e_formatar_telefone(): função pura,
+#     aceita celular BR em grafia comum, normaliza pra +55DDDNNNNNNNNN,
+#     rejeita DDD/tamanho inválido.
+#   - auth/trocar_senha_obrigatoria.py — ganha o campo "Celular com DDD" no
+#     mesmo formulário da troca de senha (pedido explícito: capturar no
+#     momento em que a pessoa já está trocando a senha). Nova conta e todo
+#     reset passam por aqui — telefone vira obrigatório pra concluir a troca.
+#   - auth/confirmar_telefone.py (novo) — prompt único equivalente pra quem
+#     já tinha conta ANTES desta versão (deve_trocar_senha já era False, não
+#     passa mais pela tela acima). app.py::main() intercepta com esta tela
+#     só enquanto usuarios.telefone estiver vazio; depois de preencher, some
+#     de vez (mesmo padrão de gate da troca de senha).
+#   - database/queries.py::atualizar_telefone() — mesmo padrão best-effort
+#     de atualizar_deve_trocar_senha/atualizar_ultimo_login.
+#   Fora do escopo desta versão (fast-follow): envio de SMS em si (Brevo API
+#   HTTP) e o fluxo de reset por SMS — hoje só coleta o número; reset
+#   autoatendido continua por e-mail (auth/recuperar_senha.py).
+# Testado: validar_e_formatar_telefone com celular/fixo em grafias variadas
+# (com/sem +55, com máscara, DDD inválido, 9º dígito faltando) — só os
+# formatos válidos passam; py_compile de todos os arquivos tocados.
+# MAJOR -- mudança de schema (usuarios.telefone) + telas novas/fluxo novo
+# (regra do próprio changelog).
+
+APP_VERSION = "11.0.0"

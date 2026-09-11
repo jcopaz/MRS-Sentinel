@@ -531,6 +531,24 @@ def atualizar_deve_trocar_senha(user_id: str, valor: bool) -> None:
         pass
 
 
+def atualizar_telefone(user_id: str, telefone: str) -> None:
+    """
+    Grava o telefone de recuperação (E.164, já normalizado por
+    auth/telefone.py) do usuário — ver database/schema_telefone.sql,
+    auth/trocar_senha_obrigatoria.py e auth/confirmar_telefone.py. Falha
+    silenciosa (mesmo padrão de atualizar_ultimo_login/
+    atualizar_deve_trocar_senha) — nunca deve quebrar o fluxo de troca de
+    senha por causa disso.
+    """
+    try:
+        supabase = get_supabase()
+        supabase.table("usuarios").update({
+            "telefone": telefone
+        }).eq("id", user_id).execute()
+    except Exception:
+        pass
+
+
 def log_acesso(
     usuario_id: str | None,
     acao: str,
