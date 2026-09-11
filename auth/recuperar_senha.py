@@ -12,19 +12,23 @@
 # usado e testado em modules/admin_panel._resetar_senha — sem estado de
 # sessão).
 #
-# 2026-09-11: canal de aviso passa a ser SMS PRIMEIRO, e-mail depois
-# (relato do Julio: e-mail parou de chegar; SMS via integracoes.brevo.
-# enviar_sms — API HTTP do Brevo, não o SMTP usado em _enviar_email_senha).
-# Isso também corrige uma limitação real: antes, conta só-matrícula
-# (usuarios.email_gerado=True, sem e-mail corporativo real) NUNCA conseguia
-# reset autoatendido, só pelo admin — agora, com telefone cadastrado
-# (database/schema_telefone.sql), essas contas também se recuperam sozinhas.
+# 2026-09-11: chegou a existir uma versão SMS-primeiro (via
+# integracoes.brevo.enviar_sms) — revertida no mesmo dia por decisão do
+# Julio: Brevo cobra por SMS (não tem gateway grátis de verdade), e-mail
+# continua sendo o canal, sem custo. O módulo integracoes/brevo.py fica no
+# repo, pronto e testado, pra retomar se um dia fizer sentido (provedor mais
+# barato, ou aceitar o custo) — só não é chamado daqui.
 #
-# Freio contra abuso: além do cooldown client-side (60s, em session_state,
-# em render_esqueci_senha), _cooldown_ativo() checa server-side pela mesma
-# conta em logs_acesso — SMS custa por mensagem, o freio client-side sozinho
-# (burlável recarregando a aba, mesmo gap do Fin360 docs/10 A1) não é
-# suficiente aqui.
+# O que FICOU da tentativa: _cooldown_ativo() abaixo — freio server-side
+# contra pedido repetido pra mesma conta (reaproveita logs_acesso, sem
+# tabela nova). O cooldown de 60s em session_state (render_esqueci_senha)
+# é só client-side e cai recarregando a aba (gap conhecido, docs/10 A1 do
+# Fin360); vale manter mesmo só com e-mail.
+#
+# Segue valendo: conta só-matrícula (usuarios.email_gerado=True, sem e-mail
+# corporativo real) não tem reset autoatendido — precisa de um admin
+# (mesma limitação de sempre, sem SMS não tem como avisar essa conta em
+# lugar nenhum).
 
 import secrets
 import smtplib
@@ -42,25 +46,22 @@ from database.queries import (
     atualizar_deve_trocar_senha,
     log_acesso,
 )
-from integracoes.brevo import enviar_sms
 
 # Mesma mensagem de sucesso independente de a conta existir ou não — evita
 # que alguém descubra quais matrículas/e-mails têm conta só tentando o reset.
 _MSG_GENERICA = (
-    "✅ Se existe uma conta ativa com celular ou e-mail corporativo "
-    "cadastrado para essa matrícula/e-mail, uma nova senha temporária foi "
-    "enviada por SMS ou e-mail. Confira as mensagens do celular e a caixa "
-    "de entrada (e o spam) do e-mail."
+    "✅ Se existe uma conta ativa com e-mail corporativo cadastrado para essa "
+    "matrícula/e-mail, uma nova senha temporária foi enviada. Confira sua "
+    "caixa de entrada (e o spam)."
 )
-_MSG_SEM_CONTATO = (
-    "⚠️ Essa conta não tem celular nem e-mail corporativo cadastrado — o "
-    "reset autoatendido não tem como avisar você em lugar nenhum. Peça a um "
-    "administrador para resetar sua senha (Painel Admin > Usuários)."
+_MSG_SEM_EMAIL = (
+    "⚠️ Essa conta não tem e-mail corporativo cadastrado — o reset autoatendido "
+    "não tem como avisar você em lugar nenhum. Peça a um administrador para "
+    "resetar sua senha (Painel Admin > Usuários)."
 )
 _MSG_FALHA_ENVIO = (
-    "❌ A senha foi trocada, mas não conseguimos avisar você agora (SMS e "
-    "e-mail indisponíveis). Peça a um administrador para resetar sua senha "
-    "de novo."
+    "❌ A senha foi trocada, mas não conseguimos enviar o e-mail agora "
+    "(SMTP indisponível). Peça a um administrador para resetar sua senha de novo."
 )
 
 _COOLDOWN_SEGUNDOS = 60
@@ -132,10 +133,8 @@ def solicitar_reset_senha(identificador: str) -> str:
     """
     Ponto de entrada do "Esqueci minha senha" na tela de login.
     Retorna a mensagem a mostrar pro usuário (sucesso genérico, aviso de
-    conta sem contato cadastrado, ou falha de envio).
-
-    Ordem de canal: SMS primeiro (se tem telefone) -> e-mail (se tem e-mail
-    corporativo real) -> nenhum dos dois = pede pro admin.
+    conta sem e-mail, ou falha de envio). Só por e-mail (ver nota de
+    2026-09-11 no topo do arquivo — SMS ficou pra trás por custo).
     """
     identificador = identificador.strip()
     if not identificador:
@@ -150,13 +149,8 @@ def solicitar_reset_senha(identificador: str) -> str:
         return _MSG_GENERICA
 
     auth_user_id = usuario.get("auth_user_id") or buscar_auth_user_id_por_email(usuario.get("email") or "")
-    if not auth_user_id:
-        return _MSG_GENERICA
-
-    tem_telefone = bool(usuario.get("telefone"))
-    tem_email_real = bool(usuario.get("email")) and not usuario.get("email_gerado")
-    if not tem_telefone and not tem_email_real:
-        return _MSG_SEM_CONTATO
+    if usuario.get("email_gerado") or not auth_user_id:
+        return _MSG_SEM_EMAIL
 
     if _cooldown_ativo(usuario["id"]):
         # Mesma mensagem genérica — não revela que já tinha pedido antes.
@@ -172,23 +166,14 @@ def solicitar_reset_senha(identificador: str) -> str:
     # Mesma regra do reset manual do admin (modules/admin_panel.py) e da
     # criação de usuário: conta que fica com senha provisória/temporária
     # tem que trocar no próximo login — reduz a janela de exposição da
-    # senha que acabou de ser mandada por SMS/e-mail em texto puro (achado
-    # de revisão de segurança, 2026-09-06).
+    # senha que acabou de ser mandada por e-mail em texto puro (achado de
+    # revisão de segurança, 2026-09-06).
     atualizar_deve_trocar_senha(usuario["id"], True)
 
-    canal_usado = None
-    if tem_telefone:
-        texto_sms = f"MRS Sentinel: senha temporaria = {senha_temp}. Troque no proximo login."
-        if enviar_sms(usuario["telefone"], texto_sms):
-            canal_usado = "sms"
-    if not canal_usado and tem_email_real:
-        if _enviar_email_senha(usuario["email"], usuario.get("nome", ""), senha_temp):
-            canal_usado = "email"
-
-    if not canal_usado:
+    if not _enviar_email_senha(usuario["email"], usuario.get("nome", ""), senha_temp):
         return _MSG_FALHA_ENVIO
 
-    log_acesso(usuario["id"], "SOLICITAR_RESET_SENHA", {"canal": canal_usado})
+    log_acesso(usuario["id"], "SOLICITAR_RESET_SENHA", {"email": usuario["email"]})
     return _MSG_GENERICA
 
 
@@ -196,15 +181,15 @@ def render_esqueci_senha() -> None:
     """Bloco 'Esqueci minha senha' — chamado pela tela de login."""
     with st.expander("🔑 Esqueci minha senha"):
         st.caption(
-            "Funciona pra conta com celular ou e-mail corporativo cadastrado "
-            "(prioridade: SMS). Sem nenhum dos dois, peça reset a um administrador."
+            "Funciona só pra contas com e-mail corporativo cadastrado. "
+            "Login só por matrícula precisa de reset pelo administrador."
         )
         with st.form("form_esqueci_senha"):
             identificador = st.text_input(
                 "Matrícula ou e-mail", placeholder="Ex: 123456 ou seu.nome@mrs.com.br",
                 key="esqueci_senha_id",
             )
-            enviar = st.form_submit_button("Enviar nova senha")
+            enviar = st.form_submit_button("Enviar nova senha por e-mail")
 
         if enviar:
             agora = st.session_state.get("_ultimo_reset_ts")

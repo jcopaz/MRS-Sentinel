@@ -883,4 +883,25 @@
 # MAJOR -- muda o comportamento de um fluxo de segurança (reset de senha) e
 # fecha uma lacuna de acesso real (conta só-matrícula sem reset autoatendido).
 
-APP_VERSION = "12.0.0"
+# 13.0.0 (2026-09-11): reverte o canal SMS do reset de senha (v12.0.0),
+# ainda no mesmo dia, ANTES de ir pro ar (o commit da 12.0.0 nunca chegou a
+# ser dado push) — decisão do Julio: achava que existia gateway de SMS
+# gratuito; não existe (todo provedor sério cobra por mensagem, quem cobra
+# de verdade é a operadora na ponta). Sem orçamento pra isso agora, e-mail
+# volta a ser o único canal.
+#   - auth/recuperar_senha.py::solicitar_reset_senha() volta a ser só
+#     e-mail (mesma lógica/mensagens da 10.x) — conta só-matrícula
+#     (email_gerado=True) volta a precisar do admin, como sempre foi.
+#   - O que FICOU: _cooldown_ativo() (freio server-side contra pedido
+#     repetido, reaproveitando logs_acesso) — não tem custo, vale manter
+#     mesmo só com e-mail.
+#   - integracoes/brevo.py continua no repo, testado, só não é chamado —
+#     fica pronto se um dia fizer sentido retomar (provedor mais barato,
+#     ou aceitar o custo).
+# Testado: 4 cenários mockados (e-mail ok, e-mail falha, só-matrícula sem
+# e-mail real não tenta nada, cooldown ativo não reenvia) — todos corretos;
+# py_compile.
+# MAJOR -- reverte comportamento de um fluxo de segurança (mesmo critério
+# usado pra classificar a mudança original).
+
+APP_VERSION = "13.0.0"
