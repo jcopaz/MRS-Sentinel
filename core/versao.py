@@ -847,4 +847,40 @@
 # MAJOR -- mudança de schema (usuarios.telefone) + telas novas/fluxo novo
 # (regra do próprio changelog).
 
-APP_VERSION = "11.0.0"
+# 12.0.0 (2026-09-11): reset de senha autoatendido passa a avisar por SMS
+# (API HTTP do Brevo) em vez de só e-mail — pedido do Julio, mesmo dia,
+# como sequência direta da 11.0.0 (captura de telefone).
+#   - integracoes/brevo.py (novo, pacote novo) — enviar_sms(): POST em
+#     api.brevo.com/v3/transactionalSMS/sms (chave REST — DIFERENTE da
+#     chave SMTP já usada pro e-mail). Falha (config ausente, rede,
+#     rejeição do Brevo) -> False, silenciosa.
+#   - auth/recuperar_senha.py::solicitar_reset_senha() — ordem de canal
+#     agora é SMS primeiro (se tem telefone) -> e-mail (se tem e-mail
+#     corporativo real) -> nenhum dos dois = pede pro admin. Corrige de
+#     quebra uma limitação real: conta só-matrícula (email_gerado=True)
+#     NUNCA conseguia reset autoatendido antes — a checagem antiga
+#     (`if usuario.get("email_gerado") or not auth_user_id`) barrava com
+#     "sem e-mail" mesmo quando a intenção real era só garantir que dava
+#     pra AVISAR a pessoa em algum canal. Agora, com telefone cadastrado
+#     (11.0.0), essas contas se recuperam sozinhas por SMS.
+#   - Freio novo contra abuso: _cooldown_ativo() bloqueia pedido repetido
+#     pra mesma conta consultando logs_acesso (reaproveitado, sem tabela
+#     nova) — o cooldown de 60s em session_state já existia mas é só
+#     client-side (burlável recarregando a aba, mesmo gap do Fin360
+#     docs/10 A1); SMS custa por mensagem, então esse freio server-side
+#     passa a valer também aqui.
+#   - requirements.txt: `requests` como dependência direta (usada por
+#     integracoes/brevo.py). secrets.toml.example ganhou [smtp] (documentado
+#     pela 1ª vez, já era lido pelo código) e [brevo] (novo).
+# Testado: solicitar_reset_senha com banco/Brevo/Supabase Admin mockados
+# (7 cenários — SMS ok, SMS falha->cai pro e-mail, os dois falham, sem
+# contato nenhum, conta só-matrícula COM telefone agora funciona via SMS,
+# sem auth_user_id, cooldown ativo) — todos corretos; enviar_sms confirmado
+# retornando False sem exceção quando [brevo] ainda não está configurado
+# (caso real de hoje — falta o Julio adicionar a chave). py_compile de
+# todos os arquivos tocados. Não validado em navegador real nem com envio
+# de SMS de verdade (sem credencial Brevo neste sandbox).
+# MAJOR -- muda o comportamento de um fluxo de segurança (reset de senha) e
+# fecha uma lacuna de acesso real (conta só-matrícula sem reset autoatendido).
+
+APP_VERSION = "12.0.0"

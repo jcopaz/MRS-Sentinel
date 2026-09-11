@@ -25,3 +25,6 @@ email-validator>=2.0.0
 
 # Utilitários
 python-dotenv>=1.0.0
+
+# Integração SMS (Brevo, API HTTP) — auth/recuperar_senha.py / integracoes/brevo.py
+requests>=2.31.0
