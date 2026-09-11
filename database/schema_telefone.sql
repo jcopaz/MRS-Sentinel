@@ -10,6 +10,12 @@
 -- Formato: E.164 (+55DDDNNNNNNNNN), normalizado por auth/telefone.py antes
 -- de gravar — nunca grava o texto digitado cru.
 --
+-- ATUALIZAÇÃO 2026-09-11: a captura de telefone (app.py/auth/
+-- trocar_senha_obrigatoria.py/auth/confirmar_telefone.py) foi revertida no
+-- mesmo dia por falta de orçamento pra SMS (ver core/versao.py 13.0.0) —
+-- a coluna NÃO foi removida (evita perder o que já tiver sido capturado
+-- entre a v11.0.0 e a reversão) e fica pronta se um dia retomarem.
+--
 -- Idempotente: seguro rodar mais de uma vez.
 
 ALTER TABLE usuarios

@@ -43,7 +43,6 @@ injetar_css_global()
 from auth.session    import is_logged_in, init_session, get_usuario
 from auth.login      import render_login
 from auth.trocar_senha_obrigatoria import render_trocar_senha_obrigatoria
-from auth.confirmar_telefone import render_confirmar_telefone
 from modules.home    import render_sidebar
 from modules.gerencia_dashboard import render_gerencia
 from modules.gerencia_geral import render_gerencia_geral
@@ -222,8 +221,7 @@ def main():
     """
     Ponto de entrada principal.
     Ordem: CSS → init estado → auth check → troca de senha obrigatória
-    (se pendente) → confirmar telefone (se faltando) → sidebar (se logado)
-    → roteamento
+    (se pendente) → sidebar (se logado) → roteamento
     """
     _inject_global_css()
     init_session()
@@ -234,14 +232,8 @@ def main():
         # Intercepta ANTES de sidebar/rotas — toda conta nova ou recém-
         # resetada nasce com deve_trocar_senha=True (ver modules/admin_panel.py
         # e database/schema_deve_trocar_senha.sql). Sem sidebar aqui de
-        # propósito: não dá pra "escapar" navegando pra outra tela. Essa
-        # tela já captura o telefone junto (ver auth/trocar_senha_obrigatoria.py).
+        # propósito: não dá pra "escapar" navegando pra outra tela.
         render_trocar_senha_obrigatoria()
-    elif not get_usuario().get("telefone"):
-        # 2026-09-11: conta anterior a essa data não passou pela captura de
-        # telefone acima — pede uma única vez (ver auth/confirmar_telefone.py
-        # e database/schema_telefone.sql). Depois de preenchido, some.
-        render_confirmar_telefone()
     else:
         render_sidebar()
         _rotear()

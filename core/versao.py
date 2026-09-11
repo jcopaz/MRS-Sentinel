@@ -904,4 +904,23 @@
 # MAJOR -- reverte comportamento de um fluxo de segurança (mesmo critério
 # usado pra classificar a mudança original).
 
-APP_VERSION = "13.0.0"
+# 14.0.0 (2026-09-11): reverte a captura de telefone (v11.0.0) — decisão do
+# Julio, mesmo lote da 13.0.0: sem SMS ativo, pedir telefone é coletar dado
+# pessoal sem finalidade em uso (achado ele mesmo, ao perguntar "então não
+# precisa capturar o celular das pessoas, correto?"). Opções apresentadas
+# (manter / tornar opcional / remover) — escolheu remover por enquanto.
+#   - app.py: tira o gate "confirmar telefone" (elif not telefone) — volta
+#     a ser login -> troca de senha obrigatória (se pendente) -> app.
+#   - auth/trocar_senha_obrigatoria.py: volta a pedir só a senha nova, sem
+#     o campo de celular.
+#   - auth/telefone.py, auth/confirmar_telefone.py, integracoes/brevo.py:
+#     ficam no repo, DORMENTES (documentado no topo de cada um) — prontos
+#     pra reativar se um dia fizer sentido.
+#   - database/schema_telefone.sql / usuarios.telefone: a COLUNA NÃO foi
+#     removida — evita perder o que já tiver sido capturado no intervalo
+#     (v11.0.0 chegou a ir pro ar; v12.0.0/SMS, não). Só fica sem uso.
+# Testado: py_compile de app.py e auth/trocar_senha_obrigatoria.py; fluxo
+# volta a ser idêntico ao de antes da v11.0.0 (mesma tela, mesmos campos).
+# MAJOR -- reverte fluxo de tela (mesmo critério da 13.0.0).
+
+APP_VERSION = "14.0.0"

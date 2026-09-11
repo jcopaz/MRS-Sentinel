@@ -1,11 +1,18 @@
 # auth/confirmar_telefone.py — Confirmação de telefone (recuperação por SMS)
 #
-# Por quê existe: contas criadas ANTES de 2026-09-11 não passam mais pela
-# captura de telefone (deve_trocar_senha já é False pra elas — não caem em
-# auth/trocar_senha_obrigatoria.py, que ganhou o campo nessa data). Esta
-# tela intercepta o app UMA VEZ, só pra quem ainda não tem telefone
+# DORMENTE desde 2026-09-11 (app.py não chama mais esta tela): existia pra
+# capturar telefone de quem já tinha conta antes da v11.0.0, viabilizando
+# reset por SMS. Revertida no mesmo dia — sem orçamento pra SMS agora (ver
+# core/versao.py 13.0.0, auth/telefone.py, integracoes/brevo.py). Fica
+# pronta pra reativar (bastaria importar e chamar de novo em app.py::main())
+# se um dia fizer sentido retomar.
+#
+# Descrição original: contas criadas ANTES de 2026-09-11 não passavam pela
+# captura de telefone (deve_trocar_senha já era False pra elas — não caíam
+# em auth/trocar_senha_obrigatoria.py, que ganhou o campo nessa data). Esta
+# tela interceptava o app UMA VEZ, só pra quem ainda não tinha telefone
 # cadastrado (usuarios.telefone IS NULL) — depois de preencher, nunca mais
-# aparece. Mesmo mecanismo de gate de app.py::main() já usado pra troca de
+# aparecia. Mesmo mecanismo de gate de app.py::main() já usado pra troca de
 # senha obrigatória, verificado DEPOIS dela.
 
 import streamlit as st

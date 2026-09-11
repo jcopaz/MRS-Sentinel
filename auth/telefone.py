@@ -1,10 +1,13 @@
 # auth/telefone.py — Validação/normalização de telefone (E.164, Brasil)
 #
-# Telefone vira canal de recuperação de senha (SMS) — captado na troca
-# obrigatória de senha (auth/trocar_senha_obrigatoria.py) e no prompt de
-# confirmação pra quem já tinha conta (auth/confirmar_telefone.py). Função
-# PURA, sem Streamlit/banco — testável isolada (ver PADRAO-DE-ENGENHARIA.md
-# secao 7: "função pura primeiro").
+# DORMENTE desde 2026-09-11 (não é chamado por nenhuma tela agora): a
+# captura de telefone existia pra viabilizar reset de senha por SMS
+# (v11.0.0), revertida no mesmo dia por falta de orçamento pra SMS (não
+# existe gateway gratuito — ver core/versao.py 13.0.0). Fica pronto pra
+# retomar (aqui, em integracoes/brevo.py e em auth/confirmar_telefone.py)
+# se um dia fizer sentido — WhatsApp, provedor mais barato, ou orçamento
+# aprovado. Função PURA, sem Streamlit/banco — testável isolada (ver
+# PADRAO-DE-ENGENHARIA.md secao 7: "função pura primeiro").
 
 from __future__ import annotations
 

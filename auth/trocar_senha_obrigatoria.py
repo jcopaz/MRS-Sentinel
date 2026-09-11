@@ -17,12 +17,12 @@
 # (update_user_by_id), sem depender de SMTP — a rede corporativa da MRS
 # bloqueia porta de saída SMTP mesmo (ver auth/recuperar_senha.py).
 #
-# 2026-09-11: ganha a captura do TELEFONE de recuperação (relato de e-mail
-# não chegando — SMS vira o canal prioritário). Pedido explícito do Julio:
-# capturar no exato momento da troca de senha, enquanto a pessoa já está
-# na tela. Quem já tinha conta e não passa mais por aqui (deve_trocar_senha
-# já False) recebe um prompt único equivalente — ver
-# auth/confirmar_telefone.py, acionado por app.py::main().
+# 2026-09-11: chegou a ganhar a captura de telefone (pro reset por SMS) e
+# foi revertida no mesmo dia — decisão do Julio: sem gateway de SMS
+# gratuito, sem orçamento pra isso agora (ver core/versao.py 11.0.0/13.0.0
+# e auth/telefone.py, auth/confirmar_telefone.py, que ficam no repo,
+# dormentes, prontos se um dia fizer sentido retomar). Esta tela volta a
+# pedir só a senha nova.
 #
 # Sessão 1: Lógica de troca
 # Sessão 2: Renderização
@@ -30,24 +30,17 @@
 import streamlit as st
 
 from database.client import get_supabase_admin
-from database.queries import (
-    buscar_auth_user_id_por_email,
-    atualizar_deve_trocar_senha,
-    atualizar_telefone,
-    log_acesso,
-)
+from database.queries import buscar_auth_user_id_por_email, atualizar_deve_trocar_senha, log_acesso
 from auth.session import get_usuario, clear_session
-from auth.telefone import validar_e_formatar_telefone
 
 
 # region ====================== SESSÃO 1: Lógica de troca ======================
 
-def _trocar_senha(nova_senha: str, telefone_e164: str) -> tuple[bool, str]:
+def _trocar_senha(nova_senha: str) -> tuple[bool, str]:
     """
-    Troca a senha da conta logada via API admin do Supabase, grava o
-    telefone de recuperação e desmarca deve_trocar_senha (banco + sessão em
-    memória — sem atualizar a sessão aqui, o gate continuaria pedindo troca/
-    telefone até o próximo login).
+    Troca a senha da conta logada via API admin do Supabase e desmarca
+    deve_trocar_senha (banco + sessão em memória — sem atualizar a sessão
+    aqui, o gate continuaria pedindo troca até o próximo login).
     """
     usuario = get_usuario()
     if not usuario:
@@ -64,9 +57,7 @@ def _trocar_senha(nova_senha: str, telefone_e164: str) -> tuple[bool, str]:
         return False, f"Erro ao trocar a senha: {e}"
 
     atualizar_deve_trocar_senha(usuario["id"], False)
-    atualizar_telefone(usuario["id"], telefone_e164)
     usuario["deve_trocar_senha"] = False
-    usuario["telefone"] = telefone_e164
     st.session_state["usuario"] = usuario
 
     try:
@@ -104,27 +95,18 @@ def render_trocar_senha_obrigatoria() -> None:
             "Confirme a nova senha", type="password",
             key="tso_confirma_senha",
         )
-        telefone_bruto = st.text_input(
-            "Celular com DDD (para recuperação por SMS)",
-            placeholder="(11) 91234-5678",
-            key="tso_telefone",
-        )
-        st.caption("Usamos seu celular só para recuperar seu acesso caso você esqueça a senha.")
         enviar = st.form_submit_button(
             "✅ Trocar senha e continuar", type="primary", key="tso_btn_enviar",
         )
 
     if enviar:
-        telefone = validar_e_formatar_telefone(telefone_bruto)
         if len(nova) < 8:
             st.error("⚠️ A senha deve ter no mínimo 8 caracteres.")
         elif nova != confirma:
             st.error("⚠️ As senhas não conferem.")
-        elif not telefone:
-            st.error("⚠️ Informe um celular válido, com DDD.")
         else:
             with st.spinner("Trocando senha..."):
-                ok, erro = _trocar_senha(nova, telefone)
+                ok, erro = _trocar_senha(nova)
             if ok:
                 st.success("✅ Senha alterada! Redirecionando...")
                 st.rerun()
