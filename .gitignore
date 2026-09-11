@@ -16,6 +16,11 @@ __pycache__/
 venv/
 env/
 ENV/
+nome_da_venv/
+
+# ── Pastas de trabalho locais avulsas (nunca rastreadas) ──
+Nova pasta/
+V.3.6.0/
 
 # ── Dados sensíveis (planilhas SAP) ──────────────────────
 *.xlsx
