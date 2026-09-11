@@ -34,6 +34,19 @@ from modules.admin_panel import SENHA_PADRAO  # noqa: E402
 # NÃO estão nesse CHECK — achado à parte, registrado na revisão do app.
 GERENCIAS_VALIDAS = {"SP", "VP", "FN", "FS", "RJ", "LC"}
 
+# "GG" na planilha = Gerência Geral São Paulo (SP+VP combinadas — mesma
+# agregação de modules/gerencia_geral.py "Visão Geral"). Confirmado pelo
+# Julio (2026-09-11): pessoa com esse valor deve ver SP e VP como Usuario.
+# O banco não tem coluna pra "lista de gerências" hoje (só uma sigla ou
+# NULL) — gerencia=NULL é o mecanismo mais próximo disponível (dá acesso a
+# Visão Geral SP+VP), mas TAMBÉM libera ver as outras 6 gerências
+# individualmente (auth/permissions.py::can_see_gerencia devolve True pra
+# qualquer alvo quando não há gerência delegada) — mais amplo do que "só
+# SP e VP". Registrado como limitação conhecida; usar só enquanto não
+# houver escopo de N-gerências de verdade (tabela usuario_escopo já existe,
+# sem UI/lógica ligada ainda).
+_GERENCIA_GERAL_SP_VP = "GG"
+
 
 def ler_planilha(caminho: str) -> list[dict]:
     wb = openpyxl.load_workbook(caminho, data_only=True)
@@ -69,7 +82,7 @@ def validar(registros: list[dict]) -> tuple[list[dict], list[dict]]:
             motivos.append("sem nome")
         if not r["email"] or "@" not in r["email"]:
             motivos.append("e-mail ausente/inválido")
-        if r["gerencia"] not in GERENCIAS_VALIDAS:
+        if r["gerencia"] not in GERENCIAS_VALIDAS and r["gerencia"] != _GERENCIA_GERAL_SP_VP:
             motivos.append(f"gerência {r['gerencia']!r} fora do CHECK do banco {sorted(GERENCIAS_VALIDAS)}")
         if r["matricula"] and r["matricula"] in vistos:
             motivos.append("matrícula duplicada na própria planilha")
@@ -82,6 +95,14 @@ def validar(registros: list[dict]) -> tuple[list[dict], list[dict]]:
             validos.append(r)
 
     return validos, problemas
+
+
+def gerencia_para_gravar(gerencia_planilha: str) -> str | None:
+    """"GG" (Gerência Geral SP+VP) não passa no usuarios_gerencia_check ->
+    grava NULL (mecanismo mais próximo hoje: dá Visão Geral SP+VP, mas
+    também amplia pras outras 6 gerências — ver comentário no topo do
+    arquivo). Qualquer outra sigla válida grava como está."""
+    return None if gerencia_planilha == _GERENCIA_GERAL_SP_VP else gerencia_planilha
 
 
 def criar_usuario(registro: dict, criado_por: str | None) -> tuple[bool, str]:
@@ -103,7 +124,7 @@ def criar_usuario(registro: dict, criado_por: str | None) -> tuple[bool, str]:
             "email_gerado": False,
             "auth_user_id": auth_user_id,
             "perfil": "usuario",
-            "gerencia": registro["gerencia"],
+            "gerencia": gerencia_para_gravar(registro["gerencia"]),
             "acesso_tv": False,
             "ativo": True,
             "criado_por": criado_por,
@@ -139,8 +160,10 @@ def main() -> None:
     print("=== SERIAM CRIADAS (dry-run) ===" if not args.commit else "=== CRIANDO ===")
     for r in validos:
         if not args.commit:
+            gerencia_gravada = gerencia_para_gravar(r["gerencia"])
+            nota = " -> grava gerencia=NULL (Visão Geral SP+VP)" if gerencia_gravada is None else ""
             print(
-                f"  [dry-run] {r['matricula']} | {r['nome']} | {r['gerencia']} | "
+                f"  [dry-run] {r['matricula']} | {r['nome']} | {r['gerencia']}{nota} | "
                 f"{r['email']} | perfil=usuario | senha provisória={SENHA_PADRAO}"
             )
         else:

@@ -122,10 +122,20 @@ def _inject_login_css():
 
 def _render_header():
     if LOGO_VIDEO_PATH.exists():
+        # Moldura circular (2026-09-11, pedido do Julio — mesmo tratamento do
+        # logo do Fin360: div quadrada com border-radius:50%+overflow:hidden
+        # recorta o vídeo (já quadrado, 720x720) num círculo; object-fit:cover
+        # preenche sem distorcer. Sem o transform:scale que o Fin360 usa — lá
+        # compensa uma margem escura do vídeo deles, o nosso não tem esse
+        # problema. Mesmo tamanho/loop/mudo de sempre, só a moldura muda.
         st.html(f"""
-        <div style="text-align:center;">
+        <div style="
+            width:{LOGO_WIDTH}px; height:{LOGO_WIDTH}px; margin:0 auto;
+            border-radius:50%; overflow:hidden;
+            box-shadow:0 8px 24px rgba(0,0,0,0.45);
+        ">
             <video autoplay loop muted playsinline
-                style="width:{LOGO_WIDTH}px;max-width:100%;display:inline-block;">
+                style="width:100%;height:100%;object-fit:cover;">
                 <source src="{LOGO_VIDEO_URL}" type="video/mp4">
             </video>
         </div>

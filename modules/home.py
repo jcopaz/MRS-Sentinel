@@ -156,12 +156,21 @@ def _inject_sidebar_css():
 def _render_logo():
     """Logo animado + nome do app no topo da sidebar."""
     if LOGO_VIDEO_PATH.exists():
+        # Moldura circular (2026-09-11) — mesmo tratamento aplicado em
+        # auth/login.py::_render_header(), pra manter a marca consistente
+        # entre a tela de login e a sidebar. Mesmo LOGO_WIDTH de sempre.
         st.sidebar.html(f"""
         <div class="sentinel-logo-wrap" style="text-align:center;">
-            <video autoplay loop muted playsinline
-                style="width:{LOGO_WIDTH}px;max-width:100%;display:inline-block;">
-                <source src="{LOGO_VIDEO_URL}" type="video/mp4">
-            </video>
+            <div style="
+                width:{LOGO_WIDTH}px; height:{LOGO_WIDTH}px; max-width:100%;
+                margin:0 auto; border-radius:50%; overflow:hidden;
+                box-shadow:0 6px 16px rgba(0,0,0,0.4);
+            ">
+                <video autoplay loop muted playsinline
+                    style="width:100%;height:100%;object-fit:cover;">
+                    <source src="{LOGO_VIDEO_URL}" type="video/mp4">
+                </video>
+            </div>
         </div>
         """)
     else:

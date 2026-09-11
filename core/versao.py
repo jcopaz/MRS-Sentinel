@@ -923,4 +923,23 @@
 # volta a ser idêntico ao de antes da v11.0.0 (mesma tela, mesmos campos).
 # MAJOR -- reverte fluxo de tela (mesmo critério da 13.0.0).
 
-APP_VERSION = "14.0.0"
+# 14.1.0 (2026-09-11): logo animado mais leve + moldura circular (pedido do
+# Julio: "deixar ele leve, sem alterar tamanho/funcionamento" + "borda
+# redonda igual o Fin360").
+#   - static/Sentinel_logo.mp4: reencodado (ffmpeg, libx264 crf 28, sem
+#     áudio — a trilha existia mas o <video> sempre usa `muted`, então era
+#     peso morto) — 2,17 MB -> 384 KB (-82%), MESMA resolução (720x720),
+#     mesmo loop/autoplay/tamanho de exibição. Frame comparado visualmente
+#     (extraído com ffmpeg) antes/depois — sem perda perceptível.
+#   - auth/login.py::_render_header() e modules/home.py::_render_logo():
+#     vídeo agora dentro de uma div circular (border-radius:50% +
+#     overflow:hidden + object-fit:cover), mesma técnica de
+#     src/branding.py::render_logo_video do Fin360 — sem o transform:scale
+#     de lá (compensa uma margem escura do vídeo deles; o nosso já é limpo
+#     e quadrado, não precisa).
+# Testado: py_compile; frame do vídeo novo comparado lado a lado com o
+# original (visualmente idêntico). Não validado em navegador real — pedir
+# confirmação visual do Julio após o deploy.
+# MINOR -- melhoria visual/performance aditiva, sem mudar schema/fluxo.
+
+APP_VERSION = "14.1.0"
