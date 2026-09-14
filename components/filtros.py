@@ -474,8 +474,10 @@ def render_filtros_cascata(
         for key in [
             f"filtro_centros_{uid}", f"filtro_ramais_{uid}",
             f"filtro_trechos_{uid}", f"filtro_patios_{uid}",
-            f"filtro_data_ini_{uid}", f"filtro_data_fim_{uid}",
+            f"filtro_ab_ini_{uid}", f"filtro_ab_fim_{uid}",
+            f"filtro_enc_ini_{uid}", f"filtro_enc_fim_{uid}",
             f"filtro_prioridade_{uid}", f"filtro_familia_{uid}",
+            f"filtro_diagnosticada_{uid}", f"filtro_anomalia_{uid}",
             f"filtro_tipo_insp_{uid}",
             f"filtro_status_base_vp_{uid}", f"filtro_status_base_ee_{uid}",
             f"filtro_km_ini_{uid}", f"filtro_km_fim_{uid}",

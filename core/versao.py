@@ -942,4 +942,25 @@
 # confirmação visual do Julio após o deploy.
 # MINOR -- melhoria visual/performance aditiva, sem mudar schema/fluxo.
 
-APP_VERSION = "14.1.0"
+# 14.1.1 (2026-09-14): corrige o botão "🗑️ Limpar filtros" (components/
+# filtros.py) não voltando pro estado inicial (relatado pelo Julio: só o
+# período ficava filtrado, o resto continuava preenchido, mas nem isso
+# funcionava de fato). Causa raiz real: a lista de chaves de session_state
+# apagadas pelo botão estava dessincronizada dos widgets atuais do
+# formulário -- sobravam `filtro_data_ini_{uid}`/`filtro_data_fim_{uid}`
+# (chaves órfãs de antes da separação Abertura/Encerramento) e faltavam as
+# chaves reais `filtro_ab_ini_{uid}`/`filtro_ab_fim_{uid}` (Abertura),
+# `filtro_enc_ini_{uid}`/`filtro_enc_fim_{uid}` (Encerramento) e
+# `filtro_diagnosticada_{uid}`/`filtro_anomalia_{uid}` (multiselects
+# adicionados depois, Sessão 2B). Resultado: ao clicar em Limpar, o
+# período e esses dois multiselects mantinham a seleção anterior em vez de
+# voltar ao padrão (Abertura = ano vigente, Encerramento = intervalo
+# completo, demais campos = tudo selecionado).
+# Testado: py_compile do arquivo. Não validado em navegador real (sem
+# ambiente Streamlit neste sandbox) -- pedir confirmação do Julio após o
+# deploy: estreitar um filtro em cada campo (Ramal, Trecho, Diagnosticada,
+# Tipo de anomalia, datas de Abertura/Encerramento) e clicar em Limpar
+# filtros.
+# PATCH -- bugfix, sem mudar comportamento esperado do botão.
+
+APP_VERSION = "14.1.1"
