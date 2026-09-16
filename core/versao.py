@@ -963,4 +963,27 @@
 # filtros.
 # PATCH -- bugfix, sem mudar comportamento esperado do botão.
 
-APP_VERSION = "14.1.1"
+# 14.1.2 (2026-09-15): dois ajustes visuais pedidos pelo Julio.
+#   (1) assinatura "Desenvolvido por: Julio Paz" centralizada, acima da
+#     linha de versão -- no sidebar (modules/home.py::_render_logo(), perto
+#     do logo) e na tela de login (auth/login.py::_render_header(), mesmo
+#     lugar/estilo, pra manter consistência entre as duas telas).
+#   (2) contraste do expander "Esqueci minha senha" na tela de login: o
+#     st.caption() de ajuda e o rótulo "Matrícula ou e-mail" usam a cor de
+#     texto padrão do Streamlit (cinza-escuro, pensada pra fundo claro) --
+#     quase ilegíveis sobre o fundo escuro (#1b2130) da tela de login,
+#     como reportado pelo Julio com print. Mesma armadilha de tema
+#     escuro/BaseWeb já documentada no sidebar (fix 6.0.2): o texto real
+#     mora num descendente interno, pintar só o elemento visado não basta.
+#     Corrigido em auth/login.py::_inject_login_css() com wildcard nos
+#     testids estáveis do próprio expander (stCaptionContainer,
+#     stWidgetLabel), sem tocar no valor digitado no campo nem no texto do
+#     botão (já legíveis, seguem como estavam). Expander também ganhou
+#     contorno/fundo sutil pra parecer um bloco intencional, não solto no
+#     meio da tela.
+# Testado: py_compile de auth/login.py e modules/home.py. Não validado em
+# navegador real (sem ambiente Streamlit neste sandbox) -- pedir
+# confirmação visual do Julio após o deploy.
+# PATCH -- ajuste visual pontual, sem mudar comportamento/fluxo.
+
+APP_VERSION = "14.1.2"

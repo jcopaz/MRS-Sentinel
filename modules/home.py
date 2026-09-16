@@ -186,7 +186,10 @@ def _render_logo():
         <div style="font-size:0.72rem; color:rgba(255,255,255,0.5); margin-top:4px; letter-spacing:0.3px;">
             INTELIGÊNCIA DE MANUTENÇÃO
         </div>
-        <div style="font-size:0.7rem; color:rgba(255,255,255,0.35); margin-top:6px; letter-spacing:0.5px;">
+        <div style="font-size:0.68rem; color:rgba(255,255,255,0.4); margin-top:10px; letter-spacing:0.3px;">
+            Desenvolvido por: Julio Paz
+        </div>
+        <div style="font-size:0.7rem; color:rgba(255,255,255,0.35); margin-top:4px; letter-spacing:0.5px;">
             v""" + APP_VERSION + """
         </div>
     </div>

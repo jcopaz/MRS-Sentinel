@@ -84,6 +84,32 @@ def _inject_login_css():
         box-shadow: 0 6px 20px rgba(30,58,95,0.35) !important;
     }
 
+    /* "Esqueci minha senha" -- o expander senta sobre o fundo escuro da
+       tela (.stApp acima), mas o rótulo do campo ("Matrícula ou e-mail") e
+       o st.caption() de ajuda usam a cor de texto padrão do Streamlit
+       (cinza-escuro, pensada pra fundo claro) -- quase invisível sobre
+       #1b2130 (mesma armadilha de BaseWeb/tema escuro já documentada no
+       app irmão Gestão_OS: pintar só o elemento visado não basta, o texto
+       real mora num descendente interno). Corrigido igual ao fix do
+       sidebar (modules/home.py, v6.0.2): wildcard nos dois containers
+       certos (testid estável do Streamlit), sem tocar no valor digitado
+       dentro do campo nem no texto do botão (que já ficam sobre uma caixa
+       clara e continuam legíveis do jeito que estão). */
+    [data-testid="stExpander"] {
+        background: rgba(255,255,255,0.04) !important;
+        border: 1px solid rgba(255,255,255,0.18) !important;
+        border-radius: 10px !important;
+        margin-top: 1.2rem;
+    }
+    [data-testid="stExpander"] summary {
+        color: #ffffff !important;
+        font-weight: 600;
+    }
+    [data-testid="stExpanderDetails"] [data-testid="stCaptionContainer"] * ,
+    [data-testid="stExpanderDetails"] [data-testid="stWidgetLabel"] * {
+        color: rgba(255,255,255,0.8) !important;
+    }
+
     /* Logo em vídeo — centralizado direto no HTML (ver _render_header), não
        precisa de regra aqui: é um <div style="text-align:center"> escrito à
        mão, sem depender de testid interno do Streamlit (que muda de versão
@@ -152,7 +178,10 @@ def _render_header():
         <div class="sentinel-gold-3d lg">SENTINEL</div>
         <p style="color:#ffffff;font-size:0.95rem;margin:0.4rem 0 0;">
             Plataforma de Inteligência de Manutenção da Malha</p>
-        <div style="color:rgba(255,255,255,0.45);font-size:0.75rem;margin-top:0.35rem;letter-spacing:0.5px;">
+        <div style="color:rgba(255,255,255,0.5);font-size:0.72rem;margin-top:0.6rem;letter-spacing:0.3px;">
+            Desenvolvido por: Julio Paz
+        </div>
+        <div style="color:rgba(255,255,255,0.45);font-size:0.75rem;margin-top:0.3rem;letter-spacing:0.5px;">
             v""" + APP_VERSION + """</div>
         <div style="width:60px;height:3px;
             background:linear-gradient(90deg,#ffb000,#ffd04d);
