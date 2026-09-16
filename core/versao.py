@@ -986,4 +986,96 @@
 # confirmação visual do Julio após o deploy.
 # PATCH -- ajuste visual pontual, sem mudar comportamento/fluxo.
 
-APP_VERSION = "14.1.2"
+# 15.0.0 (2026-09-16): upload de Notas (VP/EE) passa a substituir por
+# PERÍODO, não a base inteira — pedido do Julio, com exemplo: base
+# completa desde 2008, sobe um arquivo só de 2026 → antes isso apagava
+# (arquivava) TODO o histórico anterior da Gerência+Disciplina, porque a
+# trava de duplicidade era "1 upload ativo por Gerência+Disciplina"
+# (uploads_historico.status). Agora só as notas cujo data_nota (abertura)
+# cai dentro do período do arquivo novo são substituídas — o resto do
+# histórico fica intocado.
+#
+# Decisões confirmadas com o Julio antes de codar: (1) nota que existia,
+# cai dentro do período novo, mas não vem no arquivo novo é arquivada
+# junto — o arquivo é a verdade completa daquele período; (2) o período é
+# detectado automaticamente (min/max de data_nota do arquivo), com preview
+# mostrando quantas notas seriam substituídas vs. preservadas ANTES de
+# confirmar; (3) escopo só Notas VP/EE por enquanto — RASF, RASF_BASE (já
+# fora de uso) e Tratamento de Notas continuam substituindo a base inteira
+# por upload, sem nenhuma mudança.
+#
+# Mecânica nova (database/schema_upload_periodo.sql, rodar manualmente no
+# Supabase — ALTER + backfill + índice):
+#   - notas.vigente (bool, novo): a trava de duplicidade migra de nível de
+#     UPLOAD pra nível de LINHA. Backfill obrigatório junto com o ALTER
+#     (senão o DEFAULT true da coluna nova faz voltar a aparecer notas de
+#     uploads já 'substituido' antes desta versão).
+#   - uploads_historico.periodo_ini/periodo_fim (novo, só preenchido em
+#     uploads de VP/EE daqui pra frente) — auditoria do período coberto.
+#   - idx_uploads_historico_ativo_unico (schema_upload_unico.sql) passa a
+#     excluir VP/EE — pra essas 2 disciplinas, ter vários uploads 'ativo'
+#     simultâneos (um por período já enviado) virou o normal, não bug.
+#     RASF/RASF_BASE/TRATAMENTO continuam com a proteção de sempre.
+#   - Pra VP/EE, uploads_historico.status vira só auditoria (fica 'ativo'
+#     pra sempre depois de criado — um upload novo não substitui mais um
+#     upload antigo inteiro, só o período que ele cobre).
+#
+# Código:
+#   - modules/data_uploader.py::_calcular_periodo() (novo) — min/max de
+#     data_nota de um recorte por Gerência, ignorando nulos (nota sem data
+#     é inserida normalmente, mas nunca é "protegida" nem "arquivada" por
+#     nenhum recorte de período).
+#   - _executar_upload_gerencia(): Etapa 1 deixa de arquivar o upload
+#     'ativo' anterior inteiro e passa a arquivar (vigente=false) só as
+#     notas vigentes com data_nota dentro do período detectado; bloqueia
+#     com erro claro se nenhuma linha tiver data_nota válida (sem período
+#     não dá pra substituir com segurança).
+#   - _render_preview(): novo bloco "🗓️ Período detectado" por Gerência
+#     (um arquivo pode trazer mais de uma) mostrando o período e, via nova
+#     database/queries.py::contar_impacto_periodo(), quantas notas
+#     vigentes hoje seriam substituídas vs. preservadas — pedido do Julio
+#     de "mostrar e pedir confirmação antes de gravar".
+#   - database/queries.py::get_notas_gerencia(): troca o filtro de leitura
+#     de "upload_id pertence a um upload ativo" (_upload_ids_ativos) pra
+#     `vigente=true` direto. Fronteira limpa: essa função só é usada pela
+#     tabela `notas` (VP/EE) — _upload_ids_ativos() continua exatamente
+#     igual, usada só por get_tratamento_gerencia (e pelos clones em
+#     queries_rasf.py/queries_baseline.py), sem nenhum código bifurcado.
+#   - modules/admin_panel.py::_render_secao_resolver_duplicados(): parava
+#     de detectar "2+ uploads ativos pra mesma Gerência+Disciplina" como
+#     bug e apagava os mais antigos — isso é agora o ESPERADO pra VP/EE,
+#     então a ferramenta passa a ignorar essas 2 disciplinas (continua
+#     cobrindo RASF/RASF_BASE/TRATAMENTO normalmente).
+#   - modules/admin_panel.py::_render_aba_gestao_dados(): texto do aviso
+#     deixa explícito que o "apagar notas" manual (reprocessamento) zera
+#     TODOS os períodos, não só o upload mais recente — antes isso já era
+#     verdade implicitamente, agora fica mais importante dizer, já que o
+#     normal passa a ser vários períodos coexistindo.
+#
+# Pendência CONHECIDA e aceita por ora (documentada em
+# schema_upload_periodo.sql, não bloqueia esta versão): sem o índice único
+# cobrindo VP/EE, dois uploads simultâneos pro MESMO período (duplo-clique,
+# ou dois admins subindo ao mesmo tempo) não são mais barrados pelo banco
+# como eram antes. Uma trava de verdade exigiria mover "arquivar período +
+# inserir lote" pra uma função Postgres (RPC) com pg_advisory_xact_lock
+# (seria a 1ª RPC do projeto) — mais trabalho pra um risco do mesmo tamanho
+# do que já era aceito no modelo antigo (ver comentário em
+# schema_upload_unico.sql). Fica registrado pra retomar se um dia fizer
+# falta na prática.
+#
+# Testado: py_compile de todos os arquivos tocados; simulação em memória
+# (sem Supabase real, fora do alcance deste sandbox) reproduzindo a mesma
+# lógica de arquivar-por-período + inserir usada no app — upload A (base
+# 2008-2026) → upload B (só set/2026): notas fora do período preservadas,
+# notas de dentro do período arquivadas e substituídas pelas novas,
+# reupload do mesmo período é idempotente (não duplica), nota sem
+# data_nota nunca é tocada por nenhum arquivamento por período. NÃO
+# validado contra o Supabase real nem em produção — pedir ao Julio pra
+# rodar o schema_upload_periodo.sql manualmente (ALTER + backfill) ANTES
+# de fazer o primeiro upload de Notas nesta versão, e confirmar visualmente
+# depois: subir uma base completa, depois subir só um período e conferir
+# que só aquele período mudou.
+# MAJOR -- mudança de schema de banco + reorganização do fluxo de upload
+# de Notas (VP/EE).
+
+APP_VERSION = "15.0.0"

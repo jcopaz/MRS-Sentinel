@@ -45,6 +45,31 @@ def _verificar_arquivamento(supabase, gerencia: str, disciplina: str) -> bool:
         return True
 
 
+def _calcular_periodo(sub_df: pd.DataFrame) -> tuple:
+    """
+    Detecta o período (min/max de data_nota) de um recorte de Notas (VP/EE)
+    já filtrado por Gerência — base do upload por período (v15.0.0, pedido
+    do Julio: subir só um pedaço do tempo substitui só aquele pedaço, não a
+    base inteira). Linhas com data_nota nula ficam FORA do período
+    detectado (não entram no min/max), mas continuam sendo inseridas
+    normalmente — só não são "protegidas"/consideradas por nenhum
+    arquivamento por período, nem antes nem depois.
+
+    Returns:
+        (periodo_ini, periodo_fim, qtd_sem_data) — periodo_ini/fim são
+        pandas.Timestamp, ou (None, None, qtd) se nenhuma linha do recorte
+        tiver data_nota válida.
+    """
+    if "data_nota" not in sub_df.columns:
+        return None, None, len(sub_df)
+    datas = pd.to_datetime(sub_df["data_nota"], errors="coerce")
+    qtd_sem_data = int(datas.isna().sum())
+    validas = datas.dropna()
+    if validas.empty:
+        return None, None, qtd_sem_data
+    return validas.min(), validas.max(), qtd_sem_data
+
+
 # region ====================== SESSÃO 1: Header ======================
 
 def _render_header():
@@ -307,14 +332,47 @@ def _render_preview(
             hide_index=True,
         )
 
-    # Aviso sobre substituição
-    gerencias_txt = " e ".join(gerencias_presentes) if mista else gerencia
-    st.warning(
-        f"⚠️ **Atenção:** Esta ação irá **substituir** a base ativa da "
-        f"Gerência **{gerencias_txt}** — Disciplina **{disciplina}**. "
-        "Os dados anteriores serão arquivados e não poderão ser recuperados automaticamente.",
-        icon="⚠️"
-    )
+    # Período detectado + impacto (v15.0.0) — upload por período: só as
+    # notas ABERTAS (data_nota) dentro do período do arquivo são
+    # substituídas; o resto do histórico daquela Gerência+Disciplina fica
+    # intocado. Calculado por Gerência (um arquivo pode trazer mais de uma).
+    from database.queries import contar_impacto_periodo
+
+    bloqueado = False
+    st.markdown("##### 🗓️ Período detectado")
+    for ger in gerencias_presentes:
+        sub_df = df[df["gerencia"] == ger] if mista else df
+        periodo_ini, periodo_fim, qtd_sem_data = _calcular_periodo(sub_df)
+
+        if periodo_ini is None:
+            bloqueado = True
+            st.error(
+                f"❌ **Gerência {ger}:** nenhuma linha com data de abertura "
+                "(data_nota) válida — não dá pra detectar um período pra "
+                "substituir com segurança. Confira o arquivo (coluna de "
+                "data de abertura da nota) antes de subir."
+            )
+            continue
+
+        qtd_dentro, qtd_fora = contar_impacto_periodo(ger, disciplina, periodo_ini.date(), periodo_fim.date())
+        periodo_txt = f"{periodo_ini:%d/%m/%Y} a {periodo_fim:%d/%m/%Y}"
+        st.info(
+            f"📅 **Gerência {ger}:** período **{periodo_txt}** — "
+            f"**{qtd_dentro:,}** nota(s) vigente(s) hoje nesse período serão "
+            f"**substituídas**, **{qtd_fora:,}** fora do período ficam "
+            "**preservadas**.".replace(",", "."),
+            icon="📅"
+        )
+        if qtd_sem_data:
+            st.caption(
+                f"⚠️ {qtd_sem_data} nota(s) da Gerência {ger} sem data de "
+                "abertura reconhecida — serão inseridas normalmente, mas não "
+                "entram no cálculo do período nem são protegidas por ele."
+            )
+
+    # Botão de confirmação desabilitado se algum período não pôde ser detectado
+    if bloqueado:
+        st.stop()
 
     # Botão de confirmação
     st.markdown("<div style='margin-top:1rem;'></div>", unsafe_allow_html=True)
@@ -375,10 +433,16 @@ def _executar_upload_gerencia(
     tamanho_mb: float,
 ) -> bool:
     """
-    Persiste as notas de UMA gerência em 3 etapas:
-    1. Arquiva uploads ativos anteriores (gerencia+disciplina)
-    2. Insere registro em uploads_historico
-    3. Insere notas em lote
+    Persiste as notas de UMA gerência em 3 etapas (v15.0.0 — upload por
+    PERÍODO, pedido do Julio: substitui só o que está dentro do período do
+    arquivo, não a base inteira):
+    1. Arquiva (vigente=false), por data_nota, só as notas vigentes que
+       caem dentro do período detectado no arquivo — o resto do histórico
+       daquela Gerência+Disciplina fica intocado.
+    2. Insere registro em uploads_historico (status fica 'ativo' pra
+       sempre — deixou de ser a trava de leitura pra VP/EE, vira só
+       auditoria; ver database/schema_upload_periodo.sql)
+    3. Insere notas em lote (vigente=true por padrão da coluna)
 
     Retorna True em caso de sucesso, False em caso de falha.
     """
@@ -389,23 +453,29 @@ def _executar_upload_gerencia(
     barra = st.progress(0, text="Iniciando upload...")
 
     try:
-        # Etapa 1: Arquivar uploads anteriores da mesma gerência+disciplina
-        barra.progress(10, text="Arquivando base anterior...")
-        supabase.table("uploads_historico").update({"status": "substituido"}).match({
-            "gerencia":   gerencia,
-            "disciplina": disciplina,
-            "status":     "ativo",
-        }).execute()
-
-        if not _verificar_arquivamento(supabase, gerencia, disciplina):
+        periodo_ini, periodo_fim, _ = _calcular_periodo(df)
+        if periodo_ini is None:
             barra.empty()
             st.error(
-                f"❌ Falha ao arquivar a base anterior da Gerência **{gerencia}** "
-                f"— Disciplina **{disciplina}**. Upload cancelado para evitar "
-                "duplicar notas no Dash. Tente novamente — se persistir, pode "
-                "ser instabilidade da rede corporativa."
+                f"❌ Nenhuma nota da Gerência **{gerencia}** tem data de "
+                "abertura (data_nota) válida — não dá pra detectar um "
+                "período pra substituir com segurança. Upload cancelado."
             )
             return False
+
+        # Etapa 1: arquiva só as notas vigentes cujo data_nota cai dentro
+        # do período do arquivo novo (não mais o upload anterior inteiro).
+        barra.progress(10, text="Arquivando notas do período anterior...")
+        (
+            supabase.table("notas")
+            .update({"vigente": False})
+            .eq("gerencia", gerencia)
+            .eq("disciplina", disciplina)
+            .eq("vigente", True)
+            .gte("data_nota", str(periodo_ini.date()))
+            .lte("data_nota", str(periodo_fim.date()))
+            .execute()
+        )
 
         # Etapa 2: Criar registro em uploads_historico
         barra.progress(25, text="Registrando upload...")
@@ -417,6 +487,8 @@ def _executar_upload_gerencia(
             "total_notas":   total_notas,
             "tamanho_bytes": int(tamanho_mb * 1024 * 1024),
             "status":        "ativo",
+            "periodo_ini":   str(periodo_ini.date()),
+            "periodo_fim":   str(periodo_fim.date()),
             "metadados": {
                 "colunas": list(df.columns),
                 "ramais":  df["ramal"].dropna().unique().tolist() if "ramal" in df.columns else [],
@@ -474,14 +546,15 @@ def _executar_upload_gerencia(
         barra.empty()
         msg = str(e).lower()
         if "duplicate" in msg or "unique" in msg:
-            # idx_uploads_historico_ativo_unico (schema_upload_unico.sql)
-            # barrou 2 uploads 'ativo' simultâneos pra mesma Gerência+Disciplina
-            # — provavelmente outra pessoa (ou clique duplicado) subiu ao
-            # mesmo tempo. Não é corrupção de dado, é a trava funcionando.
+            # Upload por período (v15.0.0) não tem mais índice único pra
+            # VP/EE (idx_uploads_historico_ativo_unico passou a excluir
+            # essas 2 disciplinas — schema_upload_periodo.sql), então este
+            # ramo praticamente não deveria mais disparar aqui. Mantido por
+            # segurança, caso outra constraint dispare "duplicate"/"unique".
             st.error(
-                f"❌ Outro upload para **{gerencia}/{disciplina}** foi concluído "
-                "ao mesmo tempo que este. Para evitar duplicar notas, este foi "
-                "cancelado — recarregue a tela e tente de novo se for necessário."
+                f"❌ Outro upload para **{gerencia}/{disciplina}** pode ter sido "
+                "concluído ao mesmo tempo que este. Recarregue a tela e "
+                "confira o Histórico de Uploads antes de tentar de novo."
             )
         else:
             st.error(f"❌ Falha durante o upload da Gerência {gerencia}: {e}")

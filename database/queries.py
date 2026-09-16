@@ -82,17 +82,12 @@ def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataF
     try:
         supabase = get_supabase()
 
-        # ⭐ ANTI-DUPLICAÇÃO: lê apenas as notas do(s) upload(s) ATIVO(s).
-        # Um novo upload marca o anterior como 'substituido' mas NÃO apaga as
-        # notas antigas — por isso filtramos pelos upload_id ainda ativos.
-        upload_ids = _upload_ids_ativos(gerencia, disciplina)
-        if not upload_ids:
-            return pd.DataFrame()
-
-        # ⭐ PAGINAÇÃO: o PostgREST limita cada select a um máximo de linhas
-        # por página (padrão 1000). Sem isso, gerências com >1000 notas tinham
-        # o restante truncado silenciosamente (ex.: só 2 de 13 tipo_atividade
-        # apareciam nos filtros porque as demais notas nunca chegavam ao app).
+        # ⭐ ANTI-DUPLICAÇÃO (v15.0.0): upload por PERÍODO — cada nota carrega
+        # seu próprio `vigente` (um upload novo só arquiva, por data_nota, o
+        # período que ele cobre; o resto do histórico continua vigente=true).
+        # Antes disso era feito por upload inteiro (upload_id IN uploads
+        # 'ativo' — ver _upload_ids_ativos, que continua existindo só pra
+        # Tratamento/RASF, que ainda substituem a base inteira por upload).
         PAGE_SIZE = 1000
         registros: list[dict] = []
         offset = 0
@@ -101,7 +96,7 @@ def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataF
                 supabase.table("notas")
                 .select("*, uploads_historico(enviado_em, usuario_id, nome_arquivo)")
                 .eq("gerencia", gerencia)
-                .in_("upload_id", upload_ids)
+                .eq("vigente", True)
                 .range(offset, offset + PAGE_SIZE - 1)
             )
             if disciplina:
@@ -138,6 +133,50 @@ def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataF
     except Exception as e:
         st.error(f"❌ Erro ao buscar notas ({gerencia}/{disciplina}): {e}")
         return pd.DataFrame()
+
+
+def contar_impacto_periodo(
+    gerencia: str, disciplina: str, periodo_ini, periodo_fim
+) -> tuple[int, int]:
+    """
+    Conta, ANTES de gravar um upload de Notas (VP/EE) por período: quantas
+    notas vigentes hoje caem DENTRO do período detectado no arquivo (serão
+    arquivadas) e quantas ficam FORA (preservadas). Usado no preview de
+    confirmação (modules/data_uploader.py::_render_preview), pra mostrar o
+    impacto real antes do usuário confirmar.
+
+    Returns:
+        (qtd_dentro_do_periodo, qtd_fora_do_periodo)
+    """
+    try:
+        supabase = get_supabase()
+        base = (
+            supabase.table("notas")
+            .select("id", count="exact")
+            .eq("gerencia", gerencia)
+            .eq("disciplina", disciplina)
+            .eq("vigente", True)
+        )
+        dentro = (
+            base.gte("data_nota", str(periodo_ini))
+            .lte("data_nota", str(periodo_fim))
+            .execute()
+        )
+        qtd_dentro = dentro.count or 0
+
+        total = (
+            supabase.table("notas")
+            .select("id", count="exact")
+            .eq("gerencia", gerencia)
+            .eq("disciplina", disciplina)
+            .eq("vigente", True)
+            .execute()
+        )
+        qtd_total = total.count or 0
+
+        return qtd_dentro, max(qtd_total - qtd_dentro, 0)
+    except Exception:
+        return 0, 0
 
 
 def get_uploads_historico(gerencia: str | None = None) -> pd.DataFrame:

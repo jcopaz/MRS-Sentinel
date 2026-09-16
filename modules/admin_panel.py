@@ -1161,8 +1161,12 @@ def _render_aba_gestao_dados() -> None:
     st.markdown("### 🗑️ Gestão de Dados — Reprocessamento")
 
     st.warning(
-        "⚠️ **Atenção**: Esta operação apaga permanentemente as notas do banco. "
-        "Use apenas para reprocessar uma planilha com parser corrigido.",
+        "⚠️ **Atenção**: Esta operação apaga permanentemente **TODAS as notas** "
+        "da Gerência/Disciplina escolhida, de **qualquer período** (desde "
+        "v15.0.0, o upload normal de Notas VP/EE substitui só o período do "
+        "arquivo, não a base inteira — isso aqui é o reset manual completo, "
+        "não o fluxo do dia a dia). Use apenas para reprocessar do zero "
+        "uma planilha com parser corrigido.",
         icon="⚠️",
     )
 
@@ -1316,13 +1320,22 @@ def _render_secao_resolver_duplicados() -> None:
     de vez: apaga as linhas de dados (notas/rasf_ee/rasf_baseline) e o
     próprio registro de uploads_historico dos uploads antigos, mantendo só
     o mais recente de cada Gerência+Disciplina.
+
+    v15.0.0: Notas (VP/EE) saem do escopo — desde o upload por PERÍODO
+    (database/schema_upload_periodo.sql), ter vários uploads 'ativo' ao
+    mesmo tempo pra mesma Gerência+Disciplina virou o ESPERADO (um por
+    período já enviado), não mais sinal de falha de rede. RASF/RASF_BASE/
+    TRATAMENTO continuam no modelo antigo (1 upload ativo por vez) e seguem
+    cobertos por esta ferramenta normalmente.
     """
     st.markdown("#### 🔁 Resolver Uploads Duplicados (status 'ativo' preso)")
     st.caption(
         "Detecta uploads que ficaram marcados como 'ativo' quando já deveriam "
         "ter sido substituídos (falha de rede durante o upload) e apaga os "
         "antigos — dados e registro do upload — mantendo só o mais recente "
-        "de cada Gerência+Disciplina."
+        "de cada Gerência+Disciplina. **Não cobre Notas (VP/EE)** — desde "
+        "v15.0.0 elas usam upload por período, onde vários uploads ativos "
+        "simultâneos são esperados, não um problema a resolver."
     )
 
     supabase = get_supabase()
@@ -1334,7 +1347,8 @@ def _render_secao_resolver_duplicados() -> None:
             .eq("status", "ativo")
             .execute()
         )
-        registros = resp.data or []
+        # VP/EE fora do escopo desta ferramenta (ver docstring acima).
+        registros = [r for r in (resp.data or []) if r["disciplina"] not in ("VP", "EE")]
     except Exception as e:
         st.error(f"❌ Erro ao buscar uploads: {e}")
         return
