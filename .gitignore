@@ -51,3 +51,6 @@ agente/
 
 # ── Arquivos compactados locais (backups, exports) ───────
 *.zip
+
+# Template corporativo MRS (binario pesado, material interno)
+[[]GRUPO T*CNICO[]] TEMPLATE PARA APRESENTA*.pptx
