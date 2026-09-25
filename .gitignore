@@ -54,3 +54,8 @@ agente/
 
 # Template corporativo MRS (binario pesado, material interno)
 [[]GRUPO T*CNICO[]] TEMPLATE PARA APRESENTA*.pptx
+
+# Material de apresentacao (fora do deploy)
+PPT/
+assets/
+Apresentacao_*.html
