@@ -359,7 +359,8 @@ def _render_preview(
         st.info(
             f"📅 **Gerência {ger}:** período **{periodo_txt}** — "
             f"**{qtd_dentro:,}** nota(s) vigente(s) hoje nesse período serão "
-            f"**substituídas**, **{qtd_fora:,}** fora do período ficam "
+            "**atualizadas** pelo arquivo (as que não vierem nele saem da "
+            f"base), **{qtd_fora:,}** fora do período ficam "
             "**preservadas**.".replace(",", "."),
             icon="📅"
         )
@@ -433,21 +434,32 @@ def _executar_upload_gerencia(
     tamanho_mb: float,
 ) -> bool:
     """
-    Persiste as notas de UMA gerência em 3 etapas (v15.0.0 — upload por
-    PERÍODO, pedido do Julio: substitui só o que está dentro do período do
-    arquivo, não a base inteira):
-    1. Arquiva (vigente=false), por data_nota, só as notas vigentes que
-       caem dentro do período detectado no arquivo — o resto do histórico
-       daquela Gerência+Disciplina fica intocado.
-    2. Insere registro em uploads_historico (status fica 'ativo' pra
-       sempre — deixou de ser a trava de leitura pra VP/EE, vira só
-       auditoria; ver database/schema_upload_periodo.sql)
-    3. Insere notas em lote (vigente=true por padrão da coluna)
+    Persiste as notas de UMA gerência em 3 etapas (upload por PERÍODO +
+    UPSERT por nota — ver database/schema_notas_upsert.sql):
+    1. Insere registro em uploads_historico (status fica 'ativo' pra
+       sempre — só auditoria; ver database/schema_upload_periodo.sql)
+    2. UPSERT das notas em lote pela chave (gerencia, disciplina,
+       numero_nota): nota que já existe é ATUALIZADA na mesma linha, nota
+       nova é inserida. Antes era arquivar (vigente=false) + INSERT de
+       tudo de novo — cada recarga duplicava a base inteira (412 mil
+       linhas pra 46 mil vigentes, 379 MB, estourando o Free do Supabase).
+    3. Apaga as notas do período do arquivo que NÃO vieram nele (canceladas
+       /excluídas no SAP) — mesmo efeito visível do arquivamento antigo,
+       sem deixar lixo. Identificadas por upload_id diferente do atual,
+       já que o upsert da etapa 2 grava o upload_id novo em toda nota que
+       veio no arquivo. Roda DEPOIS do upsert: se o upload cair no meio,
+       sobra nota velha, nunca some nota.
 
     Retorna True em caso de sucesso, False em caso de falha.
     """
     supabase    = get_supabase()
     usuario_id  = get_id()
+
+    # A mesma nota 2x no arquivo derruba o lote inteiro no upsert ("ON
+    # CONFLICT DO UPDATE command cannot affect row a second time") — fica a
+    # última ocorrência, mesma regra de "a mais nova vale".
+    if "numero_nota" in df.columns:
+        df = df.drop_duplicates("numero_nota", keep="last").reset_index(drop=True)
     total_notas = len(df)
 
     barra = st.progress(0, text="Iniciando upload...")
@@ -463,21 +475,7 @@ def _executar_upload_gerencia(
             )
             return False
 
-        # Etapa 1: arquiva só as notas vigentes cujo data_nota cai dentro
-        # do período do arquivo novo (não mais o upload anterior inteiro).
-        barra.progress(10, text="Arquivando notas do período anterior...")
-        (
-            supabase.table("notas")
-            .update({"vigente": False})
-            .eq("gerencia", gerencia)
-            .eq("disciplina", disciplina)
-            .eq("vigente", True)
-            .gte("data_nota", str(periodo_ini.date()))
-            .lte("data_nota", str(periodo_fim.date()))
-            .execute()
-        )
-
-        # Etapa 2: Criar registro em uploads_historico
+        # Etapa 1: Criar registro em uploads_historico
         barra.progress(25, text="Registrando upload...")
         resp_upload = supabase.table("uploads_historico").insert({
             "usuario_id":    usuario_id,
@@ -497,23 +495,42 @@ def _executar_upload_gerencia(
 
         upload_id = resp_upload.data[0]["id"]
 
-        # Etapa 3: Inserir notas em lotes de 500
+        # Etapa 2: UPSERT das notas em lotes de 500
         barra.progress(40, text="Convertendo dados...")
         registros = df_para_registros_supabase(df, upload_id)
+        for rec in registros:
+            rec["vigente"] = True
 
         tamanho_lote = 500
         total_lotes  = (len(registros) + tamanho_lote - 1) // tamanho_lote
 
         for i in range(0, len(registros), tamanho_lote):
             lote = registros[i : i + tamanho_lote]
-            supabase.table("notas").insert(lote).execute()
+            (
+                supabase.table("notas")
+                .upsert(lote, on_conflict="gerencia,disciplina,numero_nota")
+                .execute()
+            )
 
-            progresso = 40 + int(55 * (i + tamanho_lote) / len(registros))
+            progresso = 40 + int(50 * (i + tamanho_lote) / len(registros))
             lote_num  = i // tamanho_lote + 1
             barra.progress(
-                min(progresso, 95),
-                text=f"Inserindo notas... lote {lote_num}/{total_lotes}"
+                min(progresso, 90),
+                text=f"Gravando notas... lote {lote_num}/{total_lotes}"
             )
+
+        # Etapa 3: apaga as notas do período que não vieram no arquivo
+        barra.progress(95, text="Removendo notas que saíram da base...")
+        (
+            supabase.table("notas")
+            .delete()
+            .eq("gerencia", gerencia)
+            .eq("disciplina", disciplina)
+            .neq("upload_id", upload_id)
+            .gte("data_nota", str(periodo_ini.date()))
+            .lte("data_nota", str(periodo_fim.date()))
+            .execute()
+        )
 
         barra.progress(100, text="Concluído!")
 

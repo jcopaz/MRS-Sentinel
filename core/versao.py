@@ -1077,5 +1077,23 @@
 # que só aquele período mudou.
 # MAJOR -- mudança de schema de banco + reorganização do fluxo de upload
 # de Notas (VP/EE).
+#
+# 15.1.0 (2026-10-05): upload de Notas (VP/EE) passa a ser UPSERT por nota.
+# O modelo da 15.0.0 arquivava (vigente=false) as notas do período e
+# INSERIA tudo de novo, sem nunca apagar: em 04/10/2026 a tabela `notas`
+# tinha 412.650 linhas pra 46.226 vigentes (379 MB de 467 MB do banco,
+# quase no limite de 500 MB do plano Free do Supabase).
+#   - modules/data_uploader.py::_executar_upload_gerencia(): upsert pela
+#     chave (gerencia, disciplina, numero_nota) — nota existente é
+#     atualizada na mesma linha, nota nova é inserida; depois apaga as
+#     notas do período que não vieram no arquivo (upload_id != atual) —
+#     mesmo efeito visível do arquivamento antigo, sem deixar lixo. Nota
+#     repetida no próprio arquivo: fica a última (upsert não aceita a mesma
+#     chave 2x no lote).
+#   - database/schema_notas_upsert.sql (rodar manualmente no Supabase):
+#     apaga as arquivadas, deduplica as vigentes, cria a constraint única
+#     que o upsert usa. Sem a constraint o upsert falha ANTES de mexer em
+#     qualquer nota (seguro publicar o código antes do SQL).
+# MINOR -- mesma tela, mesmo resultado visível; muda só a persistência.
 
-APP_VERSION = "15.0.0"
+APP_VERSION = "15.1.0"
