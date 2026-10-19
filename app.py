@@ -53,7 +53,6 @@ from modules.evolucao_malha import render_evolucao_malha
 from modules.visao_campo   import render_visao_campo
 from modules.selecionar_gg  import render_selecionar_gg
 from modules.gerencia_placeholder import render_gerencia_placeholder
-from modules.modo_tv import render_modo_tv
 from modules.prospeccao_itirapina import render_prospeccao_itirapina
 from core.glossarios import LISTA_GERENCIAS
 # endregion
@@ -197,7 +196,6 @@ def _rotear():
         "alertas":        render_alertas,
         "upload":         render_upload,
         "admin":          render_admin_panel,
-        "modo_tv":        render_modo_tv,
         "prospeccao_itirapina": render_prospeccao_itirapina,
     }
 

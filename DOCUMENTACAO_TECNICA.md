@@ -44,8 +44,7 @@
 - **Sessão vive só em `st.session_state`** — não existe cookie/token persistente.
   Consequência: (a) não há timeout por tempo, a sessão só morre se o processo do
   Streamlit reiniciar (novo deploy, crash, restart do servidor); (b) qualquer
-  `location.reload()`/navegação JS derruba a sessão — é por isso que o Modo TV usa
-  loop interno (`st.rerun()`) em vez de recarregar a página.
+  `location.reload()`/navegação JS derruba a sessão.
 - `auth/session.py` centraliza toda leitura/escrita: `get_usuario()`, `get_perfil()`,
   `get_gerencia()`, `set_usuario()`, `clear_session()`, `set_pagina()`/`get_pagina()`.
 
@@ -62,18 +61,17 @@ Gerências e a Visão Geral): a regra hoje é sobre **ter ou não uma Gerência 
 | Ver Visão Geral (SP+VP) | ✅ | ❌ | ✅ |
 | Upload de dados | ✅ | Assistente: só a sua · Usuário: ❌ | — |
 | Alertas / Visão de Campo | ✅ | ❌ (admin-only, 2026-09-01) | ❌ |
-| Modo TV | ✅ | Só se `acesso_tv=True` | idem |
 | Painel Admin | ✅ | ❌ | ❌ |
 
 Funções-chave: `can_see_gerencia(sigla)`, `can_ver_visao_geral()`, `can_upload(sigla)`,
-`can_manage_alertas(sigla)`, `can_access_modo_tv()`, `can_admin_panel()`.
+`can_manage_alertas(sigla)`, `can_admin_panel()`.
 
 **Guards reais** (não só o botão sumir da sidebar — um `session_state` velho/manipulado
 não contorna): `require_login()`, `require_admin()`, `require_gerencia(sigla)`,
-`require_visao_geral()`, `require_upload_permission(sigla)`, `require_modo_tv()`. Estão
+`require_visao_geral()`, `require_upload_permission(sigla)`. Estão
 no TOPO de cada `render_*()` de tela protegida (`gerencia_dashboard.py`,
 `gerencia_geral.py`, `gerencia_placeholder.py`, `alertas.py`, `visao_campo.py`,
-`modo_tv.py`, `admin_panel.py`).
+`admin_panel.py`).
 
 ### 2.3 Senha (2026-09-02)
 
@@ -207,7 +205,7 @@ Aplica", não tem esse fluxo. Wired em `modules/gerencia_dashboard.py`
 (`_com_diagnosticada()`, chamada logo após `_carregar_dados()`); filtro
 "🔍 Diagnosticada" em `components/filtros.py` (com `help=` explicando as 5
 categorias) e painel resumo/gráfico em `core/diagnostico.py::render_resumo_
-diagnosticada()` (aba KPIs). **Visão Geral e Modo TV ainda não recebem essa
+diagnosticada()` (aba KPIs). **Visão Geral ainda não recebe essa
 coluna/filtro** — pendente, ver §8.
 
 ### 4.3 Regra de substituição (não somar bases)
@@ -244,8 +242,7 @@ Score = Peso Prioridade × Mult. Status (neutro desde 10/07/2026)
 ```
 
 - **Config por Gerência** (2026-09-02, depois de uma passagem curta como config
-  global no mesmo dia): cada Gerência (SP/VP/FN/FS/RJ/LC) **e** a Geral (usada
-  também pelo Modo TV) tem sua PRÓPRIA linha em `configuracoes`
+  global no mesmo dia): cada Gerência (SP/VP/FN/FS/RJ/LC) **e** a Geral tem sua PRÓPRIA linha em `configuracoes`
   (`gerencia=<sigla>`, chaves prefixadas `score_`). `carregar_score_config(gerencia)`
   é a fonte única de leitura (cacheada, `ttl=300s`); `calcular_score_dataframe(df,
   cfg)` aplica.
@@ -285,8 +282,7 @@ Centro de Trabalho → Ramal → Trecho → Pátio → Período (Abertura/Encerr
 padrão "ano vigente" desde 2026-08-30) → Prioridade/Família/Tipo de
 anomalia/Tipo de inspeção/Status Base VP/EE. Filtro de "Centro de Trabalho" já
 usa comparação DIRETA contra o valor bruto de `centro_trab` (`.isin()`, sem
-parsing de hierarquia) — mesmo mecanismo que o Modo TV passou a usar em
-2026-09-02 (ver §6.5).
+parsing de hierarquia).
 
 ### 6.2 Visão Geral (`gerencia_geral.py::render_gerencia_geral()`)
 
@@ -304,19 +300,11 @@ mesmo ramal+origem) e reincidência (reabertura ≤X dias). Parâmetros em
 
 Tela mobile-first enxuta (KPIs grandes + top-N prioridades + alertas resumidos).
 
-### 6.5 Modo TV (`modules/modo_tv.py`) — **corrigido em 2026-09-02, v6.1.0**
+### 6.5 Modo TV — **removido em 2026-10-19, v17.0.0**
 
-Painel em loop pra TV/monitor de uma coordenação (pedido original: TV parada na
-coordenação de Jundiaí). Login persiste via loop interno (`time.sleep()` +
-`st.rerun()`, sem recarregar o navegador). Histórico do bug (documentado em detalhe
-no cabeçalho do módulo): tentou filtrar por "Coordenação" derivada de `centro_trab`
-duas vezes (sigla da coordenação, depois lista de pátios) e nunca funcionou de
-verdade. **Solução final**: abandona "Coordenação" — a tela de seleção pergunta
-Gerência + Centro(s) de Trabalho (multiselect com valores REAIS presentes nos
-dados) + Trecho opcional, e o filtro é `.isin()` direto contra `centro_trab`, igual
-ao resto do app. Funciona pra qualquer gerência com dado carregado, não só SP/VP.
-3 slides: KPIs, Unifilar, Ranking de hot-spots. Acesso: admin sempre, ou
-`acesso_tv=True` delegado no Painel Admin.
+Painel em loop para TV/monitor de coordenação. Removido por não funcionar como
+deveria; histórico em `core/versao.py` (4.0.0 a 6.1.0 e 17.0.0) e no git. A coluna
+`usuarios.acesso_tv` ficou no banco, sem uso.
 
 ### 6.6 Evolução da Malha (`modules/evolucao_malha.py`)
 
@@ -332,7 +320,7 @@ usa a base congelada (`rasf_baseline`, upload disciplina `RASF_BASE`).
 
 ### 6.8 Painel Admin (`modules/admin_panel.py`) — só admin
 
-4 abas: **Usuários** (CRUD, senha provisória, acesso Modo TV, exclusão definitiva
+4 abas: **Usuários** (CRUD, senha provisória, exclusão definitiva
 com trava de confirmação), **Logs de Acesso**, **Configurações** (km de malha,
 limites de alerta IMT, metas dos indicadores, 🎯 Score, 🚨 Alertas, ℹ️ Info do
 sistema), **Gestão de Dados**.
@@ -366,9 +354,9 @@ sistema), **Gestão de Dados**.
   §3), mas `core/glossarios.py::NOME_GERENCIA["GC"]` está com um placeholder
   explícito ("Gerência GC (nome a confirmar)") até o Julio dizer o que a sigla
   significa de verdade.
-- **Diagnosticada — Visão Geral e Modo TV**: o filtro/coluna (§4.4) só está
-  ligado nas telas de Gerência (`gerencia_dashboard.py`). Visão Geral
-  (`gerencia_geral.py`) e Modo TV (`modules/modo_tv.py`) ainda carregam as
+- **Diagnosticada — Visão Geral**: o filtro/coluna (§4.4) só está
+  ligado nas telas de Gerência (`gerencia_dashboard.py`). A Visão Geral
+  (`gerencia_geral.py`) ainda carrega as
   notas sem essa coluna — fast-follow, se o Julio confirmar que quer lá também.
 - **Rodar `database/schema_notas_tratamento.sql` no Supabase** antes do primeiro
   upload de Tratamento de Notas (cria a tabela `notas_tratamento` e amplia o
@@ -377,8 +365,7 @@ sistema), **Gestão de Dados**.
 - **Password reset por e-mail** (`auth/recuperar_senha.py`) não funciona de fato na
   rede da MRS (SMTP de saída bloqueado) — existe só pra quando/se isso mudar.
 - **Gerências FN/FS/RJ/LC** têm nome de coordenação cadastrado mas ainda sem sigla
-  de `centro_trab` mapeada em `core/glossarios.py::CENTROS_POR_GERENCIA` — Modo TV
-  e outras telas já funcionam pra elas assim que houver dado carregado (não dependem
+  de `centro_trab` mapeada em `core/glossarios.py::CENTROS_POR_GERENCIA` — as telas já funcionam pra elas assim que houver dado carregado (não dependem
   mais desse mapeamento), mas alguns relatórios que ainda usam
   `CENTROS_POR_GERENCIA`/`COORDENACOES_POR_GERENCIA` diretamente ficam limitados a
   SP/VP até essas listas serem preenchidas.

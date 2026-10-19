@@ -1135,5 +1135,21 @@
 #     database/schema_itirapina.sql — não se misturam com as tabelas da
 #     malha MRS (as cargas no formato MRS seguem nas tabelas normais).
 # MAJOR -- tela nova + schema novo.
+#
+# 17.0.0 (2026-10-19): remove o "Modo TV" (pedido do Julio: não funcionava
+# como deveria) e grava os alertas em lotes. (16.0.0 fica reservada para
+# a aba Prospecção Itirapina, em desenvolvimento em paralelo.)
+#   - modules/modo_tv.py removido; saem a rota 'modo_tv' (app.py), o botão
+#     "📺 Modo TV" da sidebar (modules/home.py), can_access_modo_tv/
+#     require_modo_tv (auth/permissions.py) e o checkbox "Acesso ao Modo TV"
+#     do Painel Admin (criar/editar usuário). A coluna usuarios.acesso_tv
+#     continua no banco (sem uso) para não exigir mudança de schema.
+#   - core/alertas.py::persistir_alertas grava em lotes de até 50 alertas
+#     ou ~1 MB de JSON (antes: um upsert único). Com o `detalhes` de RJ/SP
+#     VP passando de 1 MB por alerta, o upsert único estourava o
+#     statement_timeout de 8 s (erro 57014, "recálculo de alertas falhou"
+#     após o upload) e os alertas dessas gerências não atualizavam desde
+#     setembro. _status_por_chave também consulta em lotes.
+# MAJOR -- tela removida.
 
-APP_VERSION = "16.0.0"
+APP_VERSION = "17.0.0"

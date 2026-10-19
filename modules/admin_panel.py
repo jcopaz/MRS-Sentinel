@@ -204,14 +204,6 @@ def _form_criar_usuario(admin_logado: dict) -> None:
                 options=[""] + LISTA_GERENCIAS,
                 help="Obrigatório para Assistente. Admin não precisa.",
             )
-            acesso_tv = st.checkbox(
-                "📺 Acesso ao Modo TV",
-                value=False,
-                help="Deixa esse usuário abrir o Modo TV (painel em loop pra "
-                     "TV/monitor de uma coordenação) mesmo sem ser admin — "
-                     "pensado pra uma conta dedicada de kiosk. Admin sempre "
-                     "tem acesso, com ou sem essa marcação.",
-            )
 
             submit = st.form_submit_button("✅ Criar Usuário", type="primary")
 
@@ -239,7 +231,6 @@ def _form_criar_usuario(admin_logado: dict) -> None:
                     senha=senha,
                     perfil=perfil,
                     gerencia=gerencia or None,
-                    acesso_tv=acesso_tv,
                     criado_por=admin_logado.get("id"),
                 )
 
@@ -273,11 +264,6 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
                 opcoes_gerencia = [""] + LISTA_GERENCIAS
                 nova_gerencia = st.selectbox("Gerência", opcoes_gerencia,
                                              index=opcoes_gerencia.index(row.get("gerencia","") or ""))
-                novo_acesso_tv = st.checkbox(
-                    "📺 Acesso ao Modo TV", value=bool(row.get("acesso_tv", False)),
-                    help="Deixa esse usuário abrir o Modo TV mesmo sem ser "
-                         "admin. Admin sempre tem acesso, com ou sem essa marcação.",
-                )
                 ativo        = st.checkbox("Usuário ativo", value=bool(row.get("ativo", True)))
 
                 submit_edit = st.form_submit_button("💾 Salvar Alterações", type="primary")
@@ -288,7 +274,6 @@ def _form_editar_usuario(df_users: pd.DataFrame) -> None:
                     matricula=(nova_matricula.strip() or None),
                     perfil=novo_perfil,
                     gerencia=nova_gerencia or None,
-                    acesso_tv=novo_acesso_tv,
                     ativo=ativo,
                 )
 
@@ -347,7 +332,7 @@ def _buscar_usuarios() -> pd.DataFrame:
         supabase = get_supabase()
         resp = (
             supabase.table("usuarios")
-            .select("id, nome, matricula, email, email_gerado, auth_user_id, perfil, gerencia, acesso_tv, deve_trocar_senha, ativo, ultimo_login, criado_em")
+            .select("id, nome, matricula, email, email_gerado, auth_user_id, perfil, gerencia, deve_trocar_senha, ativo, ultimo_login, criado_em")
             .order("criado_em", desc=True)
             .execute()
         )
@@ -365,7 +350,6 @@ def _criar_usuario(
     perfil: str,
     gerencia: str | None,
     criado_por: str | None,
-    acesso_tv: bool = False,
 ) -> None:
     """
     Cria a conta de login (Supabase Auth) e o perfil (tabela 'usuarios').
@@ -401,7 +385,6 @@ def _criar_usuario(
             "auth_user_id": auth_user_id,
             "perfil":       perfil,
             "gerencia":     gerencia,
-            "acesso_tv":    acesso_tv,
             "ativo":        True,
             "criado_por":   criado_por,
             # Toda conta nova nasce com a senha provisória (SENHA_PADRAO)
@@ -487,10 +470,8 @@ def _editar_usuario(
     perfil: str,
     gerencia: str | None,
     ativo: bool,
-    acesso_tv: bool = False,
 ) -> None:
-    """Atualiza matrícula, perfil, gerência, acesso ao Modo TV e status
-    ativo do usuário.
+    """Atualiza matrícula, perfil, gerência e status ativo do usuário.
 
     Só atualiza a tabela 'usuarios' — o e-mail de login no Supabase Auth
     (real ou sintético) não muda aqui, então login por matrícula continua
@@ -502,7 +483,6 @@ def _editar_usuario(
             "matricula":  matricula,
             "perfil":     perfil,
             "gerencia":   gerencia,
-            "acesso_tv":  acesso_tv,
             "ativo":      ativo,
         }).eq("id", user_id).execute()
 
@@ -818,7 +798,7 @@ def _render_aba_configuracoes() -> None:
             "🏭 Configurando a Gerência",
             options=opcoes_score_ger,
             key="cfg_score_ger_sel",
-            help="Cada Gerência (e a Geral/Modo TV) tem sua PRÓPRIA configuração — "
+            help="Cada Gerência (e a Visão Geral) tem sua PRÓPRIA configuração — "
                  "escolha aqui qual você quer ver/editar.",
         )
 

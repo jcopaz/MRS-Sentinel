@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -308,6 +309,10 @@ def gerar_alertas(gerencia: str, disciplina: str | None = None,
 
 # region ====================== SESSÃO 7: Persistência =========================
 
+_LOTE_UPSERT_ALERTAS = 50
+_LOTE_MAX_BYTES = 1_000_000
+
+
 def persistir_alertas(df_alertas: pd.DataFrame) -> int:
     """
     Faz upsert dos alertas em `alertas` (por chave_alerta).
@@ -347,8 +352,29 @@ def persistir_alertas(df_alertas: pd.DataFrame) -> int:
             "atualizado_em":   agora,
         })
 
-    supabase.table("alertas").upsert(payload, on_conflict="chave_alerta").execute()
+    # Em lotes: o `detalhes` de alguns alertas carrega a lista inteira de
+    # notas (em RJ/SP VP passa de 1 MB por alerta) e um upsert único com
+    # ~300 alertas estoura o statement_timeout de 8 s do PostgREST (erro
+    # 57014 visto no upload de 19/10/2026). Cada lote é atômico; se um
+    # falhar, os anteriores já ficaram gravados e a exceção sobe igual.
+    for lote in _lotes_por_tamanho(payload):
+        supabase.table("alertas").upsert(lote, on_conflict="chave_alerta").execute()
     return len(payload)
+
+
+def _lotes_por_tamanho(payload: list[dict]):
+    """Agrupa até _LOTE_UPSERT_ALERTAS alertas ou ~_LOTE_MAX_BYTES de JSON
+    por lote (um alerta maior que o limite vai sozinho)."""
+    lote, tam = [], 0
+    for item in payload:
+        t = len(json.dumps(item, default=str))
+        if lote and (len(lote) >= _LOTE_UPSERT_ALERTAS or tam + t > _LOTE_MAX_BYTES):
+            yield lote
+            lote, tam = [], 0
+        lote.append(item)
+        tam += t
+    if lote:
+        yield lote
 
 
 def _status_por_chave(supabase, chaves: list[str]) -> dict:
@@ -356,13 +382,18 @@ def _status_por_chave(supabase, chaves: list[str]) -> dict:
     if not chaves:
         return {}
     try:
-        resp = (
-            supabase.table("alertas")
-            .select("chave_alerta, status")
-            .in_("chave_alerta", chaves)
-            .execute()
-        )
-        return {r["chave_alerta"]: r["status"] for r in (resp.data or [])}
+        status = {}
+        # Em lotes também: centenas de chaves num único `in.(...)` deixam a
+        # URL do GET longa demais para alguns proxies.
+        for i in range(0, len(chaves), _LOTE_UPSERT_ALERTAS):
+            resp = (
+                supabase.table("alertas")
+                .select("chave_alerta, status")
+                .in_("chave_alerta", chaves[i:i + _LOTE_UPSERT_ALERTAS])
+                .execute()
+            )
+            status.update({r["chave_alerta"]: r["status"] for r in (resp.data or [])})
+        return status
     except Exception:
         return {}
 
