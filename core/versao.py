@@ -1151,5 +1151,19 @@
 #     após o upload) e os alertas dessas gerências não atualizavam desde
 #     setembro. _status_por_chave também consulta em lotes.
 # MAJOR -- tela removida.
+#
+# 17.0.1 (2026-10-19): correções da revisão do Astra no 17.0.0.
+#   - core/alertas.py::_status_por_chave deixa a falha da consulta subir em
+#     vez de devolver {} -- com {} todo alerta existente ia como 'novo' e
+#     rebaixava os vistos/resolvidos. Agora, se a consulta falha, nada é
+#     gravado.
+#   - Falha de um lote depois de outros gravados sobe
+#     PersistenciaParcialAlertas ("X de Y gravados; recalcule de novo") em
+#     vez de um erro igual ao de falha total. O botão "Recalcular" da tela
+#     de Alertas mostra o erro na tela em vez de traceback.
+#   - _lotes_por_tamanho mede bytes UTF-8 + vírgulas/colchetes (antes media
+#     caracteres de cada item e o lote podia passar um pouco de 1 MB).
+#   - scripts/importar_usuarios_planilha.py não grava mais acesso_tv.
+# PATCH -- bugfix, sem mudança de fluxo.
 
-APP_VERSION = "17.0.0"
+APP_VERSION = "17.0.1"

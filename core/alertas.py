@@ -313,13 +313,32 @@ _LOTE_UPSERT_ALERTAS = 50
 _LOTE_MAX_BYTES = 1_000_000
 
 
+class PersistenciaParcialAlertas(Exception):
+    """Um lote do upsert falhou depois de outros já gravados.
+
+    Por quê existe (revisão do Astra no v17): sem ela, o erro do 2º lote
+    subia igual a uma falha total e quem via a mensagem não sabia que parte
+    dos alertas já estava atualizada. Recalcular de novo é seguro: o upsert
+    por chave_alerta é idempotente e regrava as mesmas linhas.
+    """
+
+    def __init__(self, gravados: int, total: int, erro: Exception):
+        self.gravados, self.total, self.erro = gravados, total, erro
+        super().__init__(
+            f"{gravados} de {total} alertas gravados antes da falha ({erro}). "
+            "Recalcule os alertas de novo: a gravação é idempotente."
+        )
+
+
 def persistir_alertas(df_alertas: pd.DataFrame) -> int:
     """
     Faz upsert dos alertas em `alertas` (por chave_alerta).
     Preserva o `status` de alertas já resolvidos/vistos: o upsert atualiza
     métricas mas NÃO rebaixa o status manualmente definido pelo usuário.
 
-    Retorna o nº de alertas gravados.
+    Retorna o nº de alertas gravados. Se a consulta de status falhar, nada é
+    gravado (a exceção sobe); se um lote falhar no meio, sobe
+    PersistenciaParcialAlertas com quantos já foram gravados.
     """
     if df_alertas is None or df_alertas.empty:
         return 0
@@ -356,21 +375,30 @@ def persistir_alertas(df_alertas: pd.DataFrame) -> int:
     # notas (em RJ/SP VP passa de 1 MB por alerta) e um upsert único com
     # ~300 alertas estoura o statement_timeout de 8 s do PostgREST (erro
     # 57014 visto no upload de 19/10/2026). Cada lote é atômico; se um
-    # falhar, os anteriores já ficaram gravados e a exceção sobe igual.
+    # falhar depois de outros gravados, sobe PersistenciaParcialAlertas.
+    gravados = 0
     for lote in _lotes_por_tamanho(payload):
-        supabase.table("alertas").upsert(lote, on_conflict="chave_alerta").execute()
-    return len(payload)
+        try:
+            supabase.table("alertas").upsert(lote, on_conflict="chave_alerta").execute()
+        except Exception as e:
+            if gravados:
+                raise PersistenciaParcialAlertas(gravados, len(payload), e) from e
+            raise
+        gravados += len(lote)
+    return gravados
 
 
 def _lotes_por_tamanho(payload: list[dict]):
     """Agrupa até _LOTE_UPSERT_ALERTAS alertas ou ~_LOTE_MAX_BYTES de JSON
     por lote (um alerta maior que o limite vai sozinho)."""
-    lote, tam = [], 0
+    lote, tam = [], 2  # 2 = os colchetes do array
     for item in payload:
-        t = len(json.dumps(item, default=str))
+        # Bytes em UTF-8 (acentos ocupam 2) + 1 da vírgula entre itens: mede
+        # o que de fato vai no corpo do POST, não só os caracteres.
+        t = len(json.dumps(item, default=str).encode("utf-8")) + 1
         if lote and (len(lote) >= _LOTE_UPSERT_ALERTAS or tam + t > _LOTE_MAX_BYTES):
             yield lote
-            lote, tam = [], 0
+            lote, tam = [], 2
         lote.append(item)
         tam += t
     if lote:
@@ -378,24 +406,26 @@ def _lotes_por_tamanho(payload: list[dict]):
 
 
 def _status_por_chave(supabase, chaves: list[str]) -> dict:
-    """Retorna {chave_alerta: status} dos alertas já existentes no banco."""
+    """Retorna {chave_alerta: status} dos alertas já existentes no banco.
+
+    Erro de consulta SOBE (não devolve {}): um dicionário vazio faria todo
+    alerta existente ir para o upsert como 'novo', rebaixando os que o
+    usuário já marcou como vistos/resolvidos (achado do Astra no v17).
+    """
     if not chaves:
         return {}
-    try:
-        status = {}
-        # Em lotes também: centenas de chaves num único `in.(...)` deixam a
-        # URL do GET longa demais para alguns proxies.
-        for i in range(0, len(chaves), _LOTE_UPSERT_ALERTAS):
-            resp = (
-                supabase.table("alertas")
-                .select("chave_alerta, status")
-                .in_("chave_alerta", chaves[i:i + _LOTE_UPSERT_ALERTAS])
-                .execute()
-            )
-            status.update({r["chave_alerta"]: r["status"] for r in (resp.data or [])})
-        return status
-    except Exception:
-        return {}
+    status = {}
+    # Em lotes também: centenas de chaves num único `in.(...)` deixam a
+    # URL do GET longa demais para alguns proxies.
+    for i in range(0, len(chaves), _LOTE_UPSERT_ALERTAS):
+        resp = (
+            supabase.table("alertas")
+            .select("chave_alerta, status")
+            .in_("chave_alerta", chaves[i:i + _LOTE_UPSERT_ALERTAS])
+            .execute()
+        )
+        status.update({r["chave_alerta"]: r["status"] for r in (resp.data or [])})
+    return status
 
 # endregion
 

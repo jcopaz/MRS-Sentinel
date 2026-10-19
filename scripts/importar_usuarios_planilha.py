@@ -125,7 +125,6 @@ def criar_usuario(registro: dict, criado_por: str | None) -> tuple[bool, str]:
             "auth_user_id": auth_user_id,
             "perfil": "usuario",
             "gerencia": gerencia_para_gravar(registro["gerencia"]),
-            "acesso_tv": False,
             "ativo": True,
             "criado_por": criado_por,
             "deve_trocar_senha": True,

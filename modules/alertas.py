@@ -171,9 +171,18 @@ def _executar_recalculo(gerencia: str):
         st.error("🚫 Você não tem permissão para recalcular alertas desta gerência.")
         return
 
-    with st.spinner("Analisando notas e gerando alertas..."):
-        df_alertas = gerar_alertas(gerencia)
-        n = persistir_alertas(df_alertas)
+    # Sem o try, uma falha de gravação virava traceback na tela; agora a
+    # mensagem diz o que aconteceu (incl. gravação parcial, ver
+    # core/alertas.PersistenciaParcialAlertas) e que recalcular é seguro.
+    try:
+        with st.spinner("Analisando notas e gerando alertas..."):
+            df_alertas = gerar_alertas(gerencia)
+            n = persistir_alertas(df_alertas)
+    except Exception as e:
+        st.error(f"❌ O recálculo de alertas falhou: {e}")
+        get_alertas.clear()
+        contar_alertas_novos.clear()
+        return
 
     log_acesso(get_id(), "recalcular_alertas", {"gerencia": gerencia, "gerados": n})
     st.success(f"✅ {n} alerta(s) processado(s) para a Gerência {gerencia}.")
