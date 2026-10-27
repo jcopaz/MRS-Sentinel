@@ -124,11 +124,16 @@ def carregar_referencias() -> dict:
         "pontos": _ler(lambda: get_referencia("trecho_pontos_criticos", TRECHO_ITIRAPINA),
                        "trecho_pontos_criticos", avisos),
         "sb_faixas": _ler(lambda: get_referencia("sb_faixas", TRECHO_ITIRAPINA), "sb_faixas", avisos),
+        "plano": _ler(lambda: get_referencia("plano"), "plano", avisos),
+        "metas": _ler(lambda: get_referencia("metas"), "metas", avisos),
         "repositorios": _ler(lambda: get_repositorios_midia(TRECHO_ITIRAPINA),
                              "midias_repositorio", avisos),
     }
     for k in ("estacoes", "pontos"):
         refs[k] = _tipar(refs[k], ("km_inicio", "km_fim"))
     refs["limites"] = _tipar(refs["limites"], ("vel_min_kmh", "vel_max_kmh", "limite_mm"))
+    refs["plano"] = _tipar(refs["plano"], ("km_inicio", "km_fim", "raio", "inserviveis_mz", "taxa_mz",
+                                           "dorm_travamento", "dorm_meta20", "dorm_meta16", "rank_top10"))
+    refs["metas"] = _tipar(refs["metas"], ("valor_meta",))
     refs["avisos"] = avisos
     return refs

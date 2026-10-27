@@ -21,6 +21,8 @@
 #   🛠️ Defeitos    — export Rumo + Vagão de Via (modules/itirapina/defeitos.py)
 #   🚆 Transit time — ZPD ↔ ZIQ (modules/itirapina/transit.py)
 #   📷 Inspeção    — galeria com mídias por link (modules/itirapina/inspecao.py)
+#   🔧 Execução    — o que a Manutenção fez × plano de travamento + metas
+#                    (modules/itirapina/execucao.py)
 #   📋 Segmentos   — tabela completa da prospecção + exportação
 #   📤 Upload      — por base (modules/itirapina/upload.py)
 #
@@ -155,10 +157,10 @@ def render_prospeccao_itirapina() -> None:
 
     pode_upload = can_upload_prospeccao()
     nomes = ["📈 Evolução", "📊 Dashboard", "🔥 Dormentes", "🚧 Restrições", "🛠️ Defeitos",
-             "🚆 Transit time", "📷 Inspeção", "📋 Segmentos"] + (["📤 Upload"] if pode_upload else [])
+             "🚆 Transit time", "📷 Inspeção", "🔧 Execução", "📋 Segmentos"] + (["📤 Upload"] if pode_upload else [])
     abas = dict(zip(nomes, st.tabs(nomes)))
 
-    from modules.itirapina import evolucao, defeitos, transit, inspecao, upload
+    from modules.itirapina import evolucao, defeitos, transit, inspecao, upload, execucao
     with abas["📈 Evolução"]:
         evolucao.render_evolucao(bases, refs)
     with abas["📊 Dashboard"]:
@@ -178,6 +180,11 @@ def render_prospeccao_itirapina() -> None:
         transit.render_transit(dados["transit"])
     with abas["📷 Inspeção"]:
         inspecao.render_inspecao(dados, refs)
+    with abas["🔧 Execução"]:
+        if base_id is None:
+            st.info("A Execução usa as tabelas da fase 2 — rode `database/schema_itirapina.sql`.")
+        else:
+            execucao.render_execucao(refs, pode_upload)
     with abas["📋 Segmentos"]:
         st.warning(aviso_df) if aviso_df else _render_tabela(df)
     if pode_upload:

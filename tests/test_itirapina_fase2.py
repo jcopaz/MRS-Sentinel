@@ -140,4 +140,29 @@ def test_execucao_sobe_avanco_t1(plano):
     p = depois["pontos"].set_index("ponto_critico")
     assert p.loc["T1", "pct"] > 0 and p.loc["T1", "situacao"] in ("em curso", "concluído")
 
+
+def test_modelo_execucao_ida_e_volta(tmp_path):
+    from core.parser_execucao import gerar_modelo, ler_execucao
+    arq = tmp_path / "modelo.xlsx"
+    arq.write_bytes(gerar_modelo())
+    df, avisos = ler_execucao(arq)
+    assert avisos == []
+    assert df["atividade"].tolist() == ["troca_dormente", "solda"]
+    assert df["unidade"].tolist() == ["dorm", "und"]
+    assert df["linha"].tolist() == ["LP", "LP"]
+    assert str(df["data"].iloc[0]) == "2027-01-15"
+
+
+def test_execucao_km_e_linhas_invalidas(tmp_path):
+    from core.parser_execucao import ler_execucao
+    arq = tmp_path / "e.xlsx"
+    pd.DataFrame({"Data": ["10/02/2027", "11/02/2027", None, "12/02/2027"],
+                  "Atividade": ["troca_dormente", "Socaria", "Solda", "xpto"],
+                  "KM início": ["285+100", 285100, 286, 287],
+                  "Quantidade": [10, 0.5, 2, 1]}).to_excel(arq, index=False)
+    df, avisos = ler_execucao(arq)
+    assert df["km_inicio"].tolist() == [285.1, 285.1]
+    assert df["unidade"].tolist() == ["dorm", "km"]
+    assert len(avisos) == 1 and "2 linha(s) ignorada(s)" in avisos[0]
+
 # endregion

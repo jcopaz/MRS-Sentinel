@@ -349,6 +349,10 @@ config `acesso_prospeccao_itirapina`), não por perfil.
   Dormente da Engenharia (cenários; negativo vira 0). Travamento = 4.645, e os
   pontos C1–C3/T1–T4 são só da LP. Avanço = troca de dormente em `itp_execucao`,
   limitada ao travamento de cada equipamento; concluído = 90% ou mais.
+- **Execução** (`modules/itirapina/execucao.py`, `core/parser_execucao.py`):
+  `itp_execucao` é uma série contínua, sem base. Upload pela planilha-modelo,
+  com upsert por (data, atividade, km_inicio, linha, quantidade). As metas
+  (`itp_metas`) são editadas na própria subaba.
 - **Indicadores:** `core/indicadores_trecho.calcular` monta a foto por base em
   `itp_trecho_indicadores`, nos escopos trecho, sb, equipamento, ponto_critico,
   transit e mês.

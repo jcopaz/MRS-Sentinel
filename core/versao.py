@@ -1197,5 +1197,18 @@
 #     mesma linha tem as quantidades somadas — 78/300818-302202tg, 158 + 14)
 #     e avanço do travamento × execução.
 # MINOR -- schema novo, sem mudança de fluxo para as outras telas.
+#
+# 17.2.0 (2026-10-27): Itirapina fase 2 · F1 — subaba 🔧 Execução.
+#   - modules/itirapina/execucao.py: avanço do travamento (% do trecho,
+#     pontos C/T e Top 20 concluídos com ≥ 90%, dias de equipe a 70
+#     dorm/dia), troca de dormente acumulada × plano linear até o prazo da
+#     meta, totais por atividade e mês, tabela com exclusão (quem faz upload).
+#   - core/parser_execucao.py: planilha-modelo (📥 Baixar modelo) com
+#     cabeçalho fixo; atividade por código ou rótulo; km 285,1 / 285+100 /
+#     metros; linha vazia = LP; equipamento vazio calculado pelo km.
+#   - database/queries_trecho.py: get_execucao / salvar_execucao (upsert pela
+#     chave natural) / apagar_execucao / salvar_metas. Metas editáveis na
+#     própria subaba (itp_metas; o seed não sobrescreve meta ajustada).
+# MINOR -- tela nova.
 
-APP_VERSION = "17.1.0"
+APP_VERSION = "17.2.0"

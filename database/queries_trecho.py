@@ -79,7 +79,7 @@ def _inserir(tabela: str, registros: list[dict], lote: int = 500) -> None:
 
 def limpar_caches() -> None:
     for f in (get_bases, get_por_base, get_transit_time, get_referencia,
-              get_indicadores, get_repositorios_midia):
+              get_indicadores, get_repositorios_midia, get_execucao):
         f.clear()
 
 # endregion
@@ -269,5 +269,47 @@ def salvar_repositorio_midia(trecho: str, nome: str, base_url: str, tipo: str) -
         {"trecho": trecho, "nome": nome, "base_url": base_url, "tipo": tipo, "ativo": True},
         on_conflict="trecho,nome").execute()
     get_repositorios_midia.clear()
+
+# endregion
+
+
+# region ====================== SESSÃO 6: Execução e metas (fase 2) ============
+# itp_execucao não é por base: é a série contínua do que a Manutenção fez.
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_execucao(trecho: str) -> pd.DataFrame:
+    supabase = get_supabase()
+    return _paginar(lambda: supabase.table(PREFIXO + "execucao").select("*")
+                    .eq("trecho", trecho).order("data"), "execucao")
+
+
+def salvar_execucao(trecho: str, df: pd.DataFrame, usuario_id: str | None) -> int:
+    """Upsert pela chave natural (data, atividade, km_inicio, linha, quantidade)."""
+    registros = _registros(df, {"trecho": trecho, "enviado_por": usuario_id})
+    try:
+        supabase = get_supabase()
+        for i in range(0, len(registros), 500):
+            supabase.table(PREFIXO + "execucao").upsert(
+                registros[i:i + 500], on_conflict="data,atividade,km_inicio,linha,quantidade").execute()
+    except Exception as e:
+        if _tabela_ausente(e, "execucao"):
+            raise TabelaAusente("execucao") from e
+        raise
+    get_execucao.clear()
+    return len(registros)
+
+
+def apagar_execucao(ids: list[int]) -> None:
+    if ids:
+        get_supabase().table(PREFIXO + "execucao").delete().in_("id", [int(i) for i in ids]).execute()
+        get_execucao.clear()
+
+
+def salvar_metas(df: pd.DataFrame, usuario_id: str | None) -> int:
+    registros = _registros(df, {"atualizado_por": usuario_id,
+                                "atualizado_em": datetime.utcnow().isoformat()})
+    get_supabase().table(PREFIXO + "metas").upsert(registros, on_conflict="indicador").execute()
+    get_referencia.clear()
+    return len(registros)
 
 # endregion
