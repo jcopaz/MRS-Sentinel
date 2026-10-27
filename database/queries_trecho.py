@@ -220,16 +220,20 @@ def upsert_transit_time(df: pd.DataFrame) -> int:
 
 # region ====================== SESSÃO 5: Referências e indicadores ============
 
+REFERENCIAS_POR_TRECHO = ("trecho_estacoes", "trecho_pontos_criticos", "sb_faixas")
+REFERENCIAS = REFERENCIAS_POR_TRECHO + ("limites_geometria", "plano", "metas")
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_referencia(tabela: str, trecho: str | None = None) -> pd.DataFrame:
-    """trecho_estacoes / limites_geometria / trecho_pontos_criticos."""
-    if tabela not in ("trecho_estacoes", "limites_geometria", "trecho_pontos_criticos"):
+    """Tabelas de referência (seed). Só as de REFERENCIAS_POR_TRECHO filtram trecho."""
+    if tabela not in REFERENCIAS:
         raise ValueError(tabela)
     supabase = get_supabase()
 
     def q():
         b = supabase.table(PREFIXO + tabela).select("*")
-        return b.eq("trecho", trecho) if trecho and tabela != "limites_geometria" else b
+        return b.eq("trecho", trecho) if trecho and tabela in REFERENCIAS_POR_TRECHO else b
     return _paginar(q, tabela)
 
 

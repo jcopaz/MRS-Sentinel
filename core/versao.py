@@ -1173,5 +1173,29 @@
 #     pandas (vel_max_classe_kmh, dias_ativo, numero_viagem...) e o Postgres
 #     recusa "96.0" em INT/SMALLINT. Vale para todas as gravações itp_.
 # PATCH -- bugfix, sem mudança de fluxo.
+#
+# 17.1.0 (2026-10-27): Itirapina fase 2 · F0 — correções da revisão em
+# produção (PROMPT_VSCode_Sentinel_Itirapina_OnePage_v1, seção 1).
+#   - SB pelo km: core/analise_trecho.py::SB_FAIXAS (16 SBs da Rumo) +
+#     sb_pelo_km/preencher_sb. A Rev 1 não tem SB → tabela de segmentos com
+#     "None" e matriz SB / mapa SB × grupo vazios. Agora prospecção, defeitos
+#     e inspeção completam a SB vazia pelo km; faixas_sb usa a referência da
+#     Rumo (não mais a prospecção). Tabela itp_sb_faixas (seed) prevalece.
+#     Efeito: defeitos sem equipamento casado (339 no export curto) passam a
+#     contar na SB do km — ZPD-ZFJ 188/km é a SB mais densa, igual à SB da
+#     própria Rumo no export do Vagão.
+#   - Restrições A: o Dashboard filtrava por linha/bitola (28) e a Evolução
+#     não (30). restricoes_trecho é a fonte única; KPI "30 · 14 via · 16 ANTT".
+#   - Evolução: com 1 base, cards em vez de gráfico (eixo em ms); eixo X
+#     sempre data mm/aaaa.
+#   - Vagão: export sem nº de viagem (Defeitos SUB 78) mostra aviso em vez de
+#     selectbox vazio / "Viagem None".
+#   - database/schema_itirapina_fase2.sql (rodar manualmente): itp_sb_faixas,
+#     itp_plano, itp_metas, itp_execucao, itp_restricoes_eventos. Seed
+#     estendido (sb_faixas, plano a partir da Engenharia, metas).
+#   - core/plano_itirapina.py: leitura do plano (equipamento repetido na
+#     mesma linha tem as quantidades somadas — 78/300818-302202tg, 158 + 14)
+#     e avanço do travamento × execução.
+# MINOR -- schema novo, sem mudança de fluxo para as outras telas.
 
-APP_VERSION = "17.0.2"
+APP_VERSION = "17.1.0"

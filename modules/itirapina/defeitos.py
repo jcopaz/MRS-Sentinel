@@ -59,7 +59,7 @@ def _filtros(d: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
-def _graficos(d: pd.DataFrame, dorm: pd.DataFrame) -> None:
+def _graficos(d: pd.DataFrame, dorm: pd.DataFrame, faixas: pd.DataFrame | None = None) -> None:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("##### Pareto por tipo de defeito")
@@ -76,9 +76,9 @@ def _graficos(d: pd.DataFrame, dorm: pd.DataFrame) -> None:
                           xaxis_title="dias", yaxis_title="defeitos")
         st.plotly_chart(fig, use_container_width=True, config=CFG)
 
-    if dorm is not None and not dorm.empty:
+    if d["sb_calc"].notna().any():
         st.markdown("##### Mapa de calor SB × grupo (defeitos por km)")
-        fx = faixas_sb(dorm).set_index("sb")
+        fx = faixas_sb(dorm, faixas).set_index("sb")
         ext = (fx["km_fim"] - fx["km_ini"]).replace(0, np.nan)
         m = d.groupby(["sb_calc", "grupo"]).size().unstack(fill_value=0)
         m = m.reindex([s for s in fx.index if s in m.index])
@@ -101,6 +101,11 @@ def _bloco_vagao(defeitos: pd.DataFrame, rel: pd.DataFrame) -> None:
         st.warning("Carregue o Relatório de Velocidade da base para cruzar com as restrições.")
         return
     viagens = sorted(v["numero_viagem"].dropna().astype(int).unique())
+    if not viagens:
+        st.warning("⚠️ Este export não tem o número da viagem do Vagão de Via (o export curto "
+                   "'Defeitos SUB 78' não traz). Recarregue a base com o export **Vagão Via – "
+                   "Defeitos** na subaba 📤 Upload.")
+        return
     c1, c2 = st.columns([1, 3])
     viagem = c1.selectbox("Viagem", viagens, index=len(viagens) - 1, key="vagao_viagem")
     cob = cobertura_restricao(v[v["numero_viagem"] == viagem], rel)
@@ -138,11 +143,11 @@ def render_defeitos(dados: dict) -> None:
     d = d.copy()
     if "status" in d.columns:
         d = d[d["status"].fillna("Ativo") == "Ativo"]
-    d["sb_calc"] = sb_dos_defeitos(d, dados.get("dormentes"))
+    d["sb_calc"] = sb_dos_defeitos(d, dados.get("dormentes"), dados.get("sb_faixas"))
     _kpis(d)
     f = _filtros(d)
     st.caption(f"{len(f):,} defeitos no filtro.".replace(",", "."))
-    _graficos(f, dados.get("dormentes"))
+    _graficos(f, dados.get("dormentes"), dados.get("sb_faixas"))
     _bloco_vagao(d, dados.get("rel"))
 
     geo = f.dropna(subset=["latitude", "longitude"])

@@ -19,7 +19,7 @@ import pandas as pd
 
 from core.analise_trecho import (
     TRECHO_KM, META_TAXA, resumo_velocidade, restricoes_trecho, vagao_sem_restricao,
-    defeitos_por_equipamento, sb_dos_defeitos, faixas_sb,
+    defeitos_por_equipamento, sb_dos_defeitos, faixas_sb, preencher_sb,
 )
 from core.parser_prospeccao import JUNTAS_PROBLEMA
 
@@ -180,10 +180,13 @@ def _bloco_transit(transit: pd.DataFrame, data_base: date) -> list[dict]:
 def calcular(dados: dict, data_base: date) -> pd.DataFrame:
     """
     dados: {'dormentes','defeitos','rel','transit','trilho','lastro','fixacao',
-            'inspecao','pontos'} — DataFrames (podem faltar).
+            'inspecao','pontos','sb_faixas'} — DataFrames (podem faltar).
+    SB vazia (Rev 1) é completada pelo km (core/analise_trecho.sb_pelo_km).
     """
     g = dados.get
     dorm, defe, rel = g("dormentes"), g("defeitos"), g("rel")
+    fx = g("sb_faixas")
+    dorm = preencher_sb(dorm, "km_inicio", "km_fim", fx)
     linhas = []
     total = {}
     total.update(_bloco_dormentes(dorm))
@@ -196,9 +199,9 @@ def calcular(dados: dict, data_base: date) -> pd.DataFrame:
     if dorm is not None and not dorm.empty:
         ativos = _ativos(defe)
         if not ativos.empty:
-            ativos = ativos.assign(sb_calc=sb_dos_defeitos(ativos, dorm))
+            ativos = ativos.assign(sb_calc=sb_dos_defeitos(ativos, dorm, fx))
         rA = restricoes_trecho(rel) if rel is not None and not rel.empty else pd.DataFrame()
-        for f in faixas_sb(dorm).itertuples():
+        for f in faixas_sb(dorm, fx).itertuples():
             s = dorm[dorm["sb"] == f.sb]
             ext = f.km_fim - f.km_ini
             n_def = int((ativos["sb_calc"] == f.sb).sum()) if not ativos.empty else 0
@@ -265,6 +268,7 @@ def calcular_indicadores(base_id: int, trecho: str, data_base: date) -> int:
         "inspecao": _ler(lambda: get_por_base("inspecoes_campo", base_id)),
         "transit": _ler(get_transit_time),
         "pontos": _ler(lambda: get_referencia("trecho_pontos_criticos", trecho)),
+        "sb_faixas": _ler(lambda: get_referencia("sb_faixas", trecho)),
     }
     if not dados["dormentes"].empty:
         dados["dormentes"] = enriquecer_prospeccao(dados["dormentes"])

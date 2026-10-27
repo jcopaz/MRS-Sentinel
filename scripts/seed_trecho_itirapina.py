@@ -6,8 +6,11 @@ trecho Itirapina–Pederneiras a partir dos CSVs da base de conhecimento:
   marco_zero/seed_limites_geometria_bitola_larga.csv   → limites_geometria (bitola 'Larga')
   dados/pontos_criticos_C_T.csv                        → trecho_pontos_criticos (C1–C3, T1–T4)
   dados/top10_curvas_tangentes.csv                     → trecho_pontos_criticos (Top 10)
+  marco_zero/seed_sb_faixas_itirapina_pederneiras.csv  → sb_faixas            (fase 2)
+  Prospecção Itirapina Engenharia.xlsx (aba Dormente)  → plano                (fase 2)
+  METAS (abaixo)                                       → metas                (fase 2)
 
-Uso (depois de rodar database/schema_itirapina.sql):
+Uso (depois de rodar database/schema_itirapina.sql e schema_itirapina_fase2.sql):
     python scripts/seed_trecho_itirapina.py [pasta_base_conhecimento] > seed.sql
 e colar o resultado no SQL Editor do Supabase. Idempotente (ON CONFLICT).
 Sem argumento, usa ../Base_Conhecimento_Itirapina_Pederneiras ao lado do repo.
@@ -17,6 +20,9 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core.plano_itirapina import ler_plano_engenharia  # noqa: E402
 
 TRECHO = "Itirapina-Triagem"
 PADRAO = Path(__file__).resolve().parents[2] / "Base_Conhecimento_Itirapina_Pederneiras"
@@ -71,8 +77,56 @@ def gerar(pasta: Path) -> str:
             "ON CONFLICT (trecho, ponto) DO UPDATE SET tipo=EXCLUDED.tipo, rank=EXCLUDED.rank, "
             "equipamento_siv=EXCLUDED.equipamento_siv, secao=EXCLUDED.secao, "
             "km_inicio=EXCLUDED.km_inicio, km_fim=EXCLUDED.km_fim;")
+    out += _sql_fase2(pasta, pts, top)
     out.append("COMMIT;")
     return "\n".join(out) + "\n"
+
+
+# indicador → (rótulo, meta, prazo, observação). O coordenador ajusta na tela.
+METAS = {
+    "restricoes_via":       ("Restrições de via", 0, "2027-12-31", "14 no marco zero"),
+    "vma_media":            ("VMA média TQ carregado", 40, "2027-12-31", "37,9 km/h no marco zero"),
+    "travamento":           ("Dormentes de travamento", 4645, "2027-10-26", "1º ano"),
+    "taxa_inserviveis_pct": ("Taxa de inservíveis", 20, None, "%"),
+    "vagao_sem_restricao":  ("Vagão < 35 km/h sem restrição", 0, None, "52 no marco zero"),
+    "ultimo_acidente":      ("Data do último acidente de via", None, None, "preencher no admin"),
+}
+
+
+def _sql_fase2(pasta: Path, pts: pd.DataFrame, top: pd.DataFrame) -> list[str]:
+    out = []
+    sb = _csv(pasta / "marco_zero" / "seed_sb_faixas_itirapina_pederneiras.csv")
+    for r in sb.itertuples():
+        out.append(
+            "INSERT INTO itp_sb_faixas (trecho, sb, km_inicio, km_fim, ordem, fonte) "
+            f"VALUES ({_sql(TRECHO)}, {_sql(r.sb)}, {round(float(r.km_inicio), 3)}, "
+            f"{round(float(r.km_fim), 3)}, {int(r.ordem)}, {_sql(r.fonte)}) "
+            "ON CONFLICT (trecho, sb) DO UPDATE SET km_inicio=EXCLUDED.km_inicio, "
+            "km_fim=EXCLUDED.km_fim, ordem=EXCLUDED.ordem, fonte=EXCLUDED.fonte;")
+    plano, _ = ler_plano_engenharia(pasta / "Prospecção Itirapina Engenharia.xlsx", pts, top)
+    for r in plano.itertuples():
+        rank = None if pd.isna(r.rank_top10) else int(r.rank_top10)
+        out.append(
+            "INSERT INTO itp_plano (equipamento_siv, linha, tipo, km_inicio, km_fim, raio, sb, "
+            "inserviveis_mz, taxa_mz, dorm_travamento, dorm_meta20, dorm_meta16, ponto_critico, rank_top10) "
+            f"VALUES ({_sql(r.equipamento_siv)}, {_sql(r.linha)}, {_sql(r.tipo)}, {_sql(float(r.km_inicio))}, "
+            f"{_sql(float(r.km_fim))}, {_sql(None if pd.isna(r.raio) else float(r.raio))}, {_sql(r.sb)}, "
+            f"{int(r.inserviveis_mz)}, {_sql(None if pd.isna(r.taxa_mz) else float(r.taxa_mz))}, "
+            f"{int(r.dorm_travamento)}, {int(r.dorm_meta20)}, {int(r.dorm_meta16)}, "
+            f"{_sql(r.ponto_critico)}, {_sql(rank)}) "
+            "ON CONFLICT (equipamento_siv, linha) DO UPDATE SET tipo=EXCLUDED.tipo, "
+            "km_inicio=EXCLUDED.km_inicio, km_fim=EXCLUDED.km_fim, raio=EXCLUDED.raio, sb=EXCLUDED.sb, "
+            "inserviveis_mz=EXCLUDED.inserviveis_mz, taxa_mz=EXCLUDED.taxa_mz, "
+            "dorm_travamento=EXCLUDED.dorm_travamento, dorm_meta20=EXCLUDED.dorm_meta20, "
+            "dorm_meta16=EXCLUDED.dorm_meta16, ponto_critico=EXCLUDED.ponto_critico, "
+            "rank_top10=EXCLUDED.rank_top10;")
+    for ind, (rot, meta, prazo, obs) in METAS.items():
+        # DO NOTHING: não sobrescreve a meta que o coordenador já ajustou
+        out.append(
+            "INSERT INTO itp_metas (indicador, rotulo, valor_meta, prazo, observacao) "
+            f"VALUES ({_sql(ind)}, {_sql(rot)}, {_sql(meta)}, {_sql(prazo)}, {_sql(obs)}) "
+            "ON CONFLICT (indicador) DO NOTHING;")
+    return out
 
 
 def carregar_referencias(pasta: Path) -> dict:

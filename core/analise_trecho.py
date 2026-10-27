@@ -54,7 +54,11 @@ def resumo_velocidade(rel: pd.DataFrame, trem: str = "TQ Carreg") -> dict:
 
 
 def restricoes_trecho(rel: pd.DataFrame) -> pd.DataFrame:
-    """Restrições A da Sub 78 dentro do trecho, com grupo Via/ANTT."""
+    """
+    Restrições A da Sub 78 dentro do trecho (LP + LD, todas as bitolas), com
+    grupo Via/ANTT. ÚNICA fonte da contagem no app (Evolução, Dashboard, One
+    Page): marco zero = 30 (14 via · 16 ANTT).
+    """
     if rel is None or rel.empty:
         return pd.DataFrame()
     r = rel[(rel["tipo"] == "restricao_a") & (rel["sub"] == SUB)].copy()
@@ -64,6 +68,14 @@ def restricoes_trecho(rel: pd.DataFrame) -> pd.DataFrame:
     r["a"], r["b"] = a.loc[r.index], b.loc[r.index]
     r["grupo"] = np.where(r["categoria"] == GRUPO_ANTT, "ANTT", "Via")
     return r.reset_index(drop=True)
+
+
+def rotulo_restricoes(rA: pd.DataFrame) -> str:
+    """'30 (14 via · 16 ANTT)' — formato único das telas."""
+    if rA is None or rA.empty:
+        return "0"
+    via = int((rA["grupo"] == "Via").sum())
+    return f"{len(rA)} ({via} via · {len(rA) - via} ANTT)"
 
 
 def vma_no_km(perfil: pd.DataFrame, kms) -> np.ndarray:
@@ -142,24 +154,94 @@ def defeitos_por_equipamento(defeitos: pd.DataFrame, dorm: pd.DataFrame) -> pd.D
     return eq
 
 
-def sb_dos_defeitos(defeitos: pd.DataFrame, dorm: pd.DataFrame) -> pd.Series:
-    """SB pelo equipamento (prospecção); na falta, a SB do próprio export."""
+def _sb_vazia(s: pd.Series) -> pd.Series:
+    return s.isna() | s.astype(str).str.strip().str.lower().isin(["", "none", "nan", "<na>"])
+
+
+def sb_dos_defeitos(defeitos: pd.DataFrame, dorm: pd.DataFrame,
+                    faixas: pd.DataFrame | None = None) -> pd.Series:
+    """SB pelo equipamento (prospecção); na falta, a do export; por último, pelo km."""
     eq = mapa_equipamentos(dorm).set_index("equipamento_siv")["sb"] if dorm is not None and not dorm.empty \
         else pd.Series(dtype=object)
     sb = defeitos["equipamento_siv"].map(eq)
+    sb = sb.where(~_sb_vazia(sb), None)
     if "sb" in defeitos.columns:
-        sb = sb.fillna(defeitos["sb"])
+        sb = sb.fillna(defeitos["sb"].where(~_sb_vazia(defeitos["sb"]), None))
+    vazia = _sb_vazia(sb)
+    if vazia.any() and "km" in defeitos.columns:
+        sb = sb.copy()
+        sb[vazia] = [sb_pelo_km(k, faixas) for k in defeitos.loc[vazia, "km"]]
     return sb
 
 
-def faixas_sb(dorm: pd.DataFrame) -> pd.DataFrame:
+# SBs da Rumo no trecho (marco_zero/seed_sb_faixas_itirapina_pederneiras.csv,
+# limites tirados do export de defeitos 26/10/2026). NÃO derivar dos pátios do
+# layout: a SB ZWY-ZPD vai até 302,2 e passa por Porto Pederneiras (ZPW).
+# A tabela itp_sb_faixas (seed) tem os mesmos valores e prevalece quando lida.
+SB_FAIXAS = pd.DataFrame([
+    ("ZIQ-ZQY", 174.8, 181.715), ("ZQY-ZFH", 181.715, 190.16), ("ZFH-ZWF", 190.16, 196.112),
+    ("ZWF-ZBO", 196.112, 206.808), ("ZBO-ZEP", 206.808, 209.936), ("ZEP-ZFG", 209.936, 218.7),
+    ("ZFG-ZTR", 218.7, 225.828), ("ZTR-ZTE", 225.828, 233.545), ("ZTE-ZVT", 233.545, 240.013),
+    ("ZVT-ZDK", 240.013, 251.29), ("ZDK-ZLF", 251.29, 258.66), ("ZLF-ZJU", 258.66, 275.6),
+    ("ZJU-ZWM", 275.6, 282.42), ("ZWM-ZWY", 282.42, 290.435), ("ZWY-ZPD", 290.435, 302.206),
+    ("ZPD-ZFJ", 302.206, 303.8),
+], columns=["sb", "km_inicio", "km_fim"]).assign(ordem=lambda d: range(1, len(d) + 1))
+
+
+def _faixas(faixas: pd.DataFrame | None) -> pd.DataFrame:
+    if faixas is None or len(faixas) == 0:
+        return SB_FAIXAS
+    f = faixas.copy()
+    f["km_inicio"] = pd.to_numeric(f["km_inicio"], errors="coerce")
+    f["km_fim"] = pd.to_numeric(f["km_fim"], errors="coerce")
+    return f.sort_values("km_inicio").reset_index(drop=True)
+
+
+def sb_pelo_km(km, faixas: pd.DataFrame | None = None) -> str | None:
+    """SB que contém o km (limite inferior fechado; o último km fecha a última SB)."""
+    try:
+        k = float(km)
+    except (TypeError, ValueError):
+        return None
+    if np.isnan(k):
+        return None
+    f = _faixas(faixas)
+    m = f[(f["km_inicio"] <= k) & (f["km_fim"] > k)]
+    if len(m):
+        return m.iloc[0]["sb"]
+    if abs(k - f["km_fim"].max()) < 1e-6:
+        return f.iloc[-1]["sb"]
+    return None
+
+
+def preencher_sb(df: pd.DataFrame, km_ini: str = "km", km_fim: str | None = None,
+                 faixas: pd.DataFrame | None = None, col: str = "sb") -> pd.DataFrame:
+    """Completa a coluna SB vazia pelo km (meio do segmento quando houver km_fim)."""
+    if df is None or df.empty or km_ini not in df.columns:
+        return df
+    d = df.copy()
+    if col not in d.columns:
+        d[col] = None
+    vazia = _sb_vazia(d[col])
+    if not vazia.any():
+        return d
+    k = pd.to_numeric(d.loc[vazia, km_ini], errors="coerce")
+    if km_fim and km_fim in d.columns:
+        k2 = pd.to_numeric(d.loc[vazia, km_fim], errors="coerce")
+        k = ((k + k2) / 2).fillna(k)
+    d[col] = d[col].astype(object)
+    d.loc[vazia, col] = [sb_pelo_km(x, faixas) for x in k]
+    return d
+
+
+def faixas_sb(dorm: pd.DataFrame | None = None, faixas: pd.DataFrame | None = None) -> pd.DataFrame:
     """
-    km início/fim de cada SB, pelas duas linhas — equipamento só em LD (ex.:
-    78/302922-303800cv em ZPD-ZFJ) também estende a faixa; senão a densidade
-    de defeitos da SB infla (os defeitos dele caem numa faixa só de LP).
+    km início/fim de cada SB da Rumo (referência fixa, não mais pela prospecção:
+    a Rev 1 não tem SB e equipamento só em LD distorcia a faixa). `dorm` fica
+    na assinatura por compatibilidade.
     """
-    return (dorm.groupby("sb").agg(km_ini=("km_inicio", "min"), km_fim=("km_fim", "max"))
-            .sort_values("km_ini").reset_index())
+    f = _faixas(faixas)
+    return f.rename(columns={"km_inicio": "km_ini"})[["sb", "km_ini", "km_fim"]].reset_index(drop=True)
 
 # endregion
 

@@ -325,6 +325,37 @@ com trava de confirmação), **Logs de Acesso**, **Configurações** (km de malh
 limites de alerta IMT, metas dos indicadores, 🎯 Score, 🚨 Alertas, ℹ️ Info do
 sistema), **Gestão de Dados**.
 
+### 6.9 Itirapina–Pederneiras (`modules/prospeccao_itirapina.py`, `modules/itirapina/`)
+
+Trecho que entra na MRS em 2027 (Sub 78, km 174,8–303,8). Aba restrita por
+e-mail (dono `julio.paz@mrs.com.br` + lista em Painel Admin → Configurações,
+config `acesso_prospeccao_itirapina`), não por perfil.
+
+- **Dados isolados:** todas as tabelas têm prefixo `itp_` (`PREFIXO` em
+  `database/queries_prospeccao.py`) e não se misturam com as tabelas da malha
+  MRS. SQL: `database/schema_itirapina.sql` (fase 1) e
+  `database/schema_itirapina_fase2.sql` (fase 2); seed das referências por
+  `scripts/seed_trecho_itirapina.py` (gera `database/seed_itirapina.sql`, fora
+  do git).
+- **Bases versionadas:** `itp_trecho_bases`; marco zero = 26/10/2026. Base
+  congelada é só leitura. Uploads gravam dentro da base escolhida.
+- **Regras de negócio** (`core/analise_trecho.py`, funções puras):
+  - restrições A = `restricoes_trecho(rel)`, fonte única de todas as telas
+    (Sub 78, LP + LD; marco zero "30 (14 via · 16 ANTT)");
+  - SB vazia (a Rev 1 não tem SB) vem pelo km com `sb_pelo_km`, usando as 16 SBs
+    da Rumo (`SB_FAIXAS` = `itp_sb_faixas`). A SB `ZWY-ZPD` vai até 302,2;
+  - Vagão de Via: coberto = restrição A a até 50 m com velocidade ≤ à da classe.
+- **Plano de travamento** (`core/plano_itirapina.py`): `itp_plano` sai da aba
+  Dormente da Engenharia (cenários; negativo vira 0). Travamento = 4.645, e os
+  pontos C1–C3/T1–T4 são só da LP. Avanço = troca de dormente em `itp_execucao`,
+  limitada ao travamento de cada equipamento; concluído = 90% ou mais.
+- **Indicadores:** `core/indicadores_trecho.calcular` monta a foto por base em
+  `itp_trecho_indicadores`, nos escopos trecho, sb, equipamento, ponto_critico,
+  transit e mês.
+- **Testes:** `tests/test_trecho_marco_zero.py` e
+  `tests/test_itirapina_fase2.py`, sobre as fixtures reais em
+  `tests/fixtures/itirapina/` (fora do git).
+
 ---
 
 ## 7. Convenções do projeto

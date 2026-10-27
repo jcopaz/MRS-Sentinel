@@ -276,8 +276,12 @@ def test_indicadores_trecho(r1, defeitos_curto, rel, transit, trilho_eng, rev1, 
     tt = foto[(foto["escopo"] == "transit") & (foto["indicador"] == "mediana")].set_index("chave")["valor"]
     assert tt["ZPD→ZIQ"] == pytest.approx(9.8, abs=0.1)
     sb = foto[(foto["escopo"] == "sb") & (foto["indicador"] == "defeitos_por_km")].set_index("chave")["valor"]
-    assert sb.idxmax() == "ZBO-ZEP"                      # concentração 145/km (seção 6.3)
-    assert sb["ZBO-ZEP"] == pytest.approx(145, abs=5)
+    # Fase 2: SB vazia vem pelo km (antes 339 defeitos sem equipamento ficavam
+    # sem SB). Confere com a SB da própria Rumo no export do Vagão: ZPD-ZFJ
+    # 188/km, ZBO-ZEP 155/km (a seção 6.3 citava ZBO-ZEP 145/km sem esses 339).
+    assert sb.idxmax() == "ZPD-ZFJ"
+    assert sb["ZPD-ZFJ"] == pytest.approx(188, abs=5)
+    assert sb["ZBO-ZEP"] == pytest.approx(155, abs=5)
     assert {"C1", "T1", "Top C1"} <= set(foto.loc[foto["escopo"] == "ponto_critico", "chave"])
 
 

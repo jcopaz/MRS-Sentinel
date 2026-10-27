@@ -155,10 +155,11 @@ def _linha_do_tempo(bases, fb, refs, rotulos) -> None:
             fig = go.Figure()
             for (sentido, ind), g in m[m["indicador"].isin(["mediana", "p90"])].groupby(["sentido", "indicador"]):
                 g = g.sort_values("mes")
-                fig.add_trace(go.Scatter(x=g["mes"], y=g["valor"], mode="lines+markers",
+                fig.add_trace(go.Scatter(x=pd.to_datetime(g["mes"] + "-01"), y=g["valor"], mode="lines+markers",
                                          name=f"{sentido} · {ind}",
                                          line=dict(dash="solid" if ind == "mediana" else "dot")))
             fig.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=30), yaxis_title="horas",
+                              xaxis=dict(type="date", tickformat="%m/%Y"),
                               plot_bgcolor="#fff", legend=dict(orientation="h", y=1.15))
             st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
             st.caption("Transit time mensal (mediana e P90, trens válidos sem outlier).")
@@ -178,6 +179,16 @@ def _linha_do_tempo(bases, fb, refs, rotulos) -> None:
         if p.empty:
             st.info("Sem bases.")
             return
+        if len(p) < 2:
+            # 1 ponto só: o Plotly escala o eixo em milissegundos — cards no lugar
+            st.caption(f"Base única ({p.iloc[0]['base']}) — a linha do tempo aparece a partir da 2ª base.")
+            k = st.columns(3)
+            for c, (col, fmt) in zip(k, (("Defeitos ativos", "int"), ("Taxa inservíveis %", "pct"),
+                                         ("Restrições A", "int"))):
+                v = p.iloc[0][col]
+                c.metric(col, fmt_valor(v, fmt) if v is not None and pd.notna(v) else "—")
+            return
+        p["data"] = pd.to_datetime(p["data"])
         fig = go.Figure()
         for col, eixo in (("Defeitos ativos", "y"), ("Taxa inservíveis %", "y2"), ("Restrições A", "y2")):
             fig.add_trace(go.Scatter(x=p["data"], y=p[col], mode="lines+markers+text", name=col,
@@ -186,6 +197,7 @@ def _linha_do_tempo(bases, fb, refs, rotulos) -> None:
                                      textposition="top center"))
         fig.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=30), plot_bgcolor="#fff",
                           yaxis=dict(title="defeitos"), legend=dict(orientation="h", y=1.15),
+                          xaxis=dict(type="date", tickformat="%m/%Y"),
                           yaxis2=dict(title="% / qtd", overlaying="y", side="right"))
         st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
         st.caption("Um ponto por base (marco zero, base histórica 2025, cargas de 2027+).")

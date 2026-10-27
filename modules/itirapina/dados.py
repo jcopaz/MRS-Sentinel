@@ -9,6 +9,7 @@
 
 import pandas as pd
 
+from core.analise_trecho import preencher_sb
 from core.analise_velocidade import normalizar_relatorio
 from core.parser_prospeccao import enriquecer_prospeccao
 from database.queries_prospeccao import (
@@ -87,6 +88,13 @@ def carregar_base(base_id: int | None) -> dict:
                 "id,inspecao_id,msg_n,arquivo,tipo,caminho_relativo,url,repositorio_id,miniatura"),
                 "inspecao_midias", avisos),
         }
+    # SB vazia (Rev 1 não tem SB) → pela faixa de km das SBs da Rumo
+    fx = _ler(lambda: get_referencia("sb_faixas", TRECHO_ITIRAPINA), "sb_faixas", [])
+    dorm = preencher_sb(dorm, "km_inicio", "km_fim", fx)
+    for k, km in (("defeitos", "km"), ("inspecao", "km")):
+        if k in dados:
+            dados[k] = preencher_sb(dados[k], km, faixas=fx)
+    dados["sb_faixas"] = fx
     dados["dormentes"] = enriquecer_prospeccao(dorm) if not dorm.empty else dorm
     dados["rel"] = normalizar_relatorio(rel)
     dados["transit"] = _carregar_transit(avisos)
@@ -115,6 +123,7 @@ def carregar_referencias() -> dict:
         "limites": _ler(lambda: get_referencia("limites_geometria"), "limites_geometria", avisos),
         "pontos": _ler(lambda: get_referencia("trecho_pontos_criticos", TRECHO_ITIRAPINA),
                        "trecho_pontos_criticos", avisos),
+        "sb_faixas": _ler(lambda: get_referencia("sb_faixas", TRECHO_ITIRAPINA), "sb_faixas", avisos),
         "repositorios": _ler(lambda: get_repositorios_midia(TRECHO_ITIRAPINA),
                              "midias_repositorio", avisos),
     }

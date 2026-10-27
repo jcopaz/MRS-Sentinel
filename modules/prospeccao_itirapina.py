@@ -48,7 +48,9 @@ from core.analise_velocidade import (
     cruzar_prospeccao, restricoes_da_sub,
 )
 from core.parser_relatorio_velocidade import ler_relatorio_velocidade
-from core.analise_trecho import TRECHO_KM, recortar, defeitos_por_equipamento, limite_pela_vma
+from core.analise_trecho import (
+    TRECHO_KM, recortar, defeitos_por_equipamento, limite_pela_vma, restricoes_trecho,
+)
 from modules.itirapina.dados import (
     TRECHO_ROTULO, carregar_bases, carregar_base, carregar_referencias,
 )
@@ -620,8 +622,13 @@ def _render_kpis_velocidade(res: dict, rA: pd.DataFrame, rB: pd.DataFrame) -> No
                 f"{res['pct_restrito']:.0f}% da extensão", delta_color="off")
     k[3].metric("Tempo perdido / passagem", f"{res['min_perdidos']:.0f} min",
                 help="Σ extensão × (1/praticada − 1/VMA), para o trem-tipo escolhido.")
-    k[4].metric("Restrições A", f"{len(rA)}",
-                f"{(rA['categoria'] == 'Via permanente').sum()} de via", delta_color="off")
+    if "grupo" in rA.columns:  # modo trecho: restricoes_trecho (LP+LD) = mesma conta da Evolução
+        via = int((rA["grupo"] == "Via").sum())
+        k[4].metric("Restrições A", f"{len(rA)}", f"{via} via · {len(rA) - via} ANTT",
+                    delta_color="off", help="Sub 78, km ≤ 303,8, LP + LD.")
+    else:
+        k[4].metric("Restrições A", f"{len(rA)}",
+                    f"{(rA['categoria'] == 'Via permanente').sum()} de via", delta_color="off")
     pare = rB["condicao"].fillna("").str.contains("sim", case=False).sum() if len(rB) else 0
     k[5].metric("Restrições B (programadas)", f"{len(rB)}", f"{pare} com Pare sim",
                 delta_color="off")
@@ -655,6 +662,9 @@ def _camadas_trecho(extra, df: pd.DataFrame, p: pd.DataFrame, linha: str, sub: s
         via = ativos[ativos["origem"] == "VIA"]
         if len(via):
             viagens = sorted(via["numero_viagem"].dropna().astype(int).unique())
+            if not viagens:
+                c1.warning("Export sem número de viagem do Vagão — recarregue com o "
+                           "'Vagão Via – Defeitos'.")
             sel = c1.multiselect("Vagão de Via — viagem", viagens, default=viagens[-1:],
                                  key="dash_viagem", help="168 = mai/26 · 180 = set/26")
             via = via[via["numero_viagem"].isin(sel)] if sel else via
@@ -702,6 +712,7 @@ def _render_dashboard(df, rel, aviso_df, aviso_rel, extra=None) -> None:
         p = recortar(p, *TRECHO_KM)
         rA = rA[(rA["a"] < TRECHO_KM[1]) & (rA["b"] > TRECHO_KM[0])]
         rB = rB[(rB["a"] < TRECHO_KM[1]) & (rB["b"] > TRECHO_KM[0])]
+        rA = restricoes_trecho(rel)
     res = resumo_perfil(p)
 
     exp = (pd.to_datetime(rel["data_exportacao"], errors="coerce").max()
