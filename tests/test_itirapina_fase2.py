@@ -267,3 +267,58 @@ def test_motivo_legivel_e_grupo():
     assert grupo_evento(codigo_motivo("204 TORÇÃO")) == "via"
 
 # endregion
+
+
+# region ── F5/F6 ────────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def onepages():
+    sys.path.insert(0, str(RAIZ / "tests"))
+    from _onepage_fix import insumos
+    from core.onepage import montar_onepage
+    return {m: montar_onepage(**insumos(m == "evolucao")) for m in ("partida", "evolucao")}
+
+
+@com_fixtures
+def test_onepage_modos(onepages):
+    p, e = onepages["partida"], onepages["evolucao"]
+    assert p["modo"] == "partida" and e["modo"] == "evolucao"
+    assert all(c["antes"] is None and c["delta"] is None for c in p["cards"])      # sem setas
+    assert (p["restricoes"]["status"] == "ativa").sum() == 30
+    assert (e["restricoes"]["status"] == "retirada").sum() == 2
+    assert any("pontos críticos" in f for f in p["frases"])                       # frases do plano
+
+
+@com_fixtures
+@pytest.mark.parametrize("modo", ["partida", "evolucao"])
+def test_onepage_exporta(onepages, modo):
+    import io
+    from PIL import Image
+    from core.onepage_render import (render_onepage, para_png, para_pdf, para_pptx, textos_fora_do_quadro,
+                                     nome_arquivo)
+    o = onepages[modo]
+    assert textos_fora_do_quadro(render_onepage(o)) == []
+    png = para_png(o)
+    im = Image.open(io.BytesIO(png))
+    assert im.size == (2338, 1654) and getattr(im, "n_frames", 1) == 1
+    assert para_pdf(o).startswith(b"%PDF")
+    from pptx import Presentation
+    prs = Presentation(io.BytesIO(para_pptx(o, png)))
+    assert len(prs.slides) == 1 and prs.slides[0].notes_slide.notes_text_frame.text
+    assert nome_arquivo(o, "png").startswith("OnePage_Itirapina_Pederneiras_")
+
+
+def test_frases_nunca_sobre_piora():
+    from core.onepage_textos import frases_evolucao
+    piorou = {"via_retiradas": 0, "minutos_ganhos": -4, "horas_mes": -20, "travamento_pct": 0,
+              "defeitos_eliminados": 0, "km_liberados": -1}
+    base = {"restricoes_via_mz": 14, "vma_atual": 37, "taxa_mz": 25.8, "taxa_atual": 28.0,
+            "vagao_mz": 52, "vagao_atual": 60}
+    assert frases_evolucao(piorou, base) == []
+    # ganho insignificante também não vira frase
+    assert frases_evolucao({"minutos_ganhos": 0.4, "travamento_pct": 2}, {"taxa_mz": 25.8, "taxa_atual": 25.5}) == []
+    ok = frases_evolucao({"via_retiradas": 3, "km_liberados": 2.0, "minutos_ganhos": 9, "horas_mes": 87},
+                         {"restricoes_via_mz": 14, "vma_atual": 40})
+    assert len(ok) == 2 and "87 h de trem por mês" in ok[1]
+
+# endregion

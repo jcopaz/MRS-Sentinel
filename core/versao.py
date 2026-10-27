@@ -1261,5 +1261,30 @@
 #     liberados (restrição de via), Δ velocidade praticada, Δ taxa,
 #     retiradas, defeitos eliminados (por defeito_id) e avanço do travamento.
 # MINOR -- funcionalidade nova.
+#
+# 17.6.0 (2026-10-27): Itirapina fase 2 · F5 + F6 — 🏁 One Page e exportação.
+#   - core/onepage.py::montar_onepage (puro): um dict com tudo que a página
+#     mostra; tela e exportação leem o MESMO dict. Modos 'evolucao' (marco
+#     zero × base selecionada, cards antes → agora com cor pelo sentido bom)
+#     e 'partida' (só o marco zero: valor + meta, sem setas, bloco ⑤ = O
+#     plano). Mérito da Manutenção (tempo de marcha, velocidade praticada,
+#     restrições de VIA) em destaque à esquerda; ANTT/terceiros e transit
+#     time ("inclui circulação e pátio") separados.
+#   - core/onepage_textos.py: frases com limiar mínimo; número que piorou
+#     nunca vira frase (só aparece no card, em vermelho).
+#   - modules/itirapina/onepage.py: cards, ① esquemático das restrições
+#     (via vermelho / ANTT laranja / retirada verde riscada, rótulos em
+#     trilhos), ② dormentação (fino = marco zero), ③ transit time mensal
+#     (mediana e média, marco zero e programado), ④ travamento C/T + bolinhas
+#     do Top 10, ⑤ o que fizemos + frases, próximos passos e segurança.
+#   - core/onepage_render.py (matplotlib, sem kaleido/Chrome): A4 paisagem
+#     200 dpi (2338 × 1654 px); PNG, PDF e PPTX 16:9 (imagem + frases nas
+#     notas). modules/itirapina/exportar_onepage.py: "Preparar exportação" +
+#     3 downloads OnePage_Itirapina_Pederneiras_aaaa-mm-dd.ext.
+#   - requirements.txt: matplotlib, python-pptx.
+#   - Subabas na ordem da fase 2: One Page · Unifilar · Travamento ·
+#     Evolução · Restrições · Defeitos · Transit · Inspeção · Execução ·
+#     Segmentos (+ Dashboard e Dormentes antigos no fim).
+# MINOR -- tela nova.
 
-APP_VERSION = "17.5.0"
+APP_VERSION = "17.6.0"

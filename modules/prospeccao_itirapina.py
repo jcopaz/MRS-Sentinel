@@ -12,6 +12,8 @@
 # funciona no modo legado (Dashboard/Dormentes/Restrições/Segmentos/Upload).
 #
 # Subabas:
+#   🏁 One Page    — peça de comunicação + exportação PNG/PDF/PPTX
+#                    (modules/itirapina/onepage.py, core/onepage*.py)
 #   🛤️ Unifilar    — navegável por km (janela itp_km, LOD, painel "o que tem
 #                    neste trecho", ficha por clique) (modules/itirapina/navegacao.py)
 #   🎯 Travamento  — mapa de calor curvas/tangentes, pontos C/T, Top N e ficha
@@ -160,11 +162,20 @@ def render_prospeccao_itirapina() -> None:
                 st.caption(a)
 
     pode_upload = can_upload_prospeccao()
-    nomes = ["🛤️ Unifilar", "🎯 Travamento", "📈 Evolução", "📊 Dashboard", "🔥 Dormentes", "🚧 Restrições", "🛠️ Defeitos",
-             "🚆 Transit time", "📷 Inspeção", "🔧 Execução", "📋 Segmentos"] + (["📤 Upload"] if pode_upload else [])
+    # Ordem da fase 2 (seção 7 do prompt). Dashboard e Dormentes antigos no fim
+    # enquanto Pareto, dispersão e matriz SB não migram para Unifilar/Travamento.
+    nomes = ["🏁 One Page", "🛤️ Unifilar", "🎯 Travamento", "📈 Evolução", "🚧 Restrições", "🛠️ Defeitos",
+             "🚆 Transit time", "📷 Inspeção", "🔧 Execução", "📋 Segmentos", "📊 Dashboard",
+             "🔥 Dormentes"] + (["📤 Upload"] if pode_upload else [])
     abas = dict(zip(nomes, st.tabs(nomes)))
 
     from modules.itirapina import evolucao, defeitos, transit, inspecao, upload, execucao, travamento, navegacao
+    with abas["🏁 One Page"]:
+        if base_id is None:
+            st.info("A One Page usa as bases — rode `database/schema_itirapina.sql`.")
+        else:
+            from modules.itirapina import onepage
+            onepage.render_onepage(bases, base, refs)
     with abas["🛤️ Unifilar"]:
         if base_id is None:
             st.info("O Unifilar navegável usa as bases — rode `database/schema_itirapina.sql`.")

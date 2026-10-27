@@ -368,6 +368,11 @@ config `acesso_prospeccao_itirapina`), não por perfil.
   anterior. O casamento é por linha + km_de (±20 m) + código do motivo, e o
   resultado vai para `itp_restricoes_eventos`. Os indicadores derivados ficam
   em `indicadores_trecho.derivados`; o ganho só aparece quando há 2 bases.
+- **One Page** (`core/onepage.py` → `modules/itirapina/onepage.py` e
+  `core/onepage_render.py`): `montar_onepage` gera um único dict, usado pela
+  tela e pela exportação em matplotlib (PNG, PDF e PPTX em A4, 200 dpi, sem
+  kaleido). Com só o marco zero carregado, a página entra no modo "Ponto de
+  partida". As frases automáticas nunca falam de indicador que piorou.
 - **Indicadores:** `core/indicadores_trecho.calcular` monta a foto por base em
   `itp_trecho_indicadores`, nos escopos trecho, sb, equipamento, ponto_critico,
   transit e mês.
