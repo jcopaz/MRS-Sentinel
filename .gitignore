@@ -59,3 +59,12 @@ agente/
 PPT/
 assets/
 Apresentacao_*.html
+
+# Fixtures do trecho Itirapina–Pederneiras (dados operacionais Rumo/MRS) e
+# base de conhecimento com mídias — nunca versionar
+tests/fixtures/itirapina/
+Base_Conhecimento_Itirapina_Pederneiras/
+*.pdf
+
+# seed gerado a partir da Base_Conhecimento (dados da empresa)
+database/seed_itirapina.sql

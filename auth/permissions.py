@@ -148,6 +148,38 @@ def can_access_modo_tv() -> bool:
     usuario = get_usuario()
     return bool(usuario and usuario.get("acesso_tv"))
 
+
+# Dono da aba Prospecção Itirapina — sempre vê, não depende de config.
+# Trecho novo (Malha Central) que entra na MRS em 2027: aba restrita por
+# e-mail, NÃO por perfil — nem todo admin vê. Demais acessos são liberados
+# no Painel Admin → Configurações (config `acesso_prospeccao_itirapina`).
+DONO_PROSPECCAO = "julio.paz@mrs.com.br"
+
+
+def _email_logado() -> str:
+    usuario = get_usuario() or {}
+    return str(usuario.get("email") or "").strip().lower()
+
+
+def can_ver_prospeccao() -> bool:
+    """Dono fixo ou e-mail liberado pelo admin na config de acesso."""
+    email = _email_logado()
+    if not email:
+        return False
+    if email == DONO_PROSPECCAO:
+        return True
+    # Import tardio: queries_prospeccao importa database.queries, que não
+    # deve ser carregado só pra checar permissão no import deste módulo.
+    from database.queries_prospeccao import get_emails_acesso_prospeccao
+    return email in get_emails_acesso_prospeccao()
+
+
+def can_upload_prospeccao() -> bool:
+    """Upload da prospecção: dono, ou admin que já tenha acesso à aba."""
+    if _email_logado() == DONO_PROSPECCAO:
+        return True
+    return is_admin() and can_ver_prospeccao()
+
 # endregion
 
 
@@ -208,6 +240,14 @@ def require_modo_tv():
     require_login()
     if not can_access_modo_tv():
         st.error("🚫 Você não tem acesso ao Modo TV.")
+        st.stop()
+
+
+def require_prospeccao():
+    """Guard: para a execução se o e-mail não estiver liberado na aba Prospecção."""
+    require_login()
+    if not can_ver_prospeccao():
+        st.error("🚫 Você não tem acesso à Prospecção Itirapina.")
         st.stop()
 
 # endregion

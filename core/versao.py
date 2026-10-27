@@ -1095,5 +1095,45 @@
 #     que o upsert usa. Sem a constraint o upsert falha ANTES de mexer em
 #     qualquer nota (seguro publicar o código antes do SQL).
 # MINOR -- mesma tela, mesmo resultado visível; muda só a persistência.
+#
+# 16.0.0 (2026-10-09): aba nova "🛤️ Prospecção Itirapina" — prospecção de
+# dormentes do trecho Itirapina–Triagem (Malha Central, entra na MRS em
+# 2027), com mapa de calor linear no KM real, matriz SB × indicador,
+# ranking, tabela e upload da planilha dentro da própria aba.
+#   - Acesso por e-mail, não por perfil: julio.paz@mrs.com.br fixo
+#     (auth/permissions.py::DONO_PROSPECCAO) + quem o admin liberar em
+#     Painel Admin → Configurações → "Acesso à Prospecção Itirapina"
+#     (config global `acesso_prospeccao_itirapina`, lista de e-mails).
+#   - Relatório de Velocidade do SRM (PDF por rota) lido por
+#     core/parser_relatorio_velocidade.py (pdfplumber, nova dependência):
+#     VMA por trem-tipo, restrições A/B, observações. core/analise_
+#     velocidade.py calcula velocidade praticada = min(VMA, restrições A),
+#     tempo perdido por passagem e cruza restrições × segmentos de
+#     dormentes por Sub + linha + KM. Dashboard com unifilar (velocidade,
+#     restrições, faixa de dormentes), Pareto de motivos e dispersão
+#     dormentação × velocidade.
+#   - SQL (rodar manualmente no Supabase): tabelas
+#     `prospeccao_dormentes` e `relatorio_velocidade`; sem elas a aba avisa
+#     e não quebra.
+#   - Sem mapa geográfico: o KMZ de marcos não cobre o trecho.
+#   - (27/10, ainda dentro da 16.0.0, não publicada) Aba renomeada para
+#     "Itirapina–Pederneiras · Marco Zero" (PROMPT v3.1): dados versionados
+#     por BASE (trecho_bases com
+#     marco zero 26/10/2026 e base congelada somente leitura; base_id em
+#     prospeccao_dormentes/relatorio_velocidade; tabelas novas de lastro,
+#     fixação, trilho, defeitos_via, transit_time, inspeções + mídias por
+#     link, referências e trecho_indicadores). Parsers novos (Rev 1 de
+#     campo, defeitos Rumo/Vagão, transit time SRM, inspeção + manifest),
+#     core/analise_trecho.py (regras do trecho, Vagão × restrição × limite
+#     de geometria), core/indicadores_trecho.py (foto por base), subabas
+#     Evolução/Defeitos/Transit time/Inspeção, unifilar com pátios,
+#     defeitos/km, Vagão e inspeção, Upload por base com Congelar (só o
+#     dono). core/ui_evolucao.py extraído de evolucao_malha.py (cards ▲▼).
+#     Testes de aceitação: tests/test_trecho_marco_zero.py (19, sobre
+#     fixtures fora do git). Seed: scripts/seed_trecho_itirapina.py.
+#     Tabelas do trecho isoladas com prefixo itp_ num script único,
+#     database/schema_itirapina.sql — não se misturam com as tabelas da
+#     malha MRS (as cargas no formato MRS seguem nas tabelas normais).
+# MAJOR -- tela nova + schema novo.
 
-APP_VERSION = "15.1.0"
+APP_VERSION = "16.0.0"

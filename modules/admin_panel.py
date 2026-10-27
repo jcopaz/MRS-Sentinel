@@ -20,6 +20,10 @@ from database.queries import (
     get_uploads_historico, gerar_email_sintetico, get_notas_cached,
     get_config as _get_config, salvar_config as _salvar_config_shared,
 )
+from database.queries_prospeccao import (
+    CHAVE_ACESSO_PROSPECCAO, get_emails_acesso_prospeccao, invalidar_cache_acesso,
+)
+from auth.permissions  import DONO_PROSPECCAO
 from core.glossarios   import LISTA_GERENCIAS
 from core.versao       import APP_VERSION
 from core.score_engine import (
@@ -1100,6 +1104,10 @@ def _render_aba_configuracoes() -> None:
             _salvar_config(None, "email_destinatarios", destinatarios)
             st.success("✅ Configuração de e-mail salva!")
 
+    # ── 4.4b: Acesso à Prospecção Itirapina ───────────────────────────────────
+    with st.expander("🛤️ Acesso à Prospecção Itirapina", expanded=False):
+        _render_acesso_prospeccao()
+
     # ── 4.5: Informações do sistema ───────────────────────────────────────────
     with st.expander("ℹ️ Informações do Sistema", expanded=False):
         st.markdown(
@@ -1130,6 +1138,51 @@ def _render_aba_configuracoes() -> None:
 def _salvar_config(gerencia: str | None, chave: str, valor) -> None:
     admin_id = st.session_state.get("usuario", {}).get("id")
     _salvar_config_shared(gerencia, chave, valor, admin_id)
+
+
+def _render_acesso_prospeccao() -> None:
+    """
+    Quem vê a aba Prospecção Itirapina (trecho que entra na MRS em 2027).
+    O dono (DONO_PROSPECCAO) é fixo e não aparece na seleção; a lista dos
+    demais é salva como e-mails na config global CHAVE_ACESSO_PROSPECCAO.
+    """
+    st.caption(
+        f"O acesso é por usuário, não por perfil: nem todo admin vê a aba. "
+        f"**{DONO_PROSPECCAO}** tem acesso fixo. Quem tiver perfil Admin e "
+        f"estiver liberado aqui também pode enviar a planilha."
+    )
+    df_users = _buscar_usuarios()
+    if df_users.empty or "email" not in df_users.columns:
+        st.info("Nenhum usuário encontrado.")
+        return
+
+    df_users = df_users[df_users["email"].notna()].copy()
+    df_users["email_norm"] = df_users["email"].str.strip().str.lower()
+    df_users = df_users[df_users["email_norm"] != DONO_PROSPECCAO]
+    if "ativo" in df_users.columns:
+        df_users = df_users[df_users["ativo"].fillna(False)]
+    df_users = df_users.sort_values("nome")
+
+    rotulos = {
+        r.email_norm: f"{r.nome} — {r.email_norm} ({r.perfil})"
+        for r in df_users.itertuples()
+    }
+    atuais = [e for e in get_emails_acesso_prospeccao() if e in rotulos]
+
+    selecionados = st.multiselect(
+        "Usuários com acesso",
+        options=list(rotulos),
+        default=atuais,
+        format_func=lambda e: rotulos.get(e, e),
+        key="cfg_acesso_prospeccao",
+        placeholder="Ninguém além do dono",
+    )
+    if st.button("💾 Salvar Acesso à Prospecção", key="btn_acesso_prospeccao"):
+        _salvar_config(None, CHAVE_ACESSO_PROSPECCAO, sorted(selecionados))
+        invalidar_cache_acesso()
+        admin_id = st.session_state.get("usuario", {}).get("id")
+        _registrar_log("acesso_prospeccao", {"emails": sorted(selecionados)}, admin_id)
+        st.success(f"✅ Acesso salvo — {len(selecionados)} usuário(s) além do dono.")
 
 # endregion
 

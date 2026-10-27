@@ -31,13 +31,9 @@ except Exception:  # pragma: no cover
 
 from auth.permissions import gerencias_visiveis
 from database.queries_snapshots import get_snapshots
+from core.ui_evolucao import fmt_valor, delta_html, COR_PRIMARIA, COR_OK, COR_RUIM, COR_NEUTRO
 
 # region ====================== SESSÃO 1: Config + agregação ===================
-
-COR_PRIMARIA = "#1e3a5f"
-COR_OK = "#16a34a"
-COR_RUIM = "#dc2626"
-COR_NEUTRO = "#6b7280"
 
 # Colunas de FLUXO (somam ao juntar semanas num mês).
 _FLUXO = ["aberturas_periodo", "encerramentos_periodo", "thp_acumulado"]
@@ -153,30 +149,10 @@ def _preparar(gerencias, disciplinas, granularidade) -> pd.DataFrame:
 
 # region ====================== SESSÃO 2: KPIs com setas =======================
 
-def _fmt(valor, formato) -> str:
-    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
-        return "—"
-    if formato == "int":
-        return f"{int(round(valor))}"
-    if formato == "pct":
-        return f"{valor:.1f}%"
-    return f"{valor:.2f}"
-
-
-def _delta_html(atual, anterior, sentido, formato) -> str:
-    """Seta ▲▼ colorida conforme melhora/piora."""
-    if atual is None or anterior is None or pd.isna(atual) or pd.isna(anterior):
-        return f"<span style='color:{COR_NEUTRO};font-size:0.8rem;'>—</span>"
-    diff = atual - anterior
-    if abs(diff) < 1e-9:
-        return f"<span style='color:{COR_NEUTRO};font-size:0.8rem;'>▬ 0</span>"
-    subiu = diff > 0
-    bom = (subiu and sentido == "maior_melhor") or (not subiu and sentido == "menor_melhor")
-    cor = COR_OK if bom else COR_RUIM
-    seta = "▲" if subiu else "▼"
-    val = _fmt(abs(diff), formato)
-    return (f"<span style='color:{cor};font-size:0.8rem;font-weight:700;'>"
-            f"{seta} {val}</span>")
+# _fmt/_delta_html vivem em core/ui_evolucao.py (compartilhados com a aba
+# Itirapina–Pederneiras). Aliases mantêm as chamadas existentes.
+_fmt = fmt_valor
+_delta_html = delta_html
 
 
 def _bloco_kpis(tot: pd.DataFrame, pa: str, pb: str):

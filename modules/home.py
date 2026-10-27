@@ -6,7 +6,7 @@ from pathlib import Path
 
 import streamlit as st
 from auth.session import get_nome, get_perfil, get_gerencia, set_pagina, get_pagina, clear_session, get_id
-from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis, can_access_modo_tv, can_ver_visao_geral, is_admin
+from auth.permissions import can_admin_panel, can_upload, gerencias_visiveis, can_access_modo_tv, can_ver_visao_geral, is_admin, can_ver_prospeccao
 from database.queries import log_acesso, contar_alertas_novos
 from core.glossarios import GERENCIAS_COM_DASHBOARD, GERENCIA_GERAL_DE
 from core.versao import APP_VERSION
@@ -311,6 +311,16 @@ def _render_nav_buttons():
             n_novos = 0
         badge = f"  ({n_novos})" if n_novos else ""
         nav_items.append(("ALERTAS", f"{ativo_alertas}🚨  Alertas{badge}", "alertas"))
+
+    # Prospecção Itirapina: por e-mail (dono + liberados no Painel Admin),
+    # independente do perfil — ver auth/permissions.py::can_ver_prospeccao.
+    try:
+        ver_prospeccao = can_ver_prospeccao()
+    except Exception:
+        ver_prospeccao = False
+    if ver_prospeccao:
+        ativo_prosp = "🔵 " if pagina_atual == "prospeccao_itirapina" else ""
+        nav_items.append(("PROSPECCAO", f"{ativo_prosp}🛤️  Itirapina–Pederneiras", "prospeccao_itirapina"))
 
     # Upload: admin e assistente
     gerencia_usr = get_gerencia()
