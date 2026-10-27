@@ -44,11 +44,6 @@ def render_inspecao(dados: dict, refs: dict) -> None:
     if insp is None or insp.empty:
         st.info("📭 Nenhuma inspeção de campo nesta base — envie a planilha do Marco Zero na subaba **📤 Upload**.")
         return
-    midias = dados.get("midias")
-    repos = refs.get("repositorios")
-    repo = repos[repos["ativo"].fillna(True)].iloc[0] if repos is not None and len(repos) else None
-    base_url = repo["base_url"] if repo is not None else None
-
     i = insp.copy()
     i["nivel"] = i["gravidade"].map(nivel_gravidade)
     c = st.columns([2, 2, 2, 3])
@@ -69,6 +64,18 @@ def render_inspecao(dados: dict, refs: dict) -> None:
     if sbs:
         i = i[i["sb"].isin(sbs)]
     i = i[i["km"].isna() | i["km"].between(*faixa)]
+    render_cards_inspecao(i, dados, refs)
+
+
+def render_cards_inspecao(i: pd.DataFrame, dados: dict, refs: dict) -> None:
+    """Cards (3 colunas) com mídias por link — também usado no painel do Unifilar."""
+    midias = dados.get("midias")
+    repos = refs.get("repositorios")
+    repo = repos[repos["ativo"].fillna(True)].iloc[0] if repos is not None and len(repos) else None
+    base_url = repo["base_url"] if repo is not None else None
+    i = i.copy()
+    if "nivel" not in i.columns:
+        i["nivel"] = i["gravidade"].map(nivel_gravidade)
     i = i.sort_values(["nivel", "km"], ascending=[False, True])
 
     st.caption(f"{len(i)} registro(s) · "

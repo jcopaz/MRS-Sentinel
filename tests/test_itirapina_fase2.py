@@ -203,3 +203,18 @@ def test_quadro_equipamentos(plano):
     assert q["taxa_pct"].between(0, 100).all()
 
 # endregion
+
+
+# region ── F3 ───────────────────────────────────────────────────────────────
+
+def test_lod_e_janela():
+    from modules.itirapina.unifilar import lod_da_janela, motivo_curto
+    from modules.itirapina.navegacao import _limitar
+    assert lod_da_janela(174.8, 303.8) == "agregado"
+    assert lod_da_janela(280, 300) == "medio"
+    assert lod_da_janela(284, 286) == "detalhe"
+    assert _limitar(173.0, 175.0) == (174.8, 176.8)        # não sai do trecho
+    assert _limitar(303.0, 305.0) == (301.8, 303.8)
+    assert motivo_curto("ANTT - PERIMETRO URBANO") == "PERIMETRO URBANO"
+
+# endregion

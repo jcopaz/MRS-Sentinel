@@ -1228,5 +1228,21 @@
 #     execução).
 #   - core/cores_itirapina.py: paleta única (app e exportação).
 # MINOR -- tela nova.
+#
+# 17.4.0 (2026-10-27): Itirapina fase 2 · F3 — subaba 🛤️ Unifilar navegável.
+#   - modules/itirapina/navegacao.py: janela de km única da aba em
+#     session_state["itp_km"] (slider = fonte da verdade); "Ir para km"
+#     (±1 km), atalhos (pátio, SB, ponto C/T, Top 10, restrição), ◀ ▶ e
+#     "Trecho inteiro" por callback (on_change/on_click — o slider não pode
+#     mudar depois de desenhado). Painel "O que tem neste trecho" (Resumo,
+#     Restrições com "quem resolve", Defeitos + Excel, Dormentes/equipamentos,
+#     Inspeção) e ficha do equipamento por clique na barra de dormentes.
+#   - modules/itirapina/unifilar.py: nível de detalhe pela janela (> 30 km
+#     agregado; 5–30 km rótulos "vel · motivo" em até 3 trilhos; ≤ 5 km cada
+#     defeito como ponto — Scattergl acima de 1.000 — e código SIV/raio nos
+#     dormentes); rótulos C/T só dentro da janela; altura até 900 px;
+#     legenda acima da área do gráfico.
+#   - modules/itirapina/inspecao.py: cards extraídos em render_cards_inspecao.
+# MINOR -- tela nova.
 
-APP_VERSION = "17.3.0"
+APP_VERSION = "17.4.0"

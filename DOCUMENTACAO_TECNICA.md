@@ -358,6 +358,11 @@ config `acesso_prospeccao_itirapina`), não por perfil.
   `core/cores_itirapina.py`), pontos C/T, Top N (`top_n` reproduz o Top 10 do
   estudo) e ficha do equipamento. `pontos_criticos` é só uma sugestão: o padrão
   continua sendo os pontos oficiais.
+- **Unifilar navegável** (`modules/itirapina/navegacao.py`): a janela de km da
+  aba fica em `st.session_state["itp_km"]`. O nível de detalhe muda com a
+  largura da janela: acima de 30 km, visão agregada; de 5 a 30 km, aparecem os
+  rótulos; até 5 km, cada defeito vira um ponto. O painel "O que tem neste
+  trecho" acompanha a janela, e clicar num dormente abre a ficha.
 - **Indicadores:** `core/indicadores_trecho.calcular` monta a foto por base em
   `itp_trecho_indicadores`, nos escopos trecho, sb, equipamento, ponto_critico,
   transit e mês.

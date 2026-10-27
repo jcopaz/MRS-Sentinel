@@ -9,6 +9,14 @@
 # Pátios: linhas verticais tracejadas atravessando todas as faixas.
 # Pontos críticos C/T: rótulo a 90° com km exato + código SIV (lição nº 10).
 # Faixas sem dado não aparecem.
+#
+# Nível de detalhe (lod, F3 navegação por km):
+#   'agregado' (> 30 km)  — faixas agregadas, sem rótulos individuais
+#   'medio'    (5–30 km)  — + rótulo das restrições (vel · motivo curto)
+#   'detalhe'  (≤ 5 km)   — + cada defeito como ponto e código SIV/raio nos
+#                            dormentes
+# Barras de dormentes levam customdata (equipamento, linha) para o clique abrir
+# a ficha (on_select).
 # =============================================================================
 
 import numpy as np
@@ -26,6 +34,20 @@ CORES_CATEGORIA = {
     "Outras":                   "#64748b",
 }
 CORES_GRAVIDADE = {0: "#64748b", 1: "#f59e0b", 2: "#ea580c", 3: "#dc2626"}
+CORES_GRUPO_DEFEITO = ["#1e3a5f", "#b45309", "#0f766e", "#7c3aed", "#dc2626", "#64748b", "#ca8a04", "#db2777"]
+
+
+def lod_da_janela(a: float, b: float) -> str:
+    ext = abs(b - a)
+    return "agregado" if ext > 30 else "medio" if ext > 5 else "detalhe"
+
+
+def motivo_curto(m) -> str:
+    s = str(m or "").strip()
+    for pref in ("ANTT - ", "VIA - ", "VP - "):
+        if s.upper().startswith(pref):
+            s = s[len(pref):]
+    return (s[:28] + "…") if len(s) > 29 else s
 SIMBOLO_TEMA = {"trilho": "line-ns", "lastro": "circle", "AMV": "diamond", "dormente": "square",
                 "PN": "triangle-up", "junta": "x", "OAE": "star", "pátio": "hexagon", "drenagem": "cross"}
 
@@ -51,14 +73,23 @@ def _degraus(p: pd.DataFrame, col: str) -> tuple[list, list]:
     return xs, ys
 
 
+def _rotulo_eq(r) -> str:
+    cod = str(r.equipamento_siv).split("/")[-1]
+    raio = getattr(r, "raio", None)
+    return cod + (f" · R{raio:.0f}" if isinstance(raio, (int, float)) and pd.notna(raio) and raio > 0 else "")
+
+
 def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
                         seg: pd.DataFrame | None = None, seg_a: pd.DataFrame | None = None,
                         rotulo_a: str = "Base A", estacoes: pd.DataFrame | None = None,
                         def_eq: pd.DataFrame | None = None, vagao: pd.DataFrame | None = None,
                         insp: pd.DataFrame | None = None, pontos: pd.DataFrame | None = None,
-                        x_range=TRECHO_KM) -> go.Figure:
+                        x_range=TRECHO_KM, lod: str = "agregado",
+                        defeitos_pts: pd.DataFrame | None = None) -> go.Figure:
     def tem(df):
         return df is not None and not df.empty
+    if lod != "detalhe":
+        defeitos_pts = None
     faixas = []
     if tem(estacoes):
         faixas.append(("patios", 0.05))
@@ -67,6 +98,8 @@ def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
         faixas.append(("dorm", 0.12 if not tem(seg_a) else 0.16))
     if tem(def_eq):
         faixas.append(("def", 0.07))
+    if tem(defeitos_pts):
+        faixas.append(("defpts", 0.14))
     if tem(vagao):
         faixas.append(("vagao", 0.16))
     if tem(insp):
@@ -122,9 +155,25 @@ def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name=f"Restrição · {cat}",
                                  line=dict(color=cor, width=7), hovertext=txt,
                                  hovertemplate="%{hovertext}<extra></extra>"), row=rv, col=1)
+    if lod != "agregado" and len(restr):
+        # rótulos em até 3 "trilhos" para não sobrepor
+        vis = restr[(restr["km_ate"] >= x_range[0]) & (restr["km_de"] <= x_range[1])].sort_values("km_de")
+        fim_trilho = [-1e9] * 3
+        larg = (x_range[1] - x_range[0]) * 0.12
+        for r in vis.itertuples():
+            meio = (max(r.km_de, x_range[0]) + min(r.km_ate, x_range[1])) / 2
+            t = next((i for i, f in enumerate(fim_trilho) if meio - larg / 2 > f), 2)
+            fim_trilho[t] = meio + larg / 2
+            fig.add_annotation(x=meio, y=r.v_prat, xref=f"x{rv if rv > 1 else ''}",
+                               yref=f"y{rv if rv > 1 else ''}", text=f"{r.v_prat:.0f} · {motivo_curto(r.motivo)}",
+                               showarrow=True, arrowhead=0, arrowwidth=0.6, ax=0, ay=-16 - 14 * t,
+                               font=dict(size=9, color=CORES_CATEGORIA.get(r.categoria, "#64748b")),
+                               bgcolor="rgba(255,255,255,0.8)")
     fig.update_yaxes(title_text="km/h", rangemode="tozero", row=rv, col=1)
     if tem(pontos):
-        for r in pontos[pontos["ponto"].str.match(r"^[CT]\d$", na=False)].itertuples():
+        pc = pontos[pontos["ponto"].str.match(r"^[CT]\d$", na=False)]
+        pc = pc[(pc["km_fim"] >= x_range[0]) & (pc["km_inicio"] <= x_range[1])]
+        for r in pc.itertuples():
             eq = getattr(r, "equipamento_siv", None)
             eq = f" · {eq}" if isinstance(eq, str) else ""
             fig.add_annotation(x=r.km_inicio, y=1.0, yref=f"y{rv if rv > 1 else ''} domain",
@@ -161,6 +210,9 @@ def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
                                 title=dict(text="Inserv. %", side="right"), thickness=10, len=0.25)),
                 hovertext=[f"<b>{r.equipamento_siv}</b> · {rotulo}<br>km {r.km_inicio:.3f}–{r.km_fim:.3f}"
                            f"<br>Inservíveis {r.taxa_pct:.1f}%" for r in s.itertuples()],
+                customdata=np.stack([s["equipamento_siv"], s["linha"]], axis=1) if "linha" in s else None,
+                text=[_rotulo_eq(r) for r in s.itertuples()] if lod == "detalhe" and not contorno else None,
+                textposition="inside", insidetextanchor="middle", textfont=dict(size=9),
                 hovertemplate="%{hovertext}<extra></extra>", showlegend=False, width=0.8)
         fig.add_trace(_barras(seg, "Dormentes", False), row=rd, col=1)
         if tem(seg_a):
@@ -177,6 +229,22 @@ def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
                        for r in d.itertuples()],
             hovertemplate="%{hovertext}<extra></extra>", showlegend=False, width=0.8),
             row=linha_de["def"], col=1)
+
+    # ── Defeitos como pontos (só no detalhe) ─────────────────────────────────
+    if tem(defeitos_pts):
+        dp = defeitos_pts.dropna(subset=["km"])
+        grupos = list(dict.fromkeys(dp["grupo"].fillna("—")))
+        Trace = go.Scattergl if len(dp) > 1000 else go.Scatter
+        for i, g in enumerate(grupos):
+            sub = dp[dp["grupo"].fillna("—") == g]
+            tam = pd.to_numeric(sub["tamanho"], errors="coerce").abs() if "tamanho" in sub else pd.Series(0, index=sub.index)
+            fig.add_trace(Trace(
+                x=sub["km"], y=[g] * len(sub), mode="markers", name=f"Defeito · {g}",
+                marker=dict(size=(6 + tam.rank(pct=True) * 8).fillna(6),
+                            color=CORES_GRUPO_DEFEITO[i % len(CORES_GRUPO_DEFEITO)], opacity=0.8),
+                hovertext=[f"<b>{r.nome_defeito}</b><br>km {r.km:.3f} · {r.linha or ''}<br>{r.equipamento_siv or ''}"
+                           for r in sub.itertuples()],
+                hovertemplate="%{hovertext}<extra></extra>", showlegend=False), row=linha_de["defpts"], col=1)
 
     # ── Vagão de Via ─────────────────────────────────────────────────────────
     if tem(vagao):
@@ -219,8 +287,8 @@ def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
     for k in range(1, n + 1):
         fig.update_xaxes(range=list(x_range), row=k, col=1)
     fig.update_layout(
-        height=int(260 + 600 * tot), margin=dict(l=10, r=10, t=40, b=40),
+        height=min(900, int(260 + 600 * tot)), margin=dict(l=10, r=10, t=60, b=40),
         plot_bgcolor="#ffffff", hovermode="closest", barmode="overlay",
-        legend=dict(orientation="h", y=1.04, x=0, font=dict(size=11)),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0, font=dict(size=11)),
     )
     return fig
