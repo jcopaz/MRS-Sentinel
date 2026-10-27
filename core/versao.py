@@ -1210,5 +1210,23 @@
 #     chave natural) / apagar_execucao / salvar_metas. Metas editáveis na
 #     própria subaba (itp_metas; o seed não sobrescreve meta ajustada).
 # MINOR -- tela nova.
+#
+# 17.3.0 (2026-10-27): Itirapina fase 2 · F2 — subaba 🎯 Travamento.
+#   - modules/itirapina/travamento.py: mapa de calor por equipamento (LP em
+#     cima, LD embaixo) com 7 indicadores de cor e escala Slide (10/20/30/40%)
+#     / Meta 20% / Personalizada (4 limiares + color pickers); filtros tipo,
+#     linha, SB, raio máx., taxa mín., com/sem restrição; pontos C/T
+#     sombreados; Top N (5–20) numerado e quadro curvas | tangentes com
+#     travamento × executado e dias de equipe; ficha do equipamento por
+#     clique (on_select) ou lista, com "Ver no unifilar" (session_state
+#     itp_km, usado na F3).
+#   - core/plano_itirapina.py: top_n (LP, travamento desc, desempate taxa —
+#     reproduz o Top 10 do estudo), pontos_criticos (janela com a maior soma
+#     de inservíveis, sem reaproveitar equipamento — reproduz C1, T1 e T2; os
+#     demais tiveram ajuste manual, por isso o mapa usa os oficiais por
+#     padrão) e quadro_equipamentos (plano × base × defeitos × restrições ×
+#     execução).
+#   - core/cores_itirapina.py: paleta única (app e exportação).
+# MINOR -- tela nova.
 
-APP_VERSION = "17.2.0"
+APP_VERSION = "17.3.0"

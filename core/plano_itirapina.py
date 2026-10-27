@@ -204,3 +204,108 @@ def avanco_travamento(plano: pd.DataFrame, execucao: pd.DataFrame | None) -> dic
     }
 
 # endregion
+
+
+# region ====================== Top N e pontos críticos (recalculáveis) =========
+
+def top_n(plano: pd.DataFrame, n: int = 10) -> pd.DataFrame:
+    """
+    Top N curvas e Top N tangentes da LP por dormentes de travamento (desempate:
+    taxa). Com n=10 reproduz dados/top10_curvas_tangentes.csv do estudo.
+    """
+    d = plano[(plano["linha"] == "LP") & plano["tipo"].isin(["curva", "tangente"])]
+    out = []
+    for tipo in ("curva", "tangente"):
+        t = (d[d["tipo"] == tipo].sort_values(["dorm_travamento", "taxa_mz"], ascending=False)
+             .head(n).copy())
+        t["rank_calc"] = range(1, len(t) + 1)
+        out.append(t)
+    return pd.concat(out, ignore_index=True)
+
+
+def pontos_criticos(plano: pd.DataFrame, janela_km: float = 3.0, n_curvas: int = 3,
+                    n_tangentes: int = 4, metrica: str = "inserviveis_mz") -> pd.DataFrame:
+    """
+    Janela de `janela_km` (equipamentos da LP do mesmo tipo que COMEÇAM dentro
+    dela) com a maior soma de inservíveis, sem reaproveitar equipamento; curvas
+    e tangentes separadas. Sugestão do algoritmo: reproduz C1, T1 e T2 do
+    estudo. Os demais pontos do estudo tiveram escolha manual (ex.: a janela
+    do km 251,5 tem mais inservíveis que C3 e ficou de fora) — por isso a tela
+    mostra os pontos oficiais por padrão e esta função só no "Recalcular".
+    """
+    linhas = []
+    for tipo, n, prefixo in (("curva", n_curvas, "C"), ("tangente", n_tangentes, "T")):
+        d = (plano[(plano["linha"] == "LP") & (plano["tipo"] == tipo)]
+             .sort_values("km_inicio").reset_index(drop=True))
+        usados = np.zeros(len(d), bool)
+        for k in range(1, n + 1):
+            melhor = None
+            for a in d["km_inicio"]:
+                m = ((d["km_inicio"] >= a - 1e-9) & (d["km_inicio"] <= a + janela_km + 1e-9)).values
+                if (m & usados).any():
+                    continue
+                s = d.loc[m, metrica].sum()
+                if melhor is None or s > melhor[0]:
+                    melhor = (s, m)
+            if melhor is None:
+                break
+            s, m = melhor
+            usados |= m
+            g = d[m]
+            linhas.append({"ponto": f"{prefixo}{k}", "tipo": tipo, "km_inicio": g["km_inicio"].min(),
+                           "km_fim": g["km_fim"].max(), "n_equip": len(g), "inserviveis": int(s),
+                           "travamento": int(g["dorm_travamento"].sum()),
+                           "equipamentos": ", ".join(g["equipamento_siv"])})
+    return pd.DataFrame(linhas)
+
+# endregion
+
+
+# region ====================== Quadro por equipamento (tela 🎯 Travamento) =====
+
+def quadro_equipamentos(plano: pd.DataFrame, dorm: pd.DataFrame | None = None,
+                        defeitos: pd.DataFrame | None = None, rA: pd.DataFrame | None = None,
+                        execucao: pd.DataFrame | None = None) -> pd.DataFrame:
+    """
+    1 linha por (equipamento, linha) do plano com a situação atual: taxa e
+    inservíveis da base (prospecção), malhas ≥ 3, defeitos ativos/km,
+    restrições A sobrepostas (via/ANTT), executado e % do travamento.
+    """
+    q = plano.copy()
+    q["ext_km"] = (q["km_fim"] - q["km_inicio"]).abs()
+    q["taxa_mz_pct"] = q["taxa_mz"] * 100
+    if dorm is not None and not dorm.empty:
+        malhas = [c for c in (f"malha_{i}" for i in range(3, 11)) if c in dorm.columns]
+        g = dorm.assign(_m3=dorm[malhas].apply(pd.to_numeric, errors="coerce").sum(axis=1) if malhas else 0)
+        g = g.groupby(["equipamento_siv", "linha"]).agg(
+            inserv_atual=("qtd_inservivel", "sum"), prosp_atual=("total_prospectado", "sum"),
+            malhas_3=("_m3", "sum"))
+        q = q.join(g, on=["equipamento_siv", "linha"])
+        q["taxa_pct"] = q["inserv_atual"] / q["prosp_atual"].replace(0, np.nan) * 100
+    else:
+        q["inserv_atual"], q["taxa_pct"], q["malhas_3"] = q["inserviveis_mz"], q["taxa_mz_pct"], np.nan
+    q["taxa_pct"] = q["taxa_pct"].fillna(q["taxa_mz_pct"])
+    if defeitos is not None and not defeitos.empty:
+        n = defeitos.groupby("equipamento_siv").size()
+        q["defeitos"] = q["equipamento_siv"].map(n).fillna(0)
+        # equipamento com LP e LD: defeitos ficam na LP (mesma regra de mapa_equipamentos)
+        q.loc[q.duplicated("equipamento_siv") & (q["linha"] != "LP"), "defeitos"] = 0
+    else:
+        q["defeitos"] = 0
+    q["def_por_km"] = q["defeitos"] / q["ext_km"].replace(0, np.nan)
+    q["restr_via"], q["restr_antt"], q["restricoes"] = 0, 0, ""
+    if rA is not None and not rA.empty:
+        for i, r in q.iterrows():
+            s = rA[(rA["a"] < r["km_fim"]) & (rA["b"] > r["km_inicio"])]
+            if len(s):
+                q.at[i, "restr_via"] = int((s["grupo"] == "Via").sum())
+                q.at[i, "restr_antt"] = int((s["grupo"] == "ANTT").sum())
+                q.at[i, "restricoes"] = " · ".join(f"{v:.0f} km/h {m}" for v, m in zip(s["vel"], s["motivo"]))
+    av = avanco_travamento(plano, execucao)["equip"][["equipamento_siv", "linha", "executado_lim", "pct"]]
+    q = q.merge(av, on=["equipamento_siv", "linha"], how="left")
+    q["executado"] = q["executado_lim"].fillna(0)
+    q["pct_exec"] = q["pct"].fillna(0) * 100
+    q["dias_equipe"] = np.ceil((q["dorm_travamento"] - q["executado"]).clip(lower=0) / DORM_POR_DIA)
+    return q.drop(columns=["executado_lim", "pct"])
+
+# endregion

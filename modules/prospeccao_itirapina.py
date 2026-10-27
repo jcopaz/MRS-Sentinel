@@ -12,6 +12,8 @@
 # funciona no modo legado (Dashboard/Dormentes/Restrições/Segmentos/Upload).
 #
 # Subabas:
+#   🎯 Travamento  — mapa de calor curvas/tangentes, pontos C/T, Top N e ficha
+#                    do equipamento (modules/itirapina/travamento.py)
 #   📈 Evolução    — base A × base B (modules/itirapina/evolucao.py)
 #   📊 Dashboard   — KPIs, unifilar (pátios, VMA × praticada × restrições,
 #                    dormentes, defeitos/km, Vagão × limite, inspeção),
@@ -156,11 +158,16 @@ def render_prospeccao_itirapina() -> None:
                 st.caption(a)
 
     pode_upload = can_upload_prospeccao()
-    nomes = ["📈 Evolução", "📊 Dashboard", "🔥 Dormentes", "🚧 Restrições", "🛠️ Defeitos",
+    nomes = ["🎯 Travamento", "📈 Evolução", "📊 Dashboard", "🔥 Dormentes", "🚧 Restrições", "🛠️ Defeitos",
              "🚆 Transit time", "📷 Inspeção", "🔧 Execução", "📋 Segmentos"] + (["📤 Upload"] if pode_upload else [])
     abas = dict(zip(nomes, st.tabs(nomes)))
 
-    from modules.itirapina import evolucao, defeitos, transit, inspecao, upload, execucao
+    from modules.itirapina import evolucao, defeitos, transit, inspecao, upload, execucao, travamento
+    with abas["🎯 Travamento"]:
+        if base_id is None:
+            st.info("O Travamento usa as tabelas da fase 2 — rode `database/schema_itirapina.sql`.")
+        else:
+            travamento.render_travamento(dados, refs)
     with abas["📈 Evolução"]:
         evolucao.render_evolucao(bases, refs)
     with abas["📊 Dashboard"]:

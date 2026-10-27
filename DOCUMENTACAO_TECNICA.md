@@ -353,6 +353,11 @@ config `acesso_prospeccao_itirapina`), não por perfil.
   `itp_execucao` é uma série contínua, sem base. Upload pela planilha-modelo,
   com upsert por (data, atividade, km_inicio, linha, quantidade). As metas
   (`itp_metas`) são editadas na própria subaba.
+- **Travamento** (`modules/itirapina/travamento.py`): mapa de calor por
+  equipamento com escala de cor configurável (as cores ficam em
+  `core/cores_itirapina.py`), pontos C/T, Top N (`top_n` reproduz o Top 10 do
+  estudo) e ficha do equipamento. `pontos_criticos` é só uma sugestão: o padrão
+  continua sendo os pontos oficiais.
 - **Indicadores:** `core/indicadores_trecho.calcular` monta a foto por base em
   `itp_trecho_indicadores`, nos escopos trecho, sb, equipamento, ponto_critico,
   transit e mês.

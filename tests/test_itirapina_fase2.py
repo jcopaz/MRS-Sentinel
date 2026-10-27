@@ -166,3 +166,40 @@ def test_execucao_km_e_linhas_invalidas(tmp_path):
     assert len(avisos) == 1 and "2 linha(s) ignorada(s)" in avisos[0]
 
 # endregion
+
+
+# region ── F2 ───────────────────────────────────────────────────────────────
+
+@com_fixtures
+def test_top10_reproduz_estudo(plano):
+    from core.plano_itirapina import top_n
+    t = top_n(plano, 10)
+    csv = _csv("top10_curvas_tangentes.csv")
+    for tipo in ("curva", "tangente"):
+        assert t[t["tipo"] == tipo]["equipamento_siv"].tolist() == \
+            csv[csv["tipo"] == tipo].sort_values("rank")["equipamento_SIV"].tolist()
+
+
+@com_fixtures
+def test_pontos_criticos_algoritmo(plano):
+    """Reproduz C1, T1 e T2 (km ± 0,1). C2, C3, T3 e T4 do estudo tiveram
+    ajuste manual (ex.: a janela do km 251,5 tem 932 inservíveis > C3 = 919)."""
+    from core.plano_itirapina import pontos_criticos
+    calc = pontos_criticos(plano)
+    assert calc["ponto"].tolist() == ["C1", "C2", "C3", "T1", "T2", "T3", "T4"]
+    oficial = _csv("pontos_criticos_C_T.csv").set_index("ponto")
+    achados = {(round(r.km_inicio, 1), round(r.km_fim, 1)) for r in calc.itertuples()}
+    for p in ("C1", "T1", "T2"):
+        o = oficial.loc[p]
+        assert any(abs(a - o.km_ini) <= 0.1 and abs(b - o.km_fim) <= 0.1 for a, b in achados), p
+
+
+@com_fixtures
+def test_quadro_equipamentos(plano):
+    from core.plano_itirapina import quadro_equipamentos
+    q = quadro_equipamentos(plano)
+    assert len(q) == len(plano) and q["dorm_travamento"].sum() == 4645
+    assert (q["pct_exec"] == 0).all()
+    assert q["taxa_pct"].between(0, 100).all()
+
+# endregion
