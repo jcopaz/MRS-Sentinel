@@ -18,6 +18,8 @@ import streamlit as st
 
 from auth.permissions import DONO_PROSPECCAO
 from auth.session import get_id, get_usuario
+from core.analise_velocidade import normalizar_relatorio
+from core.eventos_restricao import comparar_restricoes, resumo_eventos
 from core.indicadores_trecho import calcular_indicadores
 from core.parser_defeitos_via import ler_defeitos_via
 from core.parser_inspecao import ler_inspecao, montar_link, _chave_nome
@@ -196,7 +198,31 @@ def _card_prospeccao(base, travada: bool) -> None:
                 _pos_gravacao(base, "upload_prospeccao_gevia", {"ciclo": ciclo, "segmentos": n})
 
 
-def _card_velocidade(base, travada: bool) -> None:
+def gerar_eventos_restricao(base, bases: pd.DataFrame) -> str | None:
+    """
+    Compara as restrições A da base com as da base anterior (mais recente com
+    Relatório de Velocidade) e grava itp_restricoes_eventos. Retorna o resumo.
+    """
+    from database.queries_prospeccao import get_relatorio_velocidade
+    anteriores = bases[pd.to_datetime(bases["data_base"]) < pd.to_datetime(base["data_base"])] \
+        .sort_values("data_base", ascending=False)
+    atual = normalizar_relatorio(get_relatorio_velocidade(int(base["id"])))
+    for b in anteriores.itertuples():
+        ant = normalizar_relatorio(get_relatorio_velocidade(int(b.id)))
+        if ant.empty:
+            continue
+        ev = comparar_restricoes(ant, atual)
+        try:
+            substituir_por_base("restricoes_eventos", int(base["id"]), ev, {"base_ant_id": int(b.id)})
+        except TabelaAusente:
+            return "⚙️ Tabela itp_restricoes_eventos ausente — rode database/schema_itirapina_fase2.sql."
+        r = resumo_eventos(ev)
+        return (f"Comparado com a base de {pd.to_datetime(b.data_base):%d/%m/%Y}: {r['via_retiradas']} "
+                f"restrição(ões) de via retirada(s), {r['novas_via']} nova(s) de via, {r['alteradas']} alterada(s).")
+    return None
+
+
+def _card_velocidade(base, travada: bool, bases: pd.DataFrame | None = None) -> None:
     arqs = st.file_uploader("PDFs do SRM (Relatório de Velocidade, um por rota)", type=["pdf"],
                             accept_multiple_files=True, key="up_relvel")
     if not arqs:
@@ -222,6 +248,13 @@ def _card_velocidade(base, travada: bool) -> None:
                 return
             total += r
         st.success(f"✅ {total} registros gravados.")
+        if bases is not None and len(bases) > 1:
+            try:
+                msg = gerar_eventos_restricao(base, bases)
+                if msg:
+                    st.info(f"🚧 {msg}")
+            except Exception as e:
+                st.warning(f"Eventos de restrição não gerados: {e}")
         _pos_gravacao(base, "upload_relatorio_velocidade", {"rotas": [r for _, r, _, _ in lidos]})
 
 
@@ -380,7 +413,7 @@ def render_upload(bases: pd.DataFrame) -> None:
     with st.expander("🔥 Prospecção (Engenharia · Rev 1 · Relatório GeVia)", expanded=True):
         _card_prospeccao(base, travada)
     with st.expander("🚧 Relatório de Velocidade (PDF do SRM)"):
-        _card_velocidade(base, travada)
+        _card_velocidade(base, travada, bases)
     with st.expander("🛠️ Defeitos de via (export Rumo / Vagão de Via)"):
         _card_defeitos(base, travada)
     with st.expander("🚆 Transit time (SRM)"):

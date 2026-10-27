@@ -1244,5 +1244,22 @@
 #     legenda acima da área do gráfico.
 #   - modules/itirapina/inspecao.py: cards extraídos em render_cards_inspecao.
 # MINOR -- tela nova.
+#
+# 17.5.0 (2026-10-27): Itirapina fase 2 · F4 — eventos de restrição e
+# indicadores derivados.
+#   - core/eventos_restricao.py: comparar_restricoes(anterior, atual) gera
+#     'retirada' / 'nova' / 'alterada' casando linha + km_de (± 20 m) +
+#     código do motivo (a Seq da Rumo muda entre relatórios); grupo
+#     'ANTT/terceiros' = códigos 503/185/502, resto 'via'. motivo_legivel
+#     (509/092 via desnivelada, 204 torção, 050 junta com taco...).
+#   - Upload do Relatório de Velocidade grava itp_restricoes_eventos contra a
+#     base anterior mais recente com relatório; subaba Restrições mostra o
+#     histórico.
+#   - core/indicadores_trecho.py: km_restrito_via e tempo_marcha_prat_min na
+#     foto; derivados(foto_mz, foto_atual, ...) = minutos ganhos por trem,
+#     horas de trem/mês (× trens válidos/mês dos 3 últimos meses), km
+#     liberados (restrição de via), Δ velocidade praticada, Δ taxa,
+#     retiradas, defeitos eliminados (por defeito_id) e avanço do travamento.
+# MINOR -- funcionalidade nova.
 
-APP_VERSION = "17.4.0"
+APP_VERSION = "17.5.0"

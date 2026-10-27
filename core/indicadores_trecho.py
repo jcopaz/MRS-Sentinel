@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from core.analise_trecho import (
-    TRECHO_KM, META_TAXA, resumo_velocidade, restricoes_trecho, vagao_sem_restricao,
+    TRECHO_KM, META_TAXA, GRUPO_ANTT, perfil_trecho, resumo_velocidade, restricoes_trecho, vagao_sem_restricao,
     defeitos_por_equipamento, sb_dos_defeitos, faixas_sb, preencher_sb,
 )
 from core.parser_prospeccao import JUNTAS_PROBLEMA
@@ -41,6 +41,8 @@ CATALOGO = {
     "restricoes_via":          ("Restrições de via", "menor_melhor", "int"),
     "restricoes_antt":         ("Restrições ANTT", "menor_melhor", "int"),
     "km_restrito":             ("Km sob restrição A", "menor_melhor", "dec"),
+    "km_restrito_via":         ("Km sob restrição de via", "menor_melhor", "dec"),
+    "tempo_marcha_prat_min":   ("Tempo de marcha praticado", "menor_melhor", "min"),
     "vma_media":               ("VMA média TQ carregado", "maior_melhor", "kmh"),
     "v_media_praticada":       ("Velocidade praticada", "maior_melhor", "kmh"),
     "tempo_marcha_vma_min":    ("Tempo de marcha na VMA", "menor_melhor", "min"),
@@ -119,6 +121,10 @@ def _bloco_velocidade(rel) -> dict:
     rA = restricoes_trecho(rel)
     out = {"restricoes_a": len(rA), "restricoes_via": int((rA["grupo"] == "Via").sum()),
            "restricoes_antt": int((rA["grupo"] == "ANTT").sum())}
+    p = perfil_trecho(rel)
+    if p is not None and not p.empty and "restrito" in p.columns:
+        via = p[p["restrito"].fillna(False) & (p["categoria"] != GRUPO_ANTT)]
+        out["km_restrito_via"] = float(via["ext"].sum())
     if r:
         out.update(vma_media=r["vma_media"], v_media_praticada=r["v_media"],
                    km_restrito=r["km_restrito"], minutos_perdidos=r["min_perdidos"],
@@ -274,3 +280,70 @@ def calcular_indicadores(base_id: int, trecho: str, data_base: date) -> int:
         dados["dormentes"] = enriquecer_prospeccao(dados["dormentes"])
     foto = calcular(dados, data_base)
     return salvar_indicadores(base_id, foto) if len(foto) else 0
+
+
+
+# region ====================== Indicadores derivados (One Page) ================
+# Ganho só faz sentido com 2 bases: com 1 base a One Page entra no modo
+# "Ponto de partida" e estes valores não são mostrados.
+
+def _total(foto: pd.DataFrame) -> pd.Series:
+    if foto is None or foto.empty:
+        return pd.Series(dtype=float)
+    f = foto[(foto["escopo"] == "trecho") & (foto["chave"] == "TOTAL")]
+    return pd.to_numeric(f.set_index("indicador")["valor"], errors="coerce")
+
+
+def trens_por_mes(transit: pd.DataFrame | None, ate=None, meses: int = 3) -> float | None:
+    """Média de trens válidos/mês (2 sentidos) nos `meses` últimos meses completos."""
+    if transit is None or transit.empty:
+        return None
+    t = transit[transit["valido"].astype(bool)].copy()
+    t["mes"] = pd.to_datetime(t["partida"]).dt.to_period("M")
+    if ate is not None:
+        t = t[t["mes"] <= pd.Period(pd.Timestamp(ate), "M")]
+    por_mes = t.groupby("mes").size().sort_index()
+    if por_mes.empty:
+        return None
+    return float(por_mes.tail(meses).mean())
+
+
+def derivados(foto_a: pd.DataFrame, foto_b: pd.DataFrame, eventos: pd.DataFrame | None = None,
+              transit: pd.DataFrame | None = None, defeitos_a: pd.DataFrame | None = None,
+              defeitos_b: pd.DataFrame | None = None, avanco: dict | None = None,
+              data_b=None) -> dict:
+    """
+    foto_a = marco zero (referência), foto_b = base atual. Valores positivos =
+    ganho. Chaves ausentes quando falta dado.
+    """
+    from core.eventos_restricao import resumo_eventos
+    a, b = _total(foto_a), _total(foto_b)
+    out = {}
+    if "tempo_marcha_prat_min" in a and "tempo_marcha_prat_min" in b:
+        ganho = float(a["tempo_marcha_prat_min"] - b["tempo_marcha_prat_min"])
+        out["minutos_ganhos"] = ganho
+        tpm = trens_por_mes(transit, data_b)
+        if tpm:
+            out["trens_mes"] = tpm
+            out["horas_mes"] = ganho * tpm / 60
+    if "km_restrito_via" in a and "km_restrito_via" in b:
+        out["km_liberados"] = float(a["km_restrito_via"] - b["km_restrito_via"])
+    if "v_media_praticada" in a and "v_media_praticada" in b:
+        out["delta_v_praticada"] = float(b["v_media_praticada"] - a["v_media_praticada"])
+    if "taxa_inserviveis_pct" in a and "taxa_inserviveis_pct" in b:
+        out["delta_taxa_pp"] = float(b["taxa_inserviveis_pct"] - a["taxa_inserviveis_pct"])
+    if eventos is not None:
+        out.update(resumo_eventos(eventos))
+    if defeitos_a is not None and defeitos_b is not None and len(defeitos_a) and len(defeitos_b):
+        ida = set(_ativos(defeitos_a)["defeito_id"].dropna().astype("int64"))
+        idb = set(_ativos(defeitos_b)["defeito_id"].dropna().astype("int64"))
+        out["defeitos_eliminados"] = len(ida - idb)
+        out["defeitos_novos"] = len(idb - ida)
+    if avanco:
+        out["travamento_pct"] = avanco["pct"] * 100
+        out["travamento_exec"] = avanco["executado"]
+        out["pontos_concluidos"] = avanco["pontos_concluidos"]
+        out["top20_concluidos"] = avanco["top20_concluidos"]
+    return out
+
+# endregion

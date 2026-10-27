@@ -218,3 +218,52 @@ def test_lod_e_janela():
     assert motivo_curto("ANTT - PERIMETRO URBANO") == "PERIMETRO URBANO"
 
 # endregion
+
+
+# region ── F4 ───────────────────────────────────────────────────────────────
+
+def _rel_modificado(rel):
+    """Cópia do relatório sem 2 restrições de via da LP e com 1 velocidade mudada."""
+    from core.analise_trecho import TRECHO_KM, GRUPO_ANTT
+    r = rel.copy()
+    m = ((r["tipo"] == "restricao_a") & (r["sub"] == "78") & (r["categoria"] != GRUPO_ANTT)
+         & (r["linha"] == "LP") & (r[["km_de", "km_ate"]].min(axis=1) <= TRECHO_KM[1]))
+    idx = r[m].sort_values("km_de").index
+    r = r.drop(index=idx[:2])
+    r.loc[idx[2], "vel"] = r.loc[idx[2], "vel"] + 5
+    return r
+
+
+@com_fixtures
+def test_eventos_de_restricao(rel):
+    from core.eventos_restricao import comparar_restricoes, resumo_eventos
+    ev = comparar_restricoes(rel, _rel_modificado(rel))
+    assert (ev["evento"] == "retirada").sum() == 2
+    assert (ev["evento"] == "alterada").sum() == 1
+    assert (ev["evento"] == "nova").sum() == 0
+    assert resumo_eventos(ev)["via_retiradas"] == 2
+    assert set(ev["grupo"]) == {"via"}
+    assert comparar_restricoes(rel, rel).empty
+
+
+@com_fixtures
+def test_minutos_ganhos(rel):
+    from core.indicadores_trecho import calcular, derivados
+    from core.eventos_restricao import comparar_restricoes
+    a = calcular({"rel": rel}, date(2026, 10, 26))
+    novo = _rel_modificado(rel)
+    b = calcular({"rel": novo}, date(2027, 3, 1))
+    d = derivados(a, b, comparar_restricoes(rel, novo))
+    assert d["minutos_ganhos"] > 0
+    assert d["km_liberados"] > 0
+    assert d["via_retiradas"] == 2
+
+
+def test_motivo_legivel_e_grupo():
+    from core.eventos_restricao import motivo_legivel, grupo_evento, codigo_motivo
+    assert motivo_legivel("509 VIA DESNIVELADA") == "via desnivelada"
+    assert motivo_legivel("502 ANTT - PN COM SINALIZAÇÃO INSUFICIENTE") == "PN sem sinalização"
+    assert grupo_evento(codigo_motivo("503 ANTT - PERIMETRO URBANO")) == "ANTT/terceiros"
+    assert grupo_evento(codigo_motivo("204 TORÇÃO")) == "via"
+
+# endregion

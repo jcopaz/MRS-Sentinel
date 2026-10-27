@@ -363,6 +363,11 @@ config `acesso_prospeccao_itirapina`), não por perfil.
   largura da janela: acima de 30 km, visão agregada; de 5 a 30 km, aparecem os
   rótulos; até 5 km, cada defeito vira um ponto. O painel "O que tem neste
   trecho" acompanha a janela, e clicar num dormente abre a ficha.
+- **Eventos de restrição** (`core/eventos_restricao.py`): no upload do
+  Relatório de Velocidade, as restrições A são comparadas com as da base
+  anterior. O casamento é por linha + km_de (±20 m) + código do motivo, e o
+  resultado vai para `itp_restricoes_eventos`. Os indicadores derivados ficam
+  em `indicadores_trecho.derivados`; o ganho só aparece quando há 2 bases.
 - **Indicadores:** `core/indicadores_trecho.calcular` monta a foto por base em
   `itp_trecho_indicadores`, nos escopos trecho, sb, equipamento, ponto_critico,
   transit e mês.

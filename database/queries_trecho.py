@@ -22,7 +22,7 @@ from database.queries_prospeccao import PREFIXO, TabelaAusente, _tabela_ausente,
 TABELAS_POR_BASE = (
     "prospeccao_dormentes", "relatorio_velocidade", "prospeccao_lastro",
     "prospeccao_fixacao", "prospeccao_trilho", "defeitos_via",
-    "inspecoes_campo", "inspecao_midias",
+    "inspecoes_campo", "inspecao_midias", "restricoes_eventos",
 )
 
 

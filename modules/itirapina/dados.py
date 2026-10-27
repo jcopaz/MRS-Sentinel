@@ -83,6 +83,7 @@ def carregar_base(base_id: int | None) -> dict:
                                    "prospeccao_fixacao", avisos), ("km_inicio", "km_fim")),
             "inspecao": _tipar(_ler(lambda: get_por_base("inspecoes_campo", base_id),
                                     "inspecoes_campo", avisos), ("km", "km_fim", "taxa_inserv_equip")),
+            "eventos": _ler(lambda: get_por_base("restricoes_eventos", base_id), "restricoes_eventos", []),
             "midias": _ler(lambda: get_por_base(
                 "inspecao_midias", base_id,
                 "id,inspecao_id,msg_n,arquivo,tipo,caminho_relativo,url,repositorio_id,miniatura"),

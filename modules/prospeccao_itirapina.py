@@ -188,6 +188,7 @@ def render_prospeccao_itirapina() -> None:
         st.warning(aviso_df) if aviso_df else _render_mapa(df)
     with abas["🚧 Restrições"]:
         st.warning(aviso_rel) if aviso_rel else _render_restricoes(rel)
+        _render_eventos(dados.get("eventos"))
     with abas["🛠️ Defeitos"]:
         defeitos.render_defeitos(dados)
     with abas["🚆 Transit time"]:
@@ -820,6 +821,29 @@ def _render_dashboard(df, rel, aviso_df, aviso_rel, extra=None) -> None:
 
 
 # region ====================== SESSÃO 7: Restrições ===========================
+
+def _render_eventos(ev: pd.DataFrame | None) -> None:
+    """Histórico gerado no upload do Relatório (core/eventos_restricao.py)."""
+    if ev is None or ev.empty:
+        return
+    from core.eventos_restricao import motivo_legivel, resumo_eventos
+    r = resumo_eventos(ev)
+    st.markdown("##### 🔁 Mudanças em relação à base anterior")
+    k = st.columns(4)
+    k[0].metric("Restrições de via retiradas", r["via_retiradas"])
+    k[1].metric("Novas de via", r["novas_via"], delta_color="off")
+    k[2].metric("Velocidade alterada", r["alteradas"])
+    k[3].metric("ANTT/terceiros retiradas", r["terceiros_retiradas"])
+    e = ev.assign(motivo_txt=ev["motivo"].map(motivo_legivel)).sort_values(["evento", "km_de"])
+    st.dataframe(e[["evento", "grupo", "linha", "km_de", "km_ate", "vel_antes", "vel_depois", "motivo_txt"]],
+                 hide_index=True, use_container_width=True, column_config={
+                     "evento": "Evento", "grupo": "Grupo", "linha": "Linha",
+                     "km_de": st.column_config.NumberColumn("km de", format="%.3f"),
+                     "km_ate": st.column_config.NumberColumn("km até", format="%.3f"),
+                     "vel_antes": st.column_config.NumberColumn("Antes", format="%.0f km/h"),
+                     "vel_depois": st.column_config.NumberColumn("Depois", format="%.0f km/h"),
+                     "motivo_txt": "Motivo"})
+
 
 def _render_restricoes(rel: pd.DataFrame) -> None:
     if rel.empty:
