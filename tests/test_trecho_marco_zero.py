@@ -322,4 +322,14 @@ def test_base_congelada_bloqueia_escrita(monkeypatch):
     with pytest.raises(qt.BaseCongelada):
         qt.salvar_indicadores(1, pd.DataFrame())
 
+
+def test_inteiro_com_vazio_vai_como_int():
+    """vel_max_classe_kmh com célula vazia vira float; o Postgres recusa "96.0" em SMALLINT."""
+    from database.queries_trecho import _registros
+    df = pd.DataFrame({"vel_max_classe_kmh": [96, None], "km": [174.5, 175.0]})
+    r = _registros(df)
+    assert r[0]["vel_max_classe_kmh"] == 96 and isinstance(r[0]["vel_max_classe_kmh"], int)
+    assert r[1]["vel_max_classe_kmh"] is None
+    assert r[0]["km"] == 174.5
+
 # endregion

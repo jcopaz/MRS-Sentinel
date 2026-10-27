@@ -1165,5 +1165,13 @@
 #     caracteres de cada item e o lote podia passar um pouco de 1 MB).
 #   - scripts/importar_usuarios_planilha.py não grava mais acesso_tv.
 # PATCH -- bugfix, sem mudança de fluxo.
+#
+# 17.0.2 (2026-10-27): upload do export Vagão de Via na aba Itirapina falhava
+# com 22P02 'invalid input syntax for type smallint: "96.0"'.
+#   - database/queries_prospeccao.py::_json_safe manda float sem parte
+#     fracionária como int: coluna inteira com célula vazia vira float no
+#     pandas (vel_max_classe_kmh, dias_ativo, numero_viagem...) e o Postgres
+#     recusa "96.0" em INT/SMALLINT. Vale para todas as gravações itp_.
+# PATCH -- bugfix, sem mudança de fluxo.
 
-APP_VERSION = "17.0.1"
+APP_VERSION = "17.0.2"

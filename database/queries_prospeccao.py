@@ -77,12 +77,14 @@ def get_prospeccao(trecho: str, base_id: int | None = None) -> pd.DataFrame:
 def _json_safe(v):
     if v is None or v is pd.NA or v is pd.NaT:
         return None
-    if isinstance(v, float) and np.isnan(v):
-        return None
     if isinstance(v, (np.integer,)):
         return int(v)
-    if isinstance(v, (np.floating,)):
-        return None if np.isnan(v) else float(v)
+    if isinstance(v, (float, np.floating)):
+        if np.isnan(v):
+            return None
+        # Coluna inteira com célula vazia vira float no pandas (96 → 96.0) e o
+        # Postgres recusa "96.0" em INT/SMALLINT; valor inteiro vai como int.
+        return int(v) if float(v).is_integer() else float(v)
     if isinstance(v, (np.bool_,)):
         return bool(v)
     if isinstance(v, (date, datetime, pd.Timestamp)):
