@@ -8,6 +8,7 @@
 # =============================================================================
 
 import pandas as pd
+import streamlit as st
 
 from core.analise_trecho import preencher_sb
 from core.analise_velocidade import normalizar_relatorio
@@ -60,6 +61,7 @@ def _tipar(d: pd.DataFrame, numericas: tuple) -> pd.DataFrame:
     return d
 
 
+@st.cache_data(ttl=300, show_spinner=False, max_entries=6)
 def carregar_base(base_id: int | None) -> dict:
     avisos: list = []
     if base_id is None:
@@ -116,6 +118,19 @@ def _carregar_transit(avisos: list) -> pd.DataFrame:
     return t
 
 
+def limpar_caches_trecho() -> None:
+    """Depois de um upload: caches das consultas + dos cálculos das visões."""
+    from database.queries_trecho import limpar_caches
+    limpar_caches()
+    carregar_base.clear()
+    carregar_referencias.clear()
+    from modules.itirapina import evolucao, navegacao, onepage, travamento
+    for f in (evolucao._foto, navegacao._figura, navegacao._vagao, onepage._montar, onepage._html,
+              travamento.quadro_cache):
+        f.clear()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
 def carregar_referencias() -> dict:
     avisos: list = []
     refs = {

@@ -291,21 +291,16 @@ def test_onepage_modos(onepages):
 
 @com_fixtures
 @pytest.mark.parametrize("modo", ["partida", "evolucao"])
-def test_onepage_exporta(onepages, modo):
-    import io
-    from PIL import Image
-    from core.onepage_render import (render_onepage, para_png, para_pdf, para_pptx, textos_fora_do_quadro,
-                                     nome_arquivo)
-    o = onepages[modo]
-    assert textos_fora_do_quadro(render_onepage(o)) == []
-    png = para_png(o)
-    im = Image.open(io.BytesIO(png))
-    assert im.size == (2338, 1654) and getattr(im, "n_frames", 1) == 1
-    assert para_pdf(o).startswith(b"%PDF")
-    from pptx import Presentation
-    prs = Presentation(io.BytesIO(para_pptx(o, png)))
-    assert len(prs.slides) == 1 and prs.slides[0].notes_slide.notes_text_frame.text
-    assert nome_arquivo(o, "png").startswith("OnePage_Itirapina_Pederneiras_")
+def test_onepage_figura_plotly(onepages, modo):
+    """One Page = 1 figura Plotly 16:9; PNG pelo botão de câmera (2×) e HTML autocontido."""
+    from core.onepage_fig import ALTURA, LARGURA, config_exportacao, fig_onepage, html_onepage
+    fig = fig_onepage(onepages[modo])
+    assert (fig.layout.width, fig.layout.height) == (LARGURA, ALTURA) == (1280, 720)
+    textos = " ".join(a.text for a in fig.layout.annotations)
+    assert "RESTRIÇÕES DE VIA" in textos and ("O PLANO" if modo == "partida" else "DESTAQUES") in textos
+    cfg = config_exportacao("OnePage_x")
+    assert cfg["toImageButtonOptions"]["scale"] == 2 and cfg["toImageButtonOptions"]["format"] == "png"
+    assert html_onepage(fig).lower().startswith(b"<!doctype html>")
 
 
 def test_frases_nunca_sobre_piora():

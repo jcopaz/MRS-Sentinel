@@ -19,10 +19,6 @@ openpyxl>=3.1.0
 # PDF — Relatório de Velocidade do SRM (core/parser_relatorio_velocidade.py)
 pdfplumber>=0.11.0
 
-# One Page Itirapina — exportação PNG/PDF (matplotlib, sem kaleido/Chrome) e PPTX
-matplotlib>=3.8.0
-python-pptx>=1.0.0
-
 # Componentes extras
 streamlit-aggrid>=1.0.5
 streamlit-extras>=0.4.0

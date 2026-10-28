@@ -1286,5 +1286,34 @@
 #     Evolução · Restrições · Defeitos · Transit · Inspeção · Execução ·
 #     Segmentos (+ Dashboard e Dormentes antigos no fim).
 # MINOR -- tela nova.
+#
+# 17.7.0 (2026-10-28): Itirapina — "menos é mais": desempenho, telas enxutas e
+# One Page em Plotly (pedido do Julio: aba densa e lenta; mesma biblioteca do
+# resto do app; One Page mais profissional).
+#   - Desempenho: st.tabs desenhava as 13 subabas a cada clique (a One Page
+#     sozinha carregava 2 bases e 5 gráficos). Agora um seletor de visão
+#     desenha só a escolhida, dentro de um st.fragment; carregar_base,
+#     carregar_referencias, foto de indicadores, quadro do Travamento, figura
+#     do Trecho por janela e One Page ficam em st.cache_data
+#     (dados.limpar_caches_trecho() limpa tudo depois de upload/metas).
+#   - 13 subabas → 6 visões: 🏁 One Page · 🛤️ Trecho (absorve Dashboard,
+#     Restrições e Defeitos; painel Restrições · Defeitos · Vagão sem
+#     restrição · Equipamentos) · 🎯 Travamento (absorve Dormentes; 4
+#     números, mapa com 3 opções de cor, Top 10, ficha por clique) · 📈
+#     Evolução (8 indicadores, mudanças de restrição, transit time) · 📷
+#     Inspeção · ⚙️ Dados (carregar arquivos, execução, metas, exportar).
+#     Saem: cores personalizadas, 6 filtros, Top N variável, recalcular
+#     pontos, ◀ ▶, faixas Restr. B/Vagão/Inspeção do unifilar, tabelas por
+#     SB, Pareto, dispersão, boxplot do transit.
+#   - One Page: core/onepage_fig.py — figura Plotly única 16:9 (1280 × 720):
+#     faixa de título, 5 indicadores grandes (restrições de via, velocidade
+#     praticada, ganho/perda por trem, trecho travado com barra, transit time),
+#     o trecho (restrições + dormentação no mesmo eixo de km; só as de via
+#     com rótulo), travamento dos 7 pontos e 3 destaques. PNG 2560 × 1440
+#     pelo botão de câmera do gráfico (no navegador) e HTML interativo.
+#   - Removidos: core/onepage_render.py (matplotlib), exportar_onepage.py,
+#     modules/itirapina/defeitos.py e transit.py; requirements sem
+#     matplotlib e python-pptx.
+# MINOR -- telas reorganizadas.
 
-APP_VERSION = "17.6.0"
+APP_VERSION = "17.7.0"

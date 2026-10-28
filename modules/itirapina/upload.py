@@ -57,7 +57,8 @@ def _pos_gravacao(base, acao: str, detalhes: dict) -> None:
         pass
     except Exception as e:
         st.warning(f"Indicadores não recalculados: {e}")
-    limpar_caches()
+    from modules.itirapina.dados import limpar_caches_trecho
+    limpar_caches_trecho()
     log_acesso(get_id(), acao, {"base_id": int(base["id"]), **detalhes})
 
 
@@ -373,6 +374,8 @@ def _card_repositorio() -> None:
                             and atual["tipo"] in tipos else 0)
         if st.form_submit_button("💾 Salvar repositório") and url.strip():
             _gravar(salvar_repositorio_midia, TRECHO_ITIRAPINA, nome.strip(), url.strip(), tipo)
+            from modules.itirapina.dados import carregar_referencias
+            carregar_referencias.clear()
             st.success("✅ Repositório salvo.")
     if atual is not None and isinstance(atual["base_url"], str):
         st.link_button("🔗 Testar link (abre a 1ª mídia do marco zero)",

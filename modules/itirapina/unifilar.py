@@ -93,7 +93,9 @@ def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
     faixas = []
     if tem(estacoes):
         faixas.append(("patios", 0.05))
-    faixas += [("vel", 0.34), ("rb", 0.06)]
+    faixas.append(("vel", 0.34))
+    if tem(rB):
+        faixas.append(("rb", 0.06))
     if tem(seg):
         faixas.append(("dorm", 0.12 if not tem(seg_a) else 0.16))
     if tem(def_eq):
@@ -182,8 +184,8 @@ def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
                                font=dict(size=9, color="#7c3aed"))
 
     # ── Restrições B ─────────────────────────────────────────────────────────
-    rr = linha_de["rb"]
     if tem(rB):
+        rr = linha_de["rb"]
         pare = rB["condicao"].fillna("").str.contains("sim", case=False)
         fmt = lambda d: d.strftime("%d/%m %H:%M") if pd.notna(d) else "—"  # noqa: E731
         fig.add_trace(go.Bar(
@@ -192,9 +194,6 @@ def fig_unifilar_trecho(p: pd.DataFrame, rB: pd.DataFrame, trem: str, *,
             hovertext=[f"<b>{r.sb}</b> · {r.condicao}<br>km {r.a:.1f}–{r.b:.1f}<br>Resp. {r.responsavel}"
                        f"<br>{fmt(r.inicio)} → {fmt(r.fim)}" for r in rB.itertuples()],
             hovertemplate="%{hovertext}<extra></extra>", showlegend=False, width=0.6), row=rr, col=1)
-    else:
-        fig.add_trace(go.Bar(orientation="h", y=["Restr. B"], base=[x_range[0]], x=[0],
-                             showlegend=False, hoverinfo="skip"), row=rr, col=1)
 
     # ── Dormentes ────────────────────────────────────────────────────────────
     if tem(seg):

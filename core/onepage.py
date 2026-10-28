@@ -2,8 +2,8 @@
 # core/onepage.py — Dados da One Page do trecho Itirapina–Pederneiras
 #
 # montar_onepage(...) é PURA e devolve um dict com tudo o que a página mostra.
-# A tela (modules/itirapina/onepage.py) e a exportação matplotlib
-# (core/onepage_render.py) leem o MESMO dict — o PNG/PDF/PPTX é a mesma peça.
+# core/onepage_fig.py transforma o dict numa figura Plotly única 16:9, que é
+# ao mesmo tempo a tela e a exportação (PNG pelo botão do Plotly, HTML).
 #
 # Modos:
 #   'evolucao' — marco zero × base atual (cards "antes → agora", frases de ganho)
@@ -119,56 +119,52 @@ def montar_onepage(*, data_mz: date, data_atual: date, foto_mz: pd.DataFrame,
         else ({"travamento_pct": av["pct"] * 100, "pontos_concluidos": av["pontos_concluidos"],
                "travamento_exec": av["executado"]} if av else {})
 
-    # ── cards ───────────────────────────────────────────────────────────────
+    # ── cards (5, na ordem de impacto; os 3 primeiros = mérito da Manutenção) ─
     cards = []
     via_a, via_b = a.get("restricoes_via"), b.get("restricoes_via")
     antt_a, antt_b = a.get("restricoes_antt"), b.get("restricoes_antt")
     mt = _meta(metas, "restricoes_via")
     if evol:
-        m = d.get("minutos_ganhos")
-        cards.append(_card("marcha", "TEMPO DE MARCHA",
-                           f"{_sinal(-m, 1 if abs(m) < 10 else 0)} min/trem" if m is not None else "—",
-                           cor=_cor(-(m or 0), "menor_melhor"), destaque=True,
-                           rodape=f"{_n(d['horas_mes'])} h de trem/mês" if d.get("horas_mes") else "",
-                           ajuda="Tempo para atravessar o trecho na velocidade praticada (VMA + restrições), "
-                                 "marco zero − agora."))
-        va, vb = a.get("v_media_praticada"), b.get("v_media_praticada")
-        cards.append(_card("vprat", "VELOCIDADE PRATICADA", f"{_n(vb, 1)} km/h", antes=f"{_n(va, 1)}",
-                           delta=_sinal(_dif(vb, va)), cor=_cor(_dif(vb, va), "maior_melhor"),
-                           destaque=True, rodape="média ponderada pelo km"))
         dv = _dif(via_b, via_a)
         cards.append(_card("restr", "RESTRIÇÕES DE VIA", f"{_n(via_b)}", antes=f"{_n(via_a)}",
-                           delta=f"{dv / via_a * 100:+.0f}%" if dv is not None and via_a else None,
+                           delta=f"{dv / via_a * 100:+.0f}%".replace("-", "−") if dv is not None and via_a else None,
                            cor=_cor(dv, "menor_melhor"), destaque=True,
-                           rodape=f"ANTT/terceiros: {_n(antt_b)} ({'=' if antt_a == antt_b else _n(antt_a) + '→'})"))
-        vma_a, vma_b = a.get("vma_media"), b.get("vma_media")
-        cards.append(_card("vma", "VMA MÉDIA TQ carregado", f"{_n(vma_b, 1)} km/h", antes=f"{_n(vma_a, 1)}",
-                           delta=_sinal(_dif(vma_b, vma_a)), cor=_cor(_dif(vma_b, vma_a), "maior_melhor")))
+                           rodape=f"+ {_n(antt_b)} ANTT/terceiros"))
+        va, vb = a.get("v_media_praticada"), b.get("v_media_praticada")
+        cards.append(_card("vprat", "VELOCIDADE PRATICADA", f"{_n(vb, 1)}", antes=f"{_n(va, 1)}",
+                           delta=_sinal(_dif(vb, va)), cor=_cor(_dif(vb, va), "maior_melhor"),
+                           destaque=True, rodape="km/h · média no trecho"))
+        m = d.get("minutos_ganhos")
+        cards.append(_card("marcha", "GANHO POR TREM",
+                           f"{_n(m, 1 if m is not None and abs(m) < 10 else 0)}" if m is not None else "—",
+                           cor=_cor(-(m or 0), "menor_melhor"), destaque=True,
+                           rodape=(f"min · {_n(d['horas_mes'])} h de trem/mês" if d.get("horas_mes")
+                                   else "min no tempo de marcha"),
+                           ajuda="Tempo de marcha (VMA + restrições) do marco zero − agora."))
     else:
-        cards.append(_card("marcha", "TEMPO DE MARCHA", f"{_n(a.get('tempo_marcha_prat_min', np.nan))} min",
-                           destaque=True, rodape=f"na VMA seriam {_n(a.get('tempo_marcha_vma_min', np.nan))} min"))
-        cards.append(_card("vprat", "VELOCIDADE PRATICADA", f"{_n(a.get('v_media_praticada', np.nan), 1)} km/h",
-                           destaque=True, rodape="média ponderada pelo km"))
         cards.append(_card("restr", "RESTRIÇÕES DE VIA", f"{_n(via_a or 0)}", destaque=True,
-                           rodape=(f"meta {_n(mt['valor_meta'])}" if mt is not None else "")
-                           + f" · ANTT/terceiros: {_n(antt_a or 0)}"))
+                           rodape=(f"meta {_n(mt['valor_meta'])} · " if mt is not None else "")
+                           + f"+ {_n(antt_a or 0)} ANTT/terceiros"))
         mv = _meta(metas, "vma_media")
-        cards.append(_card("vma", "VMA MÉDIA TQ carregado", f"{_n(a.get('vma_media', np.nan), 1)} km/h",
-                           rodape=f"meta {_n(mv['valor_meta'])} km/h" if mv is not None else ""))
+        cards.append(_card("vprat", "VELOCIDADE PRATICADA", f"{_n(a.get('v_media_praticada', np.nan), 1)}",
+                           destaque=True, rodape=f"km/h · VMA {_n(a.get('vma_media', np.nan), 1)}"
+                           + (f" · meta {_n(mv['valor_meta'])}" if mv is not None else "")))
+        cards.append(_card("marcha", "PERDA POR RESTRIÇÕES", f"{_n(a.get('minutos_perdidos', np.nan))}",
+                           destaque=True, rodape="min por trem a recuperar"))
     if av:
         cards.append(_card("trav", "TRECHO TRAVADO", f"{_n(av['pct'] * 100)}%",
-                           rodape=f"{_n(av['executado'])}/{_n(av['travamento'])} dormentes",
-                           cor="bom" if av["pct"] > 0 else "neutro"))
+                           rodape=f"{_n(av['executado'])} de {_n(av['travamento'])} dormentes",
+                           cor="bom" if av["pct"] > 0 else "neutro") | {"progresso": av["pct"]})
     tm = _transit_mensal(transit, data_atual)
     ref = _transit_ref(foto_mz)
     sent = "ZIQ→ZPD"
     if len(tm) and (tm["sentido"] == sent).any():
         ult = tm[tm["sentido"] == sent].sort_values("mes").iloc[-1]
         mz_med = (ref.get(sent) or {}).get("mediana")
-        cards.append(_card("transit", f"TRANSIT TIME {sent}", f"{_n(ult['mediana'], 1)} h",
+        cards.append(_card("transit", "TRANSIT TIME", f"{_n(ult['mediana'], 1)} h",
                            antes=f"{_n(mz_med, 1)}" if evol and mz_med is not None else None,
                            cor=_cor(_dif(ult["mediana"], mz_med), "menor_melhor") if evol else "neutro",
-                           rodape=f"mediana {ult['mes']:%m/%Y} · inclui circulação e pátio"))
+                           rodape=f"{sent} · {ult['mes']:%m/%Y} · inclui circulação"))
 
     # ── restrições no esquemático ───────────────────────────────────────────
     rA = restricoes_trecho(rel_b) if rel_b is not None and len(rel_b) else pd.DataFrame()

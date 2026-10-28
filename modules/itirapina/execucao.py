@@ -1,12 +1,10 @@
 # =============================================================================
-# modules/itirapina/execucao.py — Subaba 🔧 Execução
+# modules/itirapina/execucao.py — Execução (visão ⚙️ Dados)
 #
-# O que a Manutenção fez (itp_execucao, série contínua, sem base) × o plano
-# de travamento congelado (itp_plano). Avanço do travamento pelas regras de
-# core/plano_itirapina.py (troca de dormente, limitada ao travamento de cada
-# equipamento; concluído ≥ 90%). Upload pela planilha-modelo
-# (core/parser_execucao.py) e metas editáveis (itp_metas) para quem pode
-# fazer upload.
+# O que a Manutenção fez (itp_execucao, série contínua, sem base): envio pela
+# planilha-modelo (core/parser_execucao.py), troca de dormente acumulada ×
+# plano, totais por atividade e mês, tabela com exclusão. render_metas edita
+# itp_metas. O avanço do travamento fica na visão 🎯 Travamento.
 # =============================================================================
 
 from datetime import date
@@ -42,21 +40,6 @@ def carregar_execucao() -> tuple[pd.DataFrame, str | None]:
     return e, None
 
 
-def _cards_avanco(av: dict) -> None:
-    k = st.columns(4)
-    k[0].metric("Trecho travado", f"{av['pct'] * 100:.0f}%",
-                f"{av['executado']:,} de {av['travamento']:,} dormentes".replace(",", "."),
-                delta_color="off", help="Troca de dormente nos equipamentos do plano, limitada ao "
-                                        "travamento previsto de cada um.")
-    k[1].metric("Pontos críticos travados", f"{av['pontos_concluidos']} de {len(av['pontos'])}",
-                help="C1–C3 / T1–T4 com ≥ 90% do travamento executado.")
-    k[2].metric("Top 20 resolvidos", f"{av['top20_concluidos']} de 20",
-                help="Top 10 curvas + Top 10 tangentes com ≥ 90% do travamento executado.")
-    falta = av["equip"]["dias_equipe"].sum()
-    k[3].metric("Dias de equipe restantes", f"{falta:,.0f}".replace(",", "."),
-                help="Travamento que falta ÷ 70 dormentes/dia.")
-
-
 def _fig_acumulado(e: pd.DataFrame, plano_total: int, meta: pd.Series | None) -> go.Figure:
     t = e[e["atividade"] == "troca_dormente"].sort_values("data")
     fig = go.Figure()
@@ -74,19 +57,6 @@ def _fig_acumulado(e: pd.DataFrame, plano_total: int, meta: pd.Series | None) ->
                       yaxis_title="dormentes trocados (acumulado)",
                       xaxis=dict(type="date", tickformat="%m/%Y"), legend=dict(orientation="h", y=1.12))
     return fig
-
-
-def _tabela_pontos(av: dict) -> None:
-    p = av["pontos"].copy()
-    if p.empty:
-        st.info("Plano sem pontos críticos.")
-        return
-    p["Local"] = p.apply(lambda r: f"{r.ponto_critico} · km {r.km_inicio:.1f}–{r.km_fim:.1f}", axis=1)
-    st.dataframe(p[["Local", "travamento", "executado", "pct", "situacao"]], hide_index=True,
-                 use_container_width=True, column_config={
-                     "travamento": "Travamento (dorm.)", "executado": "Executado",
-                     "pct": st.column_config.ProgressColumn("Avanço", format="percent", min_value=0, max_value=1),
-                     "situacao": "Situação"})
 
 
 def _upload(plano: pd.DataFrame) -> None:
@@ -117,11 +87,11 @@ def _upload(plano: pd.DataFrame) -> None:
         st.rerun()
 
 
-def _metas(metas: pd.DataFrame) -> None:
+def render_metas(metas: pd.DataFrame) -> None:
     if metas is None or metas.empty:
         st.info(MSG_FASE2.format("metas"))
         return
-    m = metas[["indicador", "rotulo", "valor_meta", "prazo", "observacao"]].copy()
+    m = metas.reindex(columns=["indicador", "rotulo", "valor_meta", "prazo", "observacao"]).copy()
     m["prazo"] = pd.to_datetime(m["prazo"], errors="coerce").dt.date
     ed = st.data_editor(m, hide_index=True, use_container_width=True, key="exe_metas",
                         disabled=["indicador", "rotulo"], column_config={
@@ -131,6 +101,8 @@ def _metas(metas: pd.DataFrame) -> None:
                             "observacao": "Observação"})
     if st.button("💾 Salvar metas", key="exe_metas_ok"):
         salvar_metas(ed, get_id())
+        from modules.itirapina.dados import limpar_caches_trecho
+        limpar_caches_trecho()
         log_acesso(get_id(), "metas_itirapina", {"n": len(ed)})
         st.success("Metas salvas.")
         st.rerun()
@@ -144,22 +116,17 @@ def render_execucao(refs: dict, pode_editar: bool) -> None:
     if aviso:
         st.warning(aviso)
 
-    if plano is not None and not plano.empty:
+    if pode_editar:
+        with st.expander("📤 Enviar execução (planilha-modelo)", expanded=e.empty):
+            _upload(plano)
+    if plano is not None and not plano.empty and not e.empty:
         av = avanco_travamento(plano, e)
-        _cards_avanco(av)
         metas = refs.get("metas")
         meta = None
         if metas is not None and not metas.empty and (metas["indicador"] == "travamento").any():
             meta = metas[metas["indicador"] == "travamento"].iloc[0]
-        c1, c2 = st.columns([3, 2])
-        with c1:
-            st.markdown("##### Troca de dormente acumulada × plano")
-            st.plotly_chart(_fig_acumulado(e if not e.empty else pd.DataFrame(
-                columns=["data", "atividade", "quantidade"]), av["travamento"], meta),
-                use_container_width=True, config=CFG)
-        with c2:
-            st.markdown("##### Pontos críticos")
-            _tabela_pontos(av)
+        st.markdown("##### Troca de dormente acumulada × plano")
+        st.plotly_chart(_fig_acumulado(e, av["travamento"], meta), use_container_width=True, config=CFG)
 
     if not e.empty:
         st.markdown("##### O que foi feito")
@@ -203,8 +170,3 @@ def render_execucao(refs: dict, pode_editar: bool) -> None:
     elif not aviso:
         st.info("📭 Nenhuma execução registrada ainda.")
 
-    if pode_editar:
-        with st.expander("📤 Enviar execução (planilha-modelo)", expanded=e.empty):
-            _upload(plano)
-        with st.expander("🎯 Metas do trecho"):
-            _metas(refs.get("metas"))

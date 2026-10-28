@@ -1,8 +1,7 @@
 # =============================================================================
 # core/cores_itirapina.py — Paleta única do trecho Itirapina–Pederneiras
 #
-# Usada pelo app (Plotly) e pela exportação (matplotlib) para que tela e
-# One Page tenham as mesmas cores.
+# Usada por todas as visões e pela One Page (Plotly) — mesmas cores em tudo.
 # =============================================================================
 
 # Faixas do slide "Mapa de calor" (taxa de inservíveis): até 10 / 10–20 /
