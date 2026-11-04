@@ -9,6 +9,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from database.client import get_supabase
+from database.paginacao import TTL_BASES, buscar_paginado
 from core.glossarios import normalizar_coluna_ramal
 
 # region ====================== SESSÃO 1: Queries base (Sprint 1) ==============
@@ -80,7 +81,6 @@ def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataF
         pd.DataFrame com todas as notas, ou DataFrame vazio em caso de erro.
     """
     try:
-        supabase = get_supabase()
 
         # ⭐ ANTI-DUPLICAÇÃO (v15.0.0): upload por PERÍODO — cada nota carrega
         # seu próprio `vigente` (um upload novo só arquiva, por data_nota, o
@@ -88,27 +88,14 @@ def get_notas_gerencia(gerencia: str, disciplina: str | None = None) -> pd.DataF
         # Antes disso era feito por upload inteiro (upload_id IN uploads
         # 'ativo' — ver _upload_ids_ativos, que continua existindo só pra
         # Tratamento/RASF, que ainda substituem a base inteira por upload).
-        PAGE_SIZE = 1000
-        registros: list[dict] = []
-        offset = 0
-        while True:
-            query = (
-                supabase.table("notas")
-                .select("*, uploads_historico(enviado_em, usuario_id, nome_arquivo)")
-                .eq("gerencia", gerencia)
-                .eq("vigente", True)
-                .range(offset, offset + PAGE_SIZE - 1)
-            )
-            if disciplina:
-                query = query.eq("disciplina", disciplina)
+        # v17.8.0: páginas em paralelo (database/paginacao.py) e sem o join
+        # "uploads_historico(...)": nenhuma tela usava esse campo, e por ser um
+        # dict ele fazia o st.cache_data "picklar" a tabela inteira a cada uso.
+        def _filtrar(q):
+            q = q.eq("gerencia", gerencia).eq("vigente", True)
+            return q.eq("disciplina", disciplina) if disciplina else q
 
-            response = query.execute()
-            pagina = response.data or []
-            registros.extend(pagina)
-
-            if len(pagina) < PAGE_SIZE:
-                break
-            offset += PAGE_SIZE
+        registros = buscar_paginado("notas", _filtrar)
 
         if not registros:
             return pd.DataFrame()
@@ -254,7 +241,7 @@ def get_ultima_atualizacao(gerencia: str | None = None, disciplina: str | None =
 
 # region ====================== SESSÃO 2: Queries Sprint 3 =====================
 
-@st.cache_data(ttl=300)  # Cache de 5 minutos — dados não mudam frequentemente
+@st.cache_data(ttl=TTL_BASES, show_spinner=False)  # upload limpa na hora (invalidar_cache_notas)
 def get_notas_cached(gerencia: str, disciplina: str | None = None) -> pd.DataFrame:
     """
     Versão cacheada de get_notas_gerencia para uso nas telas de visualização.
@@ -286,27 +273,11 @@ def get_tratamento_gerencia(gerencia: str) -> pd.DataFrame:
         upload de Tratamento pra essa Gerência ainda.
     """
     try:
-        supabase = get_supabase()
         upload_ids = _upload_ids_ativos(gerencia, "TRATAMENTO")
         if not upload_ids:
             return pd.DataFrame()
 
-        PAGE_SIZE = 1000
-        registros: list[dict] = []
-        offset = 0
-        while True:
-            resp = (
-                supabase.table("notas_tratamento")
-                .select("*")
-                .in_("upload_id", upload_ids)
-                .range(offset, offset + PAGE_SIZE - 1)
-                .execute()
-            )
-            pagina = resp.data or []
-            registros.extend(pagina)
-            if len(pagina) < PAGE_SIZE:
-                break
-            offset += PAGE_SIZE
+        registros = buscar_paginado("notas_tratamento", lambda q: q.in_("upload_id", upload_ids))
 
         if not registros:
             return pd.DataFrame()
@@ -321,7 +292,7 @@ def get_tratamento_gerencia(gerencia: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300)  # Cache de 5 minutos — mesmo padrão de get_notas_cached
+@st.cache_data(ttl=TTL_BASES, show_spinner=False)  # upload de Tratamento limpa na hora
 def get_tratamento_cached(gerencia: str) -> pd.DataFrame:
     """Versão cacheada de get_tratamento_gerencia para uso nas telas de visualização."""
     return get_tratamento_gerencia(gerencia)

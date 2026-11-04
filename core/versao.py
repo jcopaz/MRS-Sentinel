@@ -1315,5 +1315,18 @@
 #     modules/itirapina/defeitos.py e transit.py; requirements sem
 #     matplotlib e python-pptx.
 # MINOR -- telas reorganizadas.
+# 17.8.0 (04/11/2026): desempenho de leitura das bases. Medido só com leitura
+#   (cache frio): Gerência SP 44,5 s / 30,5 MB -> 28,5 s; Gerência Geral 57,8 s /
+#   64 MB -> 30,9 s / 35 MB; cache quente 4,8 -> 4,0 s.
+#   - database/paginacao.py::buscar_paginado: 1ª página com contagem e as demais
+#     em paralelo (6), ordenadas por id — antes 17 chamadas em sequência só para
+#     as notas de SP, e sem ordem (o Postgres não garante a mesma sequência entre
+#     páginas: uma linha podia vir repetida ou faltar).
+#   - notas sem o join uploads_historico(...): campo não usado por nenhuma tela,
+#     e por ser dict forçava o st.cache_data a picklar a tabela a cada uso.
+#   - cache de notas, tratamento, RASF e baseline 5 min -> 6 h (TTL_BASES): só
+#     mudam por upload, e cada upload já limpa o seu cache na hora. Antes, a cada
+#     5 min alguém pagava ~45 s e ~30 MB de tráfego do Supabase.
+#   - Gerência Geral usa o cache compartilhado das notas (antes relia tudo).
 
-APP_VERSION = "17.7.0"
+APP_VERSION = "17.8.0"

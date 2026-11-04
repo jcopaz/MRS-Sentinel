@@ -5,6 +5,7 @@
 import streamlit as st
 import pandas as pd
 from database.client import get_supabase
+from database.paginacao import TTL_BASES, buscar_paginado
 
 # Disciplina usada em uploads_historico para os uploads do congelado.
 DISCIPLINA_BASELINE = "RASF_BASE"
@@ -68,31 +69,16 @@ def get_baseline_gerencia(gerencia: str | None = None) -> pd.DataFrame:
         DataFrame canônico (colunas do core.parser_rasf_baseline), ou vazio.
     """
     try:
-        supabase = get_supabase()
 
         upload_ids = _upload_ids_ativos_baseline(gerencia)
         if not upload_ids:
             return pd.DataFrame()
 
-        PAGE_SIZE = 1000
-        registros: list[dict] = []
-        offset = 0
-        while True:
-            query = (
-                supabase.table("rasf_baseline")
-                .select("*")
-                .in_("upload_id", upload_ids)
-                .range(offset, offset + PAGE_SIZE - 1)
-            )
-            if gerencia:
-                query = query.eq("gerencia", gerencia)
+        def _filtrar(q):
+            q = q.in_("upload_id", upload_ids)
+            return q.eq("gerencia", gerencia) if gerencia else q
 
-            resp = query.execute()
-            pagina = resp.data or []
-            registros.extend(pagina)
-            if len(pagina) < PAGE_SIZE:
-                break
-            offset += PAGE_SIZE
+        registros = buscar_paginado("rasf_baseline", _filtrar)
 
         if not registros:
             return pd.DataFrame()
@@ -116,7 +102,7 @@ def get_baseline_gerencia(gerencia: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=TTL_BASES, show_spinner=False)  # upload do congelado limpa na hora
 def get_baseline_cached(gerencia: str | None = None) -> pd.DataFrame:
     """Versão cacheada (5 min) de get_baseline_gerencia para as telas."""
     return get_baseline_gerencia(gerencia)

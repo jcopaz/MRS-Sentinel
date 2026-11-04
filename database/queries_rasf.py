@@ -5,6 +5,7 @@
 import streamlit as st
 import pandas as pd
 from database.client import get_supabase
+from database.paginacao import TTL_BASES, buscar_paginado
 
 # Disciplina usada em uploads_historico para os uploads do RASF.
 DISCIPLINA_RASF = "RASF"
@@ -76,31 +77,16 @@ def get_rasf_gerencia(gerencia: str | None = None) -> pd.DataFrame:
         DataFrame canônico (mesmas colunas do core.parser_rasf), ou vazio.
     """
     try:
-        supabase = get_supabase()
 
         upload_ids = _upload_ids_ativos_rasf(gerencia)
         if not upload_ids:
             return pd.DataFrame()
 
-        PAGE_SIZE = 1000
-        registros: list[dict] = []
-        offset = 0
-        while True:
-            query = (
-                supabase.table("rasf_ee")
-                .select("*")
-                .in_("upload_id", upload_ids)
-                .range(offset, offset + PAGE_SIZE - 1)
-            )
-            if gerencia:
-                query = query.eq("gerencia", gerencia)
+        def _filtrar(q):
+            q = q.in_("upload_id", upload_ids)
+            return q.eq("gerencia", gerencia) if gerencia else q
 
-            resp = query.execute()
-            pagina = resp.data or []
-            registros.extend(pagina)
-            if len(pagina) < PAGE_SIZE:
-                break
-            offset += PAGE_SIZE
+        registros = buscar_paginado("rasf_ee", _filtrar)
 
         if not registros:
             return pd.DataFrame()
@@ -126,7 +112,7 @@ def get_rasf_gerencia(gerencia: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=TTL_BASES, show_spinner=False)  # upload de RASF limpa na hora
 def get_rasf_cached(gerencia: str | None = None) -> pd.DataFrame:
     """Versão cacheada (5 min) de get_rasf_gerencia para as telas."""
     return get_rasf_gerencia(gerencia)

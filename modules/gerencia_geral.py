@@ -52,7 +52,7 @@ from core.score_engine import calcular_score_dataframe, carregar_score_config
 from core.glossarios import normalizar_coluna_ramal, nome_ramal, RAMAIS_MRS
 
 # Queries
-from database.queries import get_notas_gerencia
+from database.queries import get_notas_cached
 
 # Paleta MRS
 COR_SP   = "#1e3a5f"   # azul-marinho SP
@@ -78,7 +78,7 @@ def _carregar_tudo() -> tuple[pd.DataFrame, pd.DataFrame]:
     def _load(gerencia: str) -> pd.DataFrame:
         frames = []
         for disc in ("VP", "EE"):
-            df_d = get_notas_gerencia(gerencia, disc)
+            df_d = get_notas_cached(gerencia, disc).copy()   # cache compartilhado com as gerências
             if not df_d.empty:
                 df_d["disciplina_label"] = disc
                 df_d["gerencia_label"] = gerencia
