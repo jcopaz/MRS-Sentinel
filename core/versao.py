@@ -1316,4 +1316,18 @@
 #     matplotlib e python-pptx.
 # MINOR -- telas reorganizadas.
 
-APP_VERSION = "17.7.0"
+# 17.9.0 (2026-11-26): Visão Gerencial mostra o que está EM ABERTO (pedido do
+# Julio). (17.8.0 fica com a branch perf/cache-dados, ainda não mergeada.)
+#   - Aberta = status_final "Aberto" (sem ele, status_usuario ABER).
+#   - "Quantidade por Criticidade" vira "Total de Notas Gerência — em aberto",
+#     com cartões das notas Muito Alta em cima (o que é, coordenação, local,
+#     desde quando).
+#   - "Status Concluída — Ordem" sai; entra "Visão por Coordenação": barras
+#     por criticidade + tabela com % diagnosticado e pendentes.
+#   - Tipo de Inspeção e Quadro Resumo: só abertas. Código de Anomalia: chave
+#     "Somente notas em aberto" já ligada. Período e Planejado × Realizado
+#     seguem com o filtro inteiro (comparam abertura × encerramento).
+#   - core/glossarios.py: NOME_COORDENACAO + nome_coordenacao(centro_trab).
+# MINOR -- funcionalidade nova na tela existente.
+
+APP_VERSION = "17.9.0"

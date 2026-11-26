@@ -233,6 +233,30 @@ COORDENACOES_POR_GERENCIA = {
     "AU": [],
 }
 
+# Nome da coordenação pela sigla do centro de trabalho — último segmento
+# de "V.SP.PJU"/"E.VP.FAN" (mesma estrutura de database/schema_organograma.sql)
+# ou o formato antigo de planilha "CIPA"/"CFAN".
+NOME_COORDENACAO = {
+    "IPG": "Piaçaguera", "IPA": "Paranapiacaba", "PJU": "Jundiaí",
+    "FAN": "Agulhas Negras", "FTA": "Taubaté", "FPI": "Pinheirinho",
+    "FJC": "P1-07", "ZAS": "ZAS", "FBV": "Belo Vale", "FBR": "Brumadinho/Barreiro",
+    "FDE": "São João del Rey", "FOJ": "Bom Jardim", "FPT": "Quatis",
+    "FPL": "Pinheiral", "FBA": "Brisamar", "FBP": "Barra do Piraí", "FAR": "Rocha Sobrinho",
+    "FCL": "Conselheiro Lafaiete", "FBC": "Barbacena", "FFB": "Francisco Bernardino",
+    "FBJ": "Barão de Juparanã",
+    # formato antigo
+    "CIPG": "Piaçaguera", "CIPA": "Paranapiacaba", "CIJN": "Jundiaí",
+    "CFAN": "Agulhas Negras", "CFTA": "Taubaté", "CFPI": "Pinheirinho",
+}
+
+
+def nome_coordenacao(centro_trab) -> str:
+    """'V.SP.PJU' → 'Jundiaí'. Sigla desconhecida volta como veio."""
+    s = "" if centro_trab is None else str(centro_trab).strip().upper()
+    if s in ("", "NAN", "NONE", "<NA>"):
+        return "(Sem coordenação)"
+    return NOME_COORDENACAO.get(s.split(".")[-1], s)
+
 # Gradiente de cor de destaque (início, fim) de cada gerência no cabeçalho
 # do dashboard — SP/VP são as cores originais (não mudam); as demais são
 # escolha nossa, só pra diferenciar visualmente. Troque à vontade.
