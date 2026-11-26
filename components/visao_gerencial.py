@@ -43,7 +43,7 @@ from core.glossarios import (
     GLOSSARIO_VP, GLOSSARIO_EE, STATUS_BASE, nome_ramal, status_base_label, nome_coordenacao,
 )
 from core.diagnostico import (
-    DIAGNOSTICADA_SIM, DIAGNOSTICADA_NAO, DIAGNOSTICADA_PENDENTE_SANEAMENTO,
+    mascara_nota_aberta, DIAGNOSTICADA_SIM, DIAGNOSTICADA_NAO, DIAGNOSTICADA_PENDENTE_SANEAMENTO,
 )
 
 # Altura responsiva (core/ui_global.py, v3.6.0) — import defensivo: se por
@@ -89,20 +89,10 @@ MESES_PT_ABREV = {
 }
 
 
-def _mascara_aberta(df: pd.DataFrame) -> pd.Series:
-    """Nota em aberto = status_final "Aberto". status_usuario 'ABER' sozinho
-    não serve: metade dessas já está encerrada e só falta a baixa no SAP
-    (achado de core/diagnostico.py). Sem status_final, cai no status_usuario."""
-    vazio = pd.Series("", index=df.index)
-    sf = df.get("status_final", vazio).fillna("").astype(str).str.strip().str.lower()
-    su = df.get("status_usuario", vazio).fillna("").astype(str).str.strip().str.upper()
-    tem_sf = ~sf.isin(["", "nan", "none", "<na>"])
-    return (tem_sf & sf.str.contains("abert")) | (~tem_sf & su.str.startswith("ABER"))
-
-
-def _notas_abertas(df: pd.DataFrame) -> pd.DataFrame:
-    d = df[_mascara_aberta(df)].copy()
+def _com_coordenacao(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
     d["coordenacao"] = d.get("centro_trab", pd.Series(None, index=d.index)).apply(nome_coordenacao)
+    d["_aberta"] = mascara_nota_aberta(d)
     return d
 
 # endregion
@@ -151,17 +141,18 @@ def _calc_criticidade(df: pd.DataFrame) -> dict | None:
 
 
 def _cartoes_muito_alta(df_ab: pd.DataFrame) -> None:
-    """Cartões das notas Muito Alta em aberto — o que é, coordenação, local e
+    """Cartões das notas Muito Alta do filtro — o que é, coordenação, local e
     desde quando (mais antiga primeiro)."""
     if "prioridade" not in df_ab.columns:
         return
     ma = df_ab[df_ab["prioridade"].astype(str).str.startswith("1")].copy()
     if ma.empty:
-        st.success("✅ Nenhuma nota **Muito Alta** em aberto no filtro atual.")
+        st.success("✅ Nenhuma nota **Muito Alta** no filtro atual.")
         return
 
     ma["_dt"] = pd.to_datetime(ma.get("data_nota"), errors="coerce")
-    ma = ma.sort_values("_dt", na_position="last")
+    # Abertas primeiro, e dentro delas a mais antiga primeiro
+    ma = ma.sort_values(["_aberta", "_dt"], ascending=[False, True], na_position="last")
     hoje = pd.Timestamp.now().normalize()
 
     def _txt(r, col):
@@ -182,8 +173,12 @@ def _cartoes_muito_alta(df_ab: pd.DataFrame) -> None:
         if origem:
             local += f" · pátio {origem}"
         dt = r["_dt"]
-        desde = "data desconhecida" if pd.isna(dt) else (
-            f"desde {dt:%d/%m/%Y} · há {max(0, (hoje - dt.normalize()).days)} dias")
+        if pd.isna(dt):
+            desde = "data desconhecida"
+        elif r["_aberta"]:
+            desde = f"aberta desde {dt:%d/%m/%Y} · há {max(0, (hoje - dt.normalize()).days)} dias"
+        else:
+            desde = f"aberta em {dt:%d/%m/%Y} · encerrada"
         cartoes.append(
             "<div class='vg-ma'>"
             f"<div class='vg-ma-h'><b>Nota {html.escape(nota)}</b><span>{html.escape(desde)}</span></div>"
@@ -194,7 +189,8 @@ def _cartoes_muito_alta(df_ab: pd.DataFrame) -> None:
         )
 
     st.markdown(
-        f"<div class='vg-ma-tit'>🔴 {len(ma)} nota(s) <b>Muito Alta</b> em aberto</div>"
+        f"<div class='vg-ma-tit'>🔴 {len(ma)} nota(s) <b>Muito Alta</b> "
+        f"({int(ma['_aberta'].sum())} em aberto)</div>"
         "<style>"
         ".vg-ma-tit{font-weight:600;margin:4px 0 8px;color:#dc2626}"
         ".vg-ma-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-bottom:12px}"
@@ -218,7 +214,7 @@ def _render_criticidade(df_ab: pd.DataFrame, gerencia: str):
     @st.fragment (perf 2026-08-30): cada seção da Visão Gerencial reage só
     aos próprios widgets (quando ela tem algum).
     """
-    st.markdown("##### 📊 Total de Notas Gerência — em aberto")
+    st.markdown("##### 📊 Total de Notas Gerência")
 
     _cartoes_muito_alta(df_ab)
 
@@ -249,7 +245,7 @@ def _calc_por_coordenacao(df_ab: pd.DataFrame) -> dict | None:
     piv = pd.crosstab(df_ab["coordenacao"], prio).reindex(columns=cats, fill_value=0)
     tab = piv.copy()
     tab.columns.name = None
-    tab.insert(0, "Abertas", df_ab.groupby("coordenacao").size())
+    tab.insert(0, "Notas", df_ab.groupby("coordenacao").size())
 
     if "diagnosticada" in df_ab.columns:
         d = df_ab["diagnosticada"]
@@ -261,7 +257,7 @@ def _calc_por_coordenacao(df_ab: pd.DataFrame) -> dict | None:
         tab["% Diagnosticado"] = (agg["_sim"] / agg["_base"].where(agg["_base"] > 0) * 100).round(1)
         tab["Pendentes diagnóstico"] = agg["_pend"]
 
-    tab = tab.sort_values("Abertas", ascending=False)
+    tab = tab.sort_values("Notas", ascending=False)
 
     # Barras empilhadas por criticidade (maior coordenação no topo)
     coords = tab.index.tolist()[::-1]
@@ -290,9 +286,9 @@ def _calc_por_coordenacao(df_ab: pd.DataFrame) -> dict | None:
 
 @st.fragment
 def _render_por_coordenacao(df_ab: pd.DataFrame, gerencia: str):
-    st.markdown("##### 🏢 Visão por Coordenação — em aberto")
+    st.markdown("##### 🏢 Visão por Coordenação")
     st.caption(
-        "Notas em aberto de cada coordenação por criticidade. **% Diagnosticado** = "
+        "Notas de cada coordenação por criticidade (conforme o filtro de Situação). **% Diagnosticado** = "
         "diagnosticadas ÷ notas VP que precisam de diagnóstico (base de Tratamento de "
         "Notas); **Pendentes** = aguardando diagnóstico + pendente saneamento. EE não "
         "entra no diagnóstico."
@@ -300,7 +296,7 @@ def _render_por_coordenacao(df_ab: pd.DataFrame, gerencia: str):
 
     calc = _calc_por_coordenacao(df_ab)
     if calc is None:
-        st.info("Sem notas em aberto com prioridade no filtro atual.")
+        st.info("Sem notas com prioridade no filtro atual.")
         return
 
     if ECHARTS_OK:
@@ -470,10 +466,6 @@ def _render_codigo_anomalia(df: pd.DataFrame, gerencia: str):
     if not ECHARTS_OK:
         st.warning("streamlit-echarts não instalado.")
         return
-
-    so_abertas = st.toggle("Somente notas em aberto", value=True, key=f"vg_anom_abertas_{gerencia}")
-    if so_abertas:
-        df = df[_mascara_aberta(df)]
 
     calc = _calc_codigo_anomalia(df)
     if calc is None:
@@ -871,7 +863,8 @@ def _render_quadro_resumo(df: pd.DataFrame, gerencia: str):
 
 # region ====================== SESSÃO 9: Orquestração ==========================
 
-def render_visao_gerencial(df: pd.DataFrame, gerencia: str = "SP"):
+def render_visao_gerencial(df: pd.DataFrame, gerencia: str = "SP",
+                           df_fluxo: pd.DataFrame | None = None):
     """
     Renderiza a aba completa "Visão Gerencial" — 7 seções recuperadas do
     app1.py (Sprint 4.5). Reutilizável em SP, VP e Geral.
@@ -884,32 +877,35 @@ def render_visao_gerencial(df: pd.DataFrame, gerencia: str = "SP"):
         st.warning("⚠️ Sem dados após filtros.")
         return
 
-    # Pedido do Julio (26/11/2026): a Visão Gerencial mostra o que está em
-    # ABERTO. Só "Notas por Período" e "Planejado × Realizado" seguem com o
-    # filtro inteiro — comparam abertura com encerramento.
-    df_ab = _notas_abertas(df)
+    # A aba segue o filtro "📌 Situação da nota" da barra lateral, que já
+    # vem marcado só em Aberta (pedido do Julio, 26/11/2026).
+    d = _com_coordenacao(df)
+    n_ab = int(d["_aberta"].sum())
     st.info(
-        f"📌 Esta visão mostra só as notas **em aberto**: **{len(df_ab):,}** de "
-        f"{len(df):,} no filtro. Os gráficos de período e Planejado × Realizado "
-        "usam todas as notas do filtro.".replace(",", ".")
+        f"📌 No filtro: **{n_ab:,}** em aberto e **{len(d) - n_ab:,}** encerradas. ".replace(",", ".")
+        + "Para ver as encerradas, marque **Encerrada** em 📌 Situação da nota "
+        "na barra lateral. Período e Planejado × Realizado usam abertas e "
+        "encerradas (comparam abertura com encerramento)."
     )
 
-    _render_criticidade(df_ab, gerencia)
-    _render_por_coordenacao(df_ab, gerencia)
+    _render_criticidade(d, gerencia)
+    _render_por_coordenacao(d, gerencia)
     st.markdown("---")
 
-    _render_tipo_inspecao(df_ab, gerencia)
+    _render_tipo_inspecao(d, gerencia)
     st.markdown("---")
 
-    _render_codigo_anomalia(df, gerencia)
+    _render_codigo_anomalia(d, gerencia)
     st.markdown("---")
 
-    _render_notas_periodo(df, gerencia)
+    # df_fluxo = mesmos filtros sem a Situação (ver gerencia_dashboard)
+    fluxo = df if df_fluxo is None else df_fluxo
+    _render_notas_periodo(fluxo, gerencia)
     st.markdown("---")
 
-    _render_planejado_realizado(df, gerencia)
+    _render_planejado_realizado(fluxo, gerencia)
     st.markdown("---")
 
-    _render_quadro_resumo(df_ab, gerencia)
+    _render_quadro_resumo(d, gerencia)
 
 # endregion

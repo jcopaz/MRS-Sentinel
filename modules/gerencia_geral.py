@@ -295,6 +295,7 @@ def render_gerencia_geral():
 
     df_sp = aplicar_filtros_atributos(df_sp, filtros_attrs)
     df_vp = aplicar_filtros_atributos(df_vp, filtros_attrs)
+    df_fluxo = aplicar_filtros_atributos(df_total, {**filtros_attrs, "situacao": []})
     df_total = aplicar_filtros_atributos(df_total, filtros_attrs)
 
     # Calcula score
@@ -347,7 +348,7 @@ def render_gerencia_geral():
 
     @st.fragment
     def _aba_ger_frag():
-        render_visao_gerencial(df_total, gerencia="GERAL")
+        render_visao_gerencial(df_total, gerencia="GERAL", df_fluxo=df_fluxo)
 
     @st.fragment
     def _aba_comp_frag():

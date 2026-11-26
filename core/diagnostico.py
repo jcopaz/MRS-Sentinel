@@ -68,6 +68,20 @@ DIAGNOSTICADA_AJUDA = (
     "só lista o que está em aberto sendo trabalhado."
 )
 
+SITUACAO_ABERTA    = "Aberta"
+SITUACAO_ENCERRADA = "Encerrada"
+
+
+def mascara_nota_aberta(df: pd.DataFrame) -> pd.Series:
+    """Nota em aberto = status_final "Aberto" (regra confirmada pelo Julio em
+    26/11/2026). status_usuario 'ABER' sozinho não serve: metade dessas já está
+    encerrada e só falta a baixa no SAP. Sem status_final, cai no status_usuario."""
+    vazio = pd.Series("", index=df.index)
+    sf = df.get("status_final", vazio).fillna("").astype(str).str.strip().str.lower()
+    su = df.get("status_usuario", vazio).fillna("").astype(str).str.strip().str.upper()
+    tem_sf = ~sf.isin(["", "nan", "none", "<na>"])
+    return (tem_sf & sf.str.contains("abert")) | (~tem_sf & su.str.startswith("ABER"))
+
 # endregion
 
 

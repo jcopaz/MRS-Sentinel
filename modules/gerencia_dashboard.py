@@ -271,6 +271,9 @@ def render_gerencia(sigla: str) -> None:
     )
 
     df = _aplicar_filtros(df_raw, filtros)
+    # Período e Planejado × Realizado comparam abertura × encerramento: usam
+    # os mesmos filtros, menos a Situação (senão as encerradas zeram).
+    df_fluxo = _aplicar_filtros(df_raw, {**filtros, "situacao": []})
 
     if df.empty:
         st.info("ℹ️ Nenhuma nota encontrada com os filtros aplicados.")
@@ -311,7 +314,7 @@ def render_gerencia(sigla: str) -> None:
 
     @st.fragment
     def _aba_ger_frag():
-        render_visao_gerencial(df, gerencia=sigla)
+        render_visao_gerencial(df, gerencia=sigla, df_fluxo=df_fluxo)
 
     @st.fragment
     def _aba_unif_frag():

@@ -1334,4 +1334,17 @@
 #     Tratamento) para mostrar % diagnosticado por coordenação.
 # MINOR -- funcionalidade nova na tela existente.
 
-APP_VERSION = "17.9.0"
+# 17.10.0 (2026-11-26): a Visão Gerencial deixa de travar em "só abertas" —
+# marcar concluídas no filtro não mudava os gráficos (relato do Julio).
+#   - Filtro novo na barra lateral "📌 Situação da nota" (Aberta/Encerrada),
+#     padrão só Aberta; regra única em core/diagnostico.mascara_nota_aberta
+#     (status_final "Aberto"; sem ele, status_usuario ABER).
+#   - Vale para todas as abas da Gerência e da Visão Geral; "Limpar" volta
+#     para só Aberta.
+#   - Visão Gerencial segue o filtro: sai o toggle do Código de Anomalia;
+#     cartões Muito Alta mostram abertas primeiro e marcam as encerradas.
+#   - Revisão do Astra: Período e Planejado × Realizado usam os filtros sem a
+#     Situação (com só Aberta, as encerradas zeravam).
+# MINOR -- filtro novo.
+
+APP_VERSION = "17.10.0"
