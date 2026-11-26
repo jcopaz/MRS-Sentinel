@@ -32,6 +32,7 @@ from components.unifilar import render_unifilar_dual
 from components.heatmap import render_ranking, render_serie_temporal
 from components.filtros import render_filtros_atributos, aplicar_filtros_atributos
 from components.visao_gerencial import render_visao_gerencial
+from modules.gerencia_dashboard import _com_diagnosticada
 
 # Indicadores IMT/DI/Aderência/Lead Time
 from core.indicadores import (
@@ -262,6 +263,10 @@ def render_gerencia_geral():
     # ── Carrega dados (cached) ────────────────────────────────────────────────
     with st.spinner("⏳ Carregando dados consolidados..."):
         df_sp_raw, df_vp_raw = _carregar_tudo()
+        # Diagnóstico (só VP) por gerência, cada uma com a sua base de
+        # Tratamento — a Visão Gerencial mostra % diagnosticado por coordenação.
+        df_sp_raw = _com_diagnosticada(df_sp_raw, "SP")
+        df_vp_raw = _com_diagnosticada(df_vp_raw, "VP")
 
     # Filtra disciplinas
     def _filtrar_disc(df: pd.DataFrame) -> pd.DataFrame:

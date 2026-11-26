@@ -1328,6 +1328,10 @@
 #     "Somente notas em aberto" já ligada. Período e Planejado × Realizado
 #     seguem com o filtro inteiro (comparam abertura × encerramento).
 #   - core/glossarios.py: NOME_COORDENACAO + nome_coordenacao(centro_trab).
+#   - Revisão do Astra: prioridade fora das 4 oficiais (vazia, "5-Muito baixa")
+#     entra como "Outras/Sem prioridade" nas barras (antes sumia do gráfico);
+#     Visão Geral calcula o diagnóstico de SP e VP (cada uma com sua base de
+#     Tratamento) para mostrar % diagnosticado por coordenação.
 # MINOR -- funcionalidade nova na tela existente.
 
 APP_VERSION = "17.9.0"

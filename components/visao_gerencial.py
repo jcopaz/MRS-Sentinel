@@ -70,7 +70,18 @@ ORDEM_PRIORIDADE = ["1-Muito alta", "2-Alta", "3-Média", "4-Baixa"]
 CORES_PRIORIDADE = {
     "1-Muito alta": "#dc2626", "2-Alta": "#f59e0b",
     "3-Média": "#eab308", "4-Baixa": "#16a34a",
+    "Outras/Sem prioridade": "#9ca3af",
 }
+OUTRAS_PRIORIDADE = "Outras/Sem prioridade"
+
+
+def _prioridades(df: pd.DataFrame) -> tuple[pd.Series, list[str]]:
+    """Prioridade de cada nota, com o que não for uma das 4 oficiais (vazia,
+    "5-Muito baixa"...) em "Outras/Sem prioridade" — assim as barras somam o
+    total de notas. Devolve também as categorias a mostrar."""
+    p = df["prioridade"].where(df["prioridade"].isin(ORDEM_PRIORIDADE), OUTRAS_PRIORIDADE)
+    cats = ORDEM_PRIORIDADE + ([OUTRAS_PRIORIDADE] if p.eq(OUTRAS_PRIORIDADE).any() else [])
+    return p, cats
 
 MESES_PT_ABREV = {
     1: "jan", 2: "fev", 3: "mar", 4: "abr", 5: "mai", 6: "jun",
@@ -106,7 +117,8 @@ def _calc_criticidade(df: pd.DataFrame) -> dict | None:
     if "prioridade" not in df.columns or df["prioridade"].dropna().empty:
         return None
 
-    crit_counts = df["prioridade"].value_counts().reindex(ORDEM_PRIORIDADE, fill_value=0)
+    prio, cats = _prioridades(df)
+    crit_counts = prio.value_counts().reindex(cats, fill_value=0)
 
     return {
         "tooltip": {
@@ -117,7 +129,7 @@ def _calc_criticidade(df: pd.DataFrame) -> dict | None:
         },
         "grid": {"left": "3%", "right": "5%", "top": "8%", "bottom": "10%", "containLabel": True},
         "xAxis": {
-            "type": "category", "data": ORDEM_PRIORIDADE,
+            "type": "category", "data": cats,
             "axisLabel": {"color": "#374151", "fontSize": 12, "fontWeight": "bold"},
             "axisLine": {"lineStyle": {"color": "#9ca3af"}},
         },
@@ -233,8 +245,8 @@ def _calc_por_coordenacao(df_ab: pd.DataFrame) -> dict | None:
     if df_ab.empty or "prioridade" not in df_ab.columns:
         return None
 
-    piv = (pd.crosstab(df_ab["coordenacao"], df_ab["prioridade"])
-             .reindex(columns=ORDEM_PRIORIDADE, fill_value=0))
+    prio, cats = _prioridades(df_ab)
+    piv = pd.crosstab(df_ab["coordenacao"], prio).reindex(columns=cats, fill_value=0)
     tab = piv.copy()
     tab.columns.name = None
     tab.insert(0, "Abertas", df_ab.groupby("coordenacao").size())
@@ -269,7 +281,7 @@ def _calc_por_coordenacao(df_ab: pd.DataFrame) -> dict | None:
              "label": {"show": True, "color": "#1f2937", "fontSize": 10},
              "data": [{"value": int(piv.at[c, p]), "label": {"show": bool(piv.at[c, p])}}
                       for c in coords]}
-            for p in ORDEM_PRIORIDADE
+            for p in cats
         ],
     }
     return {"opt": opt, "tab": tab.reset_index().rename(columns={"coordenacao": "Coordenação"}),
