@@ -25,10 +25,7 @@ from core.glossarios import (
     nome_ramal, RAMAIS_MRS, STATUS_BASE, PESO_PRIORIDADE, status_base_efetivo,
     CENTROS_POR_GERENCIA as _CENTROS_POR_GERENCIA_BASE,
 )
-from core.diagnostico import (
-    DIAGNOSTICADA_OPCOES, DIAGNOSTICADA_AJUDA,
-    SITUACAO_ABERTA, SITUACAO_ENCERRADA, mascara_nota_aberta,
-)
+from core.diagnostico import DIAGNOSTICADA_OPCOES, DIAGNOSTICADA_AJUDA
 
 # Centros de trabalho por gerência — fonte única em core/glossarios.py
 # (antes havia uma segunda cópia divergente aqui). "GERAL" é a união de
@@ -224,6 +221,14 @@ def _opcoes_status_base(df: pd.DataFrame) -> list[str]:
 # num form (Gerência SP/VP, dentro de render_filtros_cascata) ou usa direto
 # na sidebar (Gerência Geral, que não tem cascata geográfica).
 
+def _padrao_aberta(opcoes_label: dict) -> list[str]:
+    """Status Base vem marcado só em ABER — Aberta (pedido do Julio,
+    26/11/2026): as telas abrem mostrando o que está pendente; quem quiser
+    ver concluídas marca no filtro. Sem ABER nos dados, marca tudo."""
+    abertas = [n for n, c in opcoes_label.items() if c == "ABER"]
+    return abertas or list(opcoes_label.keys())
+
+
 def render_filtros_atributos(
     df: pd.DataFrame, gerencia: str = "SP", disciplina_sel: str = "VP+EE",
 ) -> dict:
@@ -248,19 +253,6 @@ def render_filtros_atributos(
         sem filtro)
     """
     uid = gerencia
-
-    # Padrão = só abertas (pedido do Julio, 26/11/2026): as telas abrem
-    # mostrando o que está pendente; quem quiser ver encerradas marca aqui.
-    st.markdown("**📌 Situação da nota**")
-    situacao_sel = st.multiselect(
-        "Situação da nota",
-        options=[SITUACAO_ABERTA, SITUACAO_ENCERRADA],
-        default=[SITUACAO_ABERTA],
-        key=f"filtro_situacao_{uid}",
-        label_visibility="collapsed",
-        help="Aberta = Status Final \"Aberto\" no SAP. Vem marcado só Aberta; "
-             "inclua Encerrada para ver também as concluídas/canceladas.",
-    )
 
     st.markdown("**🎯 Prioridade**")
     opcoes_prio = _opcoes_prioridade(df)
@@ -338,7 +330,7 @@ def render_filtros_atributos(
     status_vp_nome_sel = st.multiselect(
         "Status Base VP",
         options=list(opcoes_status_vp_label.keys()),
-        default=list(opcoes_status_vp_label.keys()),
+        default=_padrao_aberta(opcoes_status_vp_label),
         key=f"filtro_status_base_vp_{uid}",
         label_visibility="collapsed",
         help="Classificação oficial de status_usuario (SAP/VP) — ver 08_GLOSSARIOS.",
@@ -354,7 +346,7 @@ def render_filtros_atributos(
     status_ee_nome_sel = st.multiselect(
         "Status Base EE",
         options=list(opcoes_status_ee_label.keys()),
-        default=list(opcoes_status_ee_label.keys()),
+        default=_padrao_aberta(opcoes_status_ee_label),
         key=f"filtro_status_base_ee_{uid}",
         label_visibility="collapsed",
         help="Status_Final_ok (Aberto/Encerrado) — único status disponível para EE.",
@@ -365,7 +357,6 @@ def render_filtros_atributos(
         status_ee_sel = opcoes_status_ee
 
     return {
-        "situacao":        situacao_sel,
         "prioridades":     prioridades_sel,
         "familias":        familias_sel,
         "diagnosticada":   diagnosticada_sel,
@@ -383,12 +374,6 @@ def aplicar_filtros_atributos(df: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     """
     if df.empty:
         return df
-
-    # Situação: com as duas (ou nenhuma) marcadas, não filtra.
-    situacao = filtros.get("situacao") or []
-    if len(situacao) == 1:
-        aberta = mascara_nota_aberta(df)
-        df = df[aberta if situacao[0] == SITUACAO_ABERTA else ~aberta]
 
     prioridades = filtros.get("prioridades") or []
     if prioridades and "prioridade" in df.columns:
@@ -499,7 +484,6 @@ def render_filtros_cascata(
             f"filtro_trechos_{uid}", f"filtro_patios_{uid}",
             f"filtro_ab_ini_{uid}", f"filtro_ab_fim_{uid}",
             f"filtro_enc_ini_{uid}", f"filtro_enc_fim_{uid}",
-            f"filtro_situacao_{uid}",
             f"filtro_prioridade_{uid}", f"filtro_familia_{uid}",
             f"filtro_diagnosticada_{uid}", f"filtro_anomalia_{uid}",
             f"filtro_tipo_insp_{uid}",

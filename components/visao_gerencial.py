@@ -23,7 +23,6 @@
 # =============================================================================
 
 # region ====================== SESSÃO 1: Imports & Constantes =================
-import html
 import re
 from datetime import datetime
 
@@ -140,72 +139,59 @@ def _calc_criticidade(df: pd.DataFrame) -> dict | None:
     }
 
 
-def _cartoes_muito_alta(df_ab: pd.DataFrame) -> None:
-    """Cartões das notas Muito Alta do filtro — o que é, coordenação, local e
-    desde quando (mais antiga primeiro)."""
-    if "prioridade" not in df_ab.columns:
+def _limpar_texto_sap(txt) -> str:
+    """Tira o carimbo do SAP "* 18.01.2023 16:20:54 BRAZIL (matrícula) Tel. 9... *"."""
+    if txt is None or (not isinstance(txt, str) and pd.isna(txt)):
+        return ""
+    t = re.sub(r"\*?\s*\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}[^*]*\*", " ", str(txt))
+    return re.sub(r"[\s*]+", " ", t).strip()
+
+
+def _tabela_muito_alta(df: pd.DataFrame, gerencia: str) -> None:
+    """Notas Muito Alta do filtro em tabela — o que é, coordenação, local e
+    desde quando. Abertas primeiro, e dentro delas a mais antiga primeiro."""
+    if "prioridade" not in df.columns:
         return
-    ma = df_ab[df_ab["prioridade"].astype(str).str.startswith("1")].copy()
+    ma = df[df["prioridade"].astype(str).str.startswith("1")].copy()
     if ma.empty:
         st.success("✅ Nenhuma nota **Muito Alta** no filtro atual.")
         return
 
-    ma["_dt"] = pd.to_datetime(ma.get("data_nota"), errors="coerce")
-    # Abertas primeiro, e dentro delas a mais antiga primeiro
-    ma = ma.sort_values(["_aberta", "_dt"], ascending=[False, True], na_position="last")
+    dt = pd.to_datetime(ma.get("data_nota"), errors="coerce")
     hoje = pd.Timestamp.now().normalize()
+    vazio = pd.Series("", index=ma.index)
+    resumo = ma.get("defeito_legivel", vazio).fillna("").astype(str)
+    resumo = resumo.where(resumo.str.strip() != "", ma.get("descricao", vazio).fillna("").astype(str))
+    tab = pd.DataFrame({
+        "Nota": ma.get("numero_nota", vazio).fillna("—").astype(str).str.removesuffix(".0"),
+        "Status": ma.get("status_usuario", vazio).apply(status_base_label),
+        "O que é": resumo,
+        "Descrição": ma.get("texto_longo", vazio).apply(_limpar_texto_sap),
+        "Coordenação": ma["coordenacao"],
+        "Local": ma.get("local_instalacao", vazio).fillna("—"),
+        "Pátio": ma.get("origem", vazio).fillna("—"),
+        "Aberta em": dt.dt.date,
+        "Dias em aberto": (hoje - dt.dt.normalize()).dt.days.where(ma["_aberta"]),
+        "_ab": ma["_aberta"], "_dt": dt,
+    }).sort_values(["_ab", "_dt"], ascending=[False, True], na_position="last")
+    tab = tab.drop(columns=["_ab", "_dt"])
 
-    def _txt(r, col):
-        v = r.get(col)
-        return "" if v is None or pd.isna(v) else str(v).strip()
-
-    cartoes = []
-    for _, r in ma.head(12).iterrows():
-        nota = _txt(r, "numero_nota").removesuffix(".0") or "—"
-        resumo = _txt(r, "defeito_legivel") or _txt(r, "descricao") or "Sem descrição"
-        # Tira o carimbo do SAP "* 18.01.2023 16:20:54 BRAZIL (matrícula) Tel. 9... *"
-        texto = re.sub(r"\*?\s*\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}[^*]*\*", " ",
-                       _txt(r, "texto_longo"))
-        texto = re.sub(r"[\s*]+", " ", texto).strip()
-        texto = texto[:180] + "…" if len(texto) > 180 else texto
-        local = _txt(r, "local_instalacao") or "—"
-        origem = _txt(r, "origem")
-        if origem:
-            local += f" · pátio {origem}"
-        dt = r["_dt"]
-        if pd.isna(dt):
-            desde = "data desconhecida"
-        elif r["_aberta"]:
-            desde = f"aberta desde {dt:%d/%m/%Y} · há {max(0, (hoje - dt.normalize()).days)} dias"
-        else:
-            desde = f"aberta em {dt:%d/%m/%Y} · encerrada"
-        cartoes.append(
-            "<div class='vg-ma'>"
-            f"<div class='vg-ma-h'><b>Nota {html.escape(nota)}</b><span>{html.escape(desde)}</span></div>"
-            f"<div class='vg-ma-r'>{html.escape(resumo)}</div>"
-            + (f"<div class='vg-ma-t'>{html.escape(texto)}</div>" if texto else "")
-            + f"<div class='vg-ma-m'>🏢 {html.escape(r['coordenacao'])} &nbsp;·&nbsp; 📍 {html.escape(local)}</div>"
-            "</div>"
-        )
-
+    n_ab = int(ma["_aberta"].sum())
     st.markdown(
-        f"<div class='vg-ma-tit'>🔴 {len(ma)} nota(s) <b>Muito Alta</b> "
-        f"({int(ma['_aberta'].sum())} em aberto)</div>"
-        "<style>"
-        ".vg-ma-tit{font-weight:600;margin:4px 0 8px;color:#dc2626}"
-        ".vg-ma-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-bottom:12px}"
-        ".vg-ma{border-left:4px solid #dc2626;background:rgba(220,38,38,.07);border-radius:8px;padding:10px 12px;font-size:.86rem}"
-        ".vg-ma-h{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}"
-        ".vg-ma-h span{color:#b91c1c;font-weight:600;font-size:.8rem}"
-        ".vg-ma-r{font-weight:600;margin-top:4px}"
-        ".vg-ma-t{opacity:.8;margin-top:2px}"
-        ".vg-ma-m{opacity:.75;margin-top:6px;font-size:.8rem}"
-        "</style>"
-        f"<div class='vg-ma-g'>{''.join(cartoes)}</div>",
+        f"<div style='font-weight:600;color:#dc2626;margin:4px 0 6px'>🔴 {len(ma)} nota(s) "
+        f"Muito Alta no filtro — {n_ab} em aberto</div>",
         unsafe_allow_html=True,
     )
-    if len(ma) > 12:
-        st.caption(f"Mostrando as 12 mais antigas de {len(ma)}. A lista completa está no Quadro Resumo abaixo.")
+    st.dataframe(
+        tab, hide_index=True, use_container_width=True,
+        height=min(38 + 35 * len(tab), 320), key=f"vg_muito_alta_{gerencia}",
+        column_config={
+            "O que é": st.column_config.TextColumn(width="medium"),
+            "Descrição": st.column_config.TextColumn(width="large"),
+            "Aberta em": st.column_config.DateColumn(format="DD/MM/YYYY"),
+            "Dias em aberto": st.column_config.NumberColumn(format="%d dias"),
+        },
+    )
 
 
 @st.fragment
@@ -216,7 +202,7 @@ def _render_criticidade(df_ab: pd.DataFrame, gerencia: str):
     """
     st.markdown("##### 📊 Total de Notas Gerência")
 
-    _cartoes_muito_alta(df_ab)
+    _tabela_muito_alta(df_ab, gerencia)
 
     if not ECHARTS_OK:
         st.warning("streamlit-echarts não instalado.")
@@ -877,13 +863,13 @@ def render_visao_gerencial(df: pd.DataFrame, gerencia: str = "SP",
         st.warning("⚠️ Sem dados após filtros.")
         return
 
-    # A aba segue o filtro "📌 Situação da nota" da barra lateral, que já
-    # vem marcado só em Aberta (pedido do Julio, 26/11/2026).
+    # A aba segue o filtro "📋 Status Base" da barra lateral, que já
+    # vem marcado só em ABER — Aberta (pedido do Julio, 26/11/2026).
     d = _com_coordenacao(df)
     n_ab = int(d["_aberta"].sum())
     st.info(
-        f"📌 No filtro: **{n_ab:,}** em aberto e **{len(d) - n_ab:,}** encerradas. ".replace(",", ".")
-        + "Para ver as encerradas, marque **Encerrada** em 📌 Situação da nota "
+        f"📌 No filtro: **{n_ab:,}** em aberto (ABER) e **{len(d) - n_ab:,}** com outros status. ".replace(",", ".")
+        + "Para ver concluídas/canceladas, marque esses status em 📋 Status Base "
         "na barra lateral. Período e Planejado × Realizado usam abertas e "
         "encerradas (comparam abertura com encerramento)."
     )
@@ -898,7 +884,7 @@ def render_visao_gerencial(df: pd.DataFrame, gerencia: str = "SP",
     _render_codigo_anomalia(d, gerencia)
     st.markdown("---")
 
-    # df_fluxo = mesmos filtros sem a Situação (ver gerencia_dashboard)
+    # df_fluxo = mesmos filtros sem o Status Base (ver gerencia_dashboard)
     fluxo = df if df_fluxo is None else df_fluxo
     _render_notas_periodo(fluxo, gerencia)
     st.markdown("---")

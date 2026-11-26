@@ -32,6 +32,8 @@
 import pandas as pd
 import streamlit as st
 
+from core.glossarios import status_base_efetivo
+
 # region ====================== SESSÃO 1: Constantes ============================
 
 DIAGNOSTICADA_SIM                 = "Sim"
@@ -68,19 +70,15 @@ DIAGNOSTICADA_AJUDA = (
     "só lista o que está em aberto sendo trabalhado."
 )
 
-SITUACAO_ABERTA    = "Aberta"
-SITUACAO_ENCERRADA = "Encerrada"
-
-
 def mascara_nota_aberta(df: pd.DataFrame) -> pd.Series:
-    """Nota em aberto = status_final "Aberto" (regra confirmada pelo Julio em
-    26/11/2026). status_usuario 'ABER' sozinho não serve: metade dessas já está
-    encerrada e só falta a baixa no SAP. Sem status_final, cai no status_usuario."""
-    vazio = pd.Series("", index=df.index)
-    sf = df.get("status_final", vazio).fillna("").astype(str).str.strip().str.lower()
-    su = df.get("status_usuario", vazio).fillna("").astype(str).str.strip().str.upper()
-    tem_sf = ~sf.isin(["", "nan", "none", "<na>"])
-    return (tem_sf & sf.str.contains("abert")) | (~tem_sf & su.str.startswith("ABER"))
+    """Nota em aberto = Status Base ABER — mesma regra do filtro 📋 Status Base
+    (status_base_efetivo: status_usuario; sem ele, status_final "Aberto").
+    Decisão do Julio em 26/11/2026: um filtro só, o Status Base. Inclui as
+    notas ABER já encerradas no status_final que aguardam baixa no SAP."""
+    vazio = pd.Series(None, index=df.index)
+    su, sf = df.get("status_usuario", vazio), df.get("status_final", vazio)
+    return pd.Series([status_base_efetivo(u, f) == "ABER" for u, f in zip(su, sf)],
+                     index=df.index, dtype=bool)
 
 # endregion
 

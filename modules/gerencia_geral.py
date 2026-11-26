@@ -295,7 +295,7 @@ def render_gerencia_geral():
 
     df_sp = aplicar_filtros_atributos(df_sp, filtros_attrs)
     df_vp = aplicar_filtros_atributos(df_vp, filtros_attrs)
-    df_fluxo = aplicar_filtros_atributos(df_total, {**filtros_attrs, "situacao": []})
+    df_fluxo = aplicar_filtros_atributos(df_total, {**filtros_attrs, "status_base_vp": [], "status_base_ee": []})
     df_total = aplicar_filtros_atributos(df_total, filtros_attrs)
 
     # Calcula score

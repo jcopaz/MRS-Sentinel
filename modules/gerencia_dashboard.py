@@ -272,8 +272,8 @@ def render_gerencia(sigla: str) -> None:
 
     df = _aplicar_filtros(df_raw, filtros)
     # Período e Planejado × Realizado comparam abertura × encerramento: usam
-    # os mesmos filtros, menos a Situação (senão as encerradas zeram).
-    df_fluxo = _aplicar_filtros(df_raw, {**filtros, "situacao": []})
+    # os mesmos filtros, menos o Status Base (senão as encerradas zeram).
+    df_fluxo = _aplicar_filtros(df_raw, {**filtros, "status_base_vp": [], "status_base_ee": []})
 
     if df.empty:
         st.info("ℹ️ Nenhuma nota encontrada com os filtros aplicados.")

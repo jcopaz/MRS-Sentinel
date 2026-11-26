@@ -1347,4 +1347,14 @@
 #     Situação (com só Aberta, as encerradas zeravam).
 # MINOR -- filtro novo.
 
-APP_VERSION = "17.10.0"
+# 17.11.0 (2026-11-26): um filtro só (pedido do Julio) — sai "📌 Situação da
+# nota"; o 📋 Status Base VP/EE já vem marcado só em ABER — Aberta (sem ABER
+# nos dados, marca tudo). "Aberta" na Visão Gerencial passa a ser a mesma
+# regra (status_base_efetivo = ABER), incluindo notas ABER que aguardam
+# baixa no SAP. Período e Planejado × Realizado usam os filtros sem o
+# Status Base.
+#   - Cartões das notas Muito Alta viram tabela (Nota, Status, O que é,
+#     Descrição, Coordenação, Local, Pátio, Aberta em, Dias em aberto).
+# MINOR -- padrão de filtro.
+
+APP_VERSION = "17.11.0"
